@@ -563,7 +563,7 @@ class DriverCleanerApp(tk.Tk):
                     subprocess.run(['pnputil', '/scan-devices'], startupinfo=startupinfo, creationflags=subprocess.CREATE_NO_WINDOW)
                     time.sleep(3.5)
                 else:
-                    # Create an auto-run script in the target Windows Startup folder
+                    # Create an auto-run script and register it in RunOnce for IMMEDIATE execution upon OS logon
                     try:
                         import shutil
                         temp_drivers_dir_target = os.path.join(target_dir, "TempRunDrivers")
@@ -572,35 +572,56 @@ class DriverCleanerApp(tk.Tk):
                             shutil.rmtree(temp_drivers_dir_target)
                         shutil.copytree(source_dir, temp_drivers_dir_target)
 
-                        startup_dir = os.path.join(target_dir, "ProgramData", "Microsoft", "Windows", "Start Menu", "Programs", "Startup")
-                        logging.info(f"Startup mappa ellenorzese: {startup_dir}")
-                        if os.path.exists(startup_dir):
-                            bat_path = os.path.join(startup_dir, "auto_pnputil_scan.bat")
-                            logging.info(f"BAT fajl letrehozasa: {bat_path}")
-                            bat_content = "@echo off\r\n" \
-                                          "set LOGFILE=\"C:\\Users\\Public\\Desktop\\driver_startup_log.txt\"\r\n" \
-                                          "echo ---------------------------------------- >> %LOGFILE%\r\n" \
-                                          "echo [%DATE% %TIME%] Script elindult! >> %LOGFILE%\r\n" \
-                                          "net session >nul 2>&1\r\n" \
-                                          "if %errorLevel% == 0 (\r\n" \
-                                          "    echo [%DATE% %TIME%] Rendszergazda mod felismerve. >> %LOGFILE%\r\n" \
-                                          "    echo Driverek teles online betoltese folyamatban... kerlek varj!\r\n" \
-                                          "    echo Eger es touchpad visszaallitasa... >> %LOGFILE%\r\n" \
-                                          "    pnputil /add-driver \"%SystemDrive%\\TempRunDrivers\\*.inf\" /subdirs /install >> %LOGFILE% 2>&1\r\n" \
-                                          "    echo [%DATE% %TIME%] pnputil scan-devices inditasa... >> %LOGFILE%\r\n" \
-                                          "    pnputil /scan-devices >> %LOGFILE% 2>&1\r\n" \
-                                          "    echo [%DATE% %TIME%] Ideiglenes mappak torlese... >> %LOGFILE%\r\n" \
-                                          "    rd /s /q \"%SystemDrive%\\TempRunDrivers\" >> %LOGFILE% 2>&1\r\n" \
-                                          "    echo [%DATE% %TIME%] Script befejezodott. >> %LOGFILE%\r\n" \
-                                          "    timeout /t 3 /nobreak >nul\r\n" \
-                                          "    (goto) 2>nul & del \"%~f0\" \r\n" \
-                                          ") else (\r\n" \
-                                          "    echo [%DATE% %TIME%] Rendszergazdai jog kero ablak inditasa... >> %LOGFILE%\r\n" \
-                                          "    echo Rendszergazdai jog szukseges a driverek inicializalasahoz!\r\n" \
-                                          "    powershell Start-Process -FilePath \"%~f0\" -Verb RunAs\r\n" \
-                                          ")\r\n"
-                            with open(bat_path, "w", encoding="utf-8") as f:
-                                f.write(bat_content)
+                        # Hova rakjuk a bat fajlt? ProgramData egy jo rejtett hely.
+                        programdata_dir = os.path.join(target_dir, "ProgramData")
+                        if not os.path.exists(programdata_dir):
+                            os.makedirs(programdata_dir)
+                            
+                        bat_path = os.path.join(programdata_dir, "auto_pnputil_scan.bat")
+                        logging.info(f"BAT fajl letrehozasa: {bat_path}")
+                        
+                        bat_content = "@echo off\r\n" \
+                                      "set LOGFILE=\"C:\\Users\\Public\\Desktop\\driver_startup_log.txt\"\r\n" \
+                                      "echo ---------------------------------------- >> %LOGFILE%\r\n" \
+                                      "echo [%DATE% %TIME%] Script elindult AZONNAL a RunOnce-bol! >> %LOGFILE%\r\n" \
+                                      "net session >nul 2>&1\r\n" \
+                                      "if %errorLevel% == 0 (\r\n" \
+                                      "    echo [%DATE% %TIME%] Rendszergazda mod felismerve. >> %LOGFILE%\r\n" \
+                                      "    echo Driverek teles online betoltese folyamatban... kerlek varj!\r\n" \
+                                      "    echo Eger es touchpad visszaallitasa... >> %LOGFILE%\r\n" \
+                                      "    pnputil /add-driver \"%SystemDrive%\\TempRunDrivers\\*.inf\" /subdirs /install >> %LOGFILE% 2>&1\r\n" \
+                                      "    echo [%DATE% %TIME%] pnputil scan-devices inditasa... >> %LOGFILE%\r\n" \
+                                      "    pnputil /scan-devices >> %LOGFILE% 2>&1\r\n" \
+                                      "    echo [%DATE% %TIME%] Ideiglenes mappak torlese... >> %LOGFILE%\r\n" \
+                                      "    rd /s /q \"%SystemDrive%\\TempRunDrivers\" >> %LOGFILE% 2>&1\r\n" \
+                                      "    echo [%DATE% %TIME%] Script befejezodott. >> %LOGFILE%\r\n" \
+                                      "    timeout /t 3 /nobreak >nul\r\n" \
+                                      "    (goto) 2>nul & del \"%~f0\" \r\n" \
+                                      ") else (\r\n" \
+                                      "    echo [%DATE% %TIME%] Rendszergazdai jog kero ablak inditasa... >> %LOGFILE%\r\n" \
+                                      "    echo Rendszergazdai jog szukseges a driverek inicializalasahoz!\r\n" \
+                                      "    powershell Start-Process -FilePath \"%~f0\" -Verb RunAs\r\n" \
+                                      ")\r\n"
+                        with open(bat_path, "w", encoding="utf-8") as f:
+                            f.write(bat_content)
+
+                        # Modositsuk az OFFLINE Registry RunOnce kulcsot, hogy bypassoljuk a fel perces Startup Delayt.
+                        hive_path = os.path.join(target_dir, "Windows", "System32", "config", "SOFTWARE")
+                        logging.info(f"Registry hive keresese a RunOnce injektalashoz: {hive_path}")
+                        if os.path.exists(hive_path):
+                            logging.info("Offline registry injektalas a HKLM\\RunOnce-ba...")
+                            subprocess.run(['reg', 'load', 'HKLM\\OFFLINE_SOFTWARE', hive_path], check=True, creationflags=subprocess.CREATE_NO_WINDOW)
+                            runonce_cmd = r"cmd.exe /c %SystemDrive%\ProgramData\auto_pnputil_scan.bat"
+                            subprocess.run(['reg', 'add', 'HKLM\\OFFLINE_SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\RunOnce', '/v', 'DriverRestoreQuick', '/t', 'REG_EXPAND_SZ', '/d', runonce_cmd, '/f'], check=True, creationflags=subprocess.CREATE_NO_WINDOW)
+                            subprocess.run(['reg', 'unload', 'HKLM\\OFFLINE_SOFTWARE'], check=True, creationflags=subprocess.CREATE_NO_WINDOW)
+                            logging.info("Registry injektalas sikeres.")
+                        else:
+                            logging.error("SOFTWARE hive nem talalhato, fallback startup mappa.")
+                            startup_dir = os.path.join(target_dir, "ProgramData", "Microsoft", "Windows", "Start Menu", "Programs", "Startup")
+                            if os.path.exists(startup_dir):
+                                import shutil
+                                shutil.copy(bat_path, os.path.join(startup_dir, "auto_pnputil_scan.bat"))
+
                     except Exception as ex:
                         print(f"Nem sikerült létrehozni a startup scriptet: {ex}")
 
