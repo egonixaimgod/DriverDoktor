@@ -544,10 +544,17 @@ class DriverCleanerApp(tk.Tk):
                         if os.path.exists(startup_dir):
                             bat_path = os.path.join(startup_dir, "auto_pnputil_scan.bat")
                             bat_content = "@echo off\r\n" \
-                                          "echo Hardverek ellenorzese... kerlek varj!\r\n" \
-                                          "timeout /t 5 /nobreak >nul\r\n" \
-                                          "pnputil /scan-devices\r\n" \
-                                          "del \"%~f0\"\r\n"
+                                          "net session >nul 2>&1\r\n" \
+                                          "if %errorLevel% == 0 (\r\n" \
+                                          "    echo Rendszergazda mod aktiv. Hardverek ellenorzese... kerlek varj!\r\n" \
+                                          "    timeout /t 5 /nobreak >nul\r\n" \
+                                          "    pnputil /scan-devices\r\n" \
+                                          "    timeout /t 2 /nobreak >nul\r\n" \
+                                          "    (goto) 2>nul & del \"%~f0\" \r\n" \
+                                          ") else (\r\n" \
+                                          "    echo Rendszergazdai jog szukseges a driverek inicializalasahoz!\r\n" \
+                                          "    powershell Start-Process -FilePath \"%~f0\" -Verb RunAs\r\n" \
+                                          ")\r\n"
                             with open(bat_path, "w", encoding="utf-8") as f:
                                 f.write(bat_content)
                     except Exception as ex:
