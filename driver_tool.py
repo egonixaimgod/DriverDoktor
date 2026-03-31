@@ -586,49 +586,50 @@ class DriverCleanerApp(tk.Tk):
                         logging.info(f"BAT fajl letrehozasa: {bat_path}")
                         
                         bat_content = "@echo off\r\n" \
-                                      "set LOGFILE=\"%PUBLIC%\\Desktop\\driver_startup_log.txt\"\r\n" \
+                                      "set LOGFILE=\"%SystemDrive%\\Users\\Public\\Desktop\\driver_startup_log.txt\"\r\n" \
                                       "echo ---------------------------------------- >> %LOGFILE%\r\n" \
-                                      "echo [%DATE% %TIME%] Script elindult AZONNAL a RunOnce-bol! >> %LOGFILE%\r\n" \
-                                      "net session >nul 2>&1\r\n" \
-                                      "if %errorLevel% == 0 (\r\n" \
-                                      "    echo [%DATE% %TIME%] Rendszergazda mod felismerve. >> %LOGFILE%\r\n" \
-                                      "    echo Driverek teles online betoltese folyamatban... kerlek varj!\r\n" \
-                                      "    echo Eger es touchpad visszaallitasa... >> %LOGFILE%\r\n" \
-                                      "    pnputil /add-driver \"%SystemDrive%\\TempRunDrivers\\*.inf\" /subdirs /install >> %LOGFILE% 2>&1\r\n" \
-                                      "    echo [%DATE% %TIME%] pnputil scan-devices inditasa... >> %LOGFILE%\r\n" \
-                                      "    pnputil /scan-devices >> %LOGFILE% 2>&1\r\n" \
-                                      "    echo [%DATE% %TIME%] Ideiglenes mappak torlese... >> %LOGFILE%\r\n" \
-                                      "    rd /s /q \"%SystemDrive%\\TempRunDrivers\" >> %LOGFILE% 2>&1\r\n" \
-                                      "    echo [%DATE% %TIME%] Script befejezodott. >> %LOGFILE%\r\n" \
-                                      "    timeout /t 3 /nobreak >nul\r\n" \
-                                      "    (goto) 2>nul & del \"%~f0\" \r\n" \
-                                      ") else (\r\n" \
-                                      "    echo [%DATE% %TIME%] Rendszergazdai jog kero ablak inditasa... >> %LOGFILE%\r\n" \
-                                      "    echo Rendszergazdai jog szukseges a driverek inicializalasahoz!\r\n" \
-                                      "    powershell Start-Process -FilePath \"%~f0\" -Verb RunAs\r\n" \
-                                      ")\r\n"
+                                      "echo [%DATE% %TIME%] Boot elotti SYSTEM telepites service (No UAC! Azonnali!) >> %LOGFILE%\r\n" \
+                                      "echo [%DATE% %TIME%] Ideiglenes szerviz torlese a registrybol is... >> %LOGFILE%\r\n" \
+                                      "sc delete DriverRestoreSvc >> %LOGFILE% 2>&1\r\n" \
+                                      "echo [%DATE% %TIME%] Driverek betoltese (Csendes mod)... kerlek varj! >> %LOGFILE%\r\n" \
+                                      "pnputil /add-driver \"%SystemDrive%\\TempRunDrivers\\*.inf\" /subdirs /install >> %LOGFILE% 2>&1\r\n" \
+                                      "echo [%DATE% %TIME%] pnputil scan-devices inditasa... >> %LOGFILE%\r\n" \
+                                      "pnputil /scan-devices >> %LOGFILE% 2>&1\r\n" \
+                                      "echo [%DATE% %TIME%] Ideiglenes mappak torlese... >> %LOGFILE%\r\n" \
+                                      "rd /s /q \"%SystemDrive%\\TempRunDrivers\" >> %LOGFILE% 2>&1\r\n" \
+                                      "echo [%DATE% %TIME%] Befejezve. Torlom a scriptet. >> %LOGFILE%\r\n" \
+                                      "ping 127.0.0.1 -n 3 > nul\r\n" \
+                                      "(goto) 2>nul & del \"%~f0\"\r\n"
                         with open(bat_path, "w", encoding="utf-8") as f:
                             f.write(bat_content)
 
-                        # Modositsuk az OFFLINE Registry RunOnce kulcsot, hogy bypassoljuk a fel perces Startup Delayt.
-                        hive_path = os.path.join(target_dir, "Windows", "System32", "config", "SOFTWARE")
-                        logging.info(f"Registry hive keresese a RunOnce injektalashoz: {hive_path}")
+                        # Modositsuk az OFFLINE Registry SYSTEM kulcsot, hogy bypassoljuk a logint es Service-kent fusson SYSTEM joggal
+                        hive_path = os.path.join(target_dir, "Windows", "System32", "config", "SYSTEM")
+                        logging.info(f"Registry hive keresese a Service injektalashoz: {hive_path}")
                         if os.path.exists(hive_path):
-                            logging.info("Offline registry injektalas a HKLM\\RunOnce-ba...")
+                            logging.info("Offline registry injektalas a HKLM\\SYSTEM\\ControlSet001\\Services-be...")
                             try:
-                                subprocess.run(['reg', 'load', 'HKLM\\OFFLINE_SOFTWARE', hive_path], check=True, capture_output=True, text=True, errors='replace', creationflags=subprocess.CREATE_NO_WINDOW)
+                                subprocess.run(['reg', 'load', 'HKLM\\OFFLINE_SYSTEM', hive_path], check=True, capture_output=True, text=True, errors='replace', creationflags=subprocess.CREATE_NO_WINDOW)
                                 try:
-                                    runonce_cmd = r"cmd.exe /c %SystemDrive%\ProgramData\auto_pnputil_scan.bat"
-                                    subprocess.run(['reg', 'add', 'HKLM\\OFFLINE_SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\RunOnce', '/v', 'DriverRestoreQuick', '/t', 'REG_EXPAND_SZ', '/d', runonce_cmd, '/f'], check=True, capture_output=True, text=True, errors='replace', creationflags=subprocess.CREATE_NO_WINDOW)
-                                    logging.info("Registry injektalas sikeres.")
+                                    svc_key = r"HKLM\OFFLINE_SYSTEM\ControlSet001\Services\DriverRestoreSvc"
+                                    # Szerviz letrehozasa Registry-ben
+                                    subprocess.run(['reg', 'add', svc_key, '/f'], check=True, capture_output=True, text=True, errors='replace', creationflags=subprocess.CREATE_NO_WINDOW)
+                                    # ImagePath: A cmd indit egy hatter folyamatot majd KILEP, igy a SCM nem fagyasztja meg a bootot
+                                    cmd_path = r'%SystemRoot%\System32\cmd.exe /c start "" "%SystemDrive%\ProgramData\auto_pnputil_scan.bat"'
+                                    subprocess.run(['reg', 'add', svc_key, '/v', 'ImagePath', '/t', 'REG_EXPAND_SZ', '/d', cmd_path, '/f'], check=True, capture_output=True, text=True, errors='replace', creationflags=subprocess.CREATE_NO_WINDOW)
+                                    subprocess.run(['reg', 'add', svc_key, '/v', 'Type', '/t', 'REG_DWORD', '/d', '16', '/f'], check=True, capture_output=True, text=True, errors='replace', creationflags=subprocess.CREATE_NO_WINDOW)
+                                    subprocess.run(['reg', 'add', svc_key, '/v', 'Start', '/t', 'REG_DWORD', '/d', '2', '/f'], check=True, capture_output=True, text=True, errors='replace', creationflags=subprocess.CREATE_NO_WINDOW)
+                                    subprocess.run(['reg', 'add', svc_key, '/v', 'ErrorControl', '/t', 'REG_DWORD', '/d', '1', '/f'], check=True, capture_output=True, text=True, errors='replace', creationflags=subprocess.CREATE_NO_WINDOW)
+                                    subprocess.run(['reg', 'add', svc_key, '/v', 'ObjectName', '/t', 'REG_SZ', '/d', 'LocalSystem', '/f'], check=True, capture_output=True, text=True, errors='replace', creationflags=subprocess.CREATE_NO_WINDOW)
+                                    logging.info("Registry szerviz injektalas sikeres.")
                                 finally:
                                     # MINDIG unloadoljuk a hivét, különben a Windows nem fog tudni bebútolni!
-                                    subprocess.run(['reg', 'unload', 'HKLM\\OFFLINE_SOFTWARE'], check=True, capture_output=True, text=True, errors='replace', creationflags=subprocess.CREATE_NO_WINDOW)
+                                    subprocess.run(['reg', 'unload', 'HKLM\\OFFLINE_SYSTEM'], check=True, capture_output=True, text=True, errors='replace', creationflags=subprocess.CREATE_NO_WINDOW)
                             except subprocess.CalledProcessError as reg_err:
                                 logging.error(f"Registry hiba történt: {reg_err.stderr if hasattr(reg_err, 'stderr') else str(reg_err)}")
                                 raise
                         else:
-                            logging.error("SOFTWARE hive nem talalhato, fallback startup mappa.")
+                            logging.error("SYSTEM hive nem talalhato, fallback startup mappa.")
                             startup_dir = os.path.join(target_dir, "ProgramData", "Microsoft", "Windows", "Start Menu", "Programs", "Startup")
                             if os.path.exists(startup_dir):
                                 shutil.copy(bat_path, os.path.join(startup_dir, "auto_pnputil_scan.bat"))
@@ -643,7 +644,7 @@ class DriverCleanerApp(tk.Tk):
                         messagebox.showinfo("Kész", "A driverek automatikus (Élő) felismertetése befejeződött!\nA Touchpadnak már mennie kell.")
                         self.refresh_drivers()
                     else:
-                        msg = "Az offline driver integrálás (DISM) a megadott meghajtón befejeződött!\n\nBiztonsági intézkedésként a Rendszerleíróba (RunOnce) beágyaztunk egy ideiglenes gyári driver scannert. Bejelentkezéskor azonnal fel fogja ébreszteni a Touchpadet, hogy ne kelljen egeret használnod!"
+                        msg = "Az offline driver integrálás (DISM) a megadott meghajtón befejeződött!\n\nBiztonsági intézkedésként a Rendszerleíróba (SYSTEM Service) beágyaztunk egy ideiglenes gyári driver scannert háttérszolgáltatásként.\nTöbbé nem kér UAC engedélyt, hanem azonnal, a bejelentkezés előtt fel fogja ébreszteni a Touchpadet, a legnagyobb SYSTEM szintű jogosultsággal!"
                         messagebox.showinfo("Offline Kész", msg)
 
                 self.after(0, finish)
