@@ -537,7 +537,7 @@ class DriverCleanerApp(tk.Tk):
                 if online:
                     cmd = ['pnputil', '/add-driver', os.path.join(source_dir, "*.inf"), '/subdirs', '/install']
                 else:
-                    cmd = ['dism', f'/Image:{target_dir}', '/Add-Driver', f'/Driver:{source_dir}', '/Recurse']
+                    cmd = ['dism', f'/Image:{target_dir}', '/Add-Driver', f'/Driver:{source_dir}', '/Recurse', '/ForceUnsigned']
                 
                 logging.info(f"Futtatas ({'Online' if online else 'Offline'}): {' '.join(cmd)}")
                 
