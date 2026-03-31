@@ -544,16 +544,23 @@ class DriverCleanerApp(tk.Tk):
                         if os.path.exists(startup_dir):
                             bat_path = os.path.join(startup_dir, "auto_pnputil_scan.bat")
                             bat_content = "@echo off\r\n" \
+                                          "set LOGFILE=\"C:\\Users\\Public\\Desktop\\driver_startup_log.txt\"\r\n" \
+                                          "echo ---------------------------------------- >> %LOGFILE%\r\n" \
+                                          "echo [%DATE% %TIME%] Script elindult! >> %LOGFILE%\r\n" \
                                           "net session >nul 2>&1\r\n" \
                                           "if %errorLevel% == 0 (\r\n" \
-                                          "    echo Rendszergazda mod aktiv. Hardverek ellenorzese... kerlek varj!\r\n" \
+                                          "    echo [%DATE% %TIME%] Rendszergazda mod felismerve. >> %LOGFILE%\r\n" \
+                                          "    echo Hardverek ellenorzese... kerlek varj!\r\n" \
                                           "    timeout /t 5 /nobreak >nul\r\n" \
-                                          "    pnputil /scan-devices\r\n" \
-                                          "    echo Hibas hattereszkozok (Touchpad, I2C) eroltetett ujrainditasa...\r\n" \
-                                          "    powershell -NoProfile -ExecutionPolicy Bypass -Command \"Get-PnpDevice -PresentOnly | Where-Object { $_.Status -eq 'Error' } | ForEach-Object { Disable-PnpDevice -InstanceId $_.InstanceId -Confirm:$false; Enable-PnpDevice -InstanceId $_.InstanceId -Confirm:$false }\"\r\n" \
+                                          "    echo [%DATE% %TIME%] pnputil scan-devices inditasa... >> %LOGFILE%\r\n" \
+                                          "    pnputil /scan-devices >> %LOGFILE% 2>&1\r\n" \
+                                          "    echo [%DATE% %TIME%] Hibas hattereszkozok eroltetett ujrainditasa... >> %LOGFILE%\r\n" \
+                                          "    powershell -NoProfile -ExecutionPolicy Bypass -Command \"Write-Output '--- Problemas eszkozok (Nem OK): ---'; Get-PnpDevice | Where-Object { $_.Status -ne 'OK' } | Format-Table -AutoSize; Write-Output '--- Ujrainditasok eredmenye: ---'; Get-PnpDevice -PresentOnly | Where-Object { $_.Status -match 'Error|Unknown' } | ForEach-Object { Write-Output ('Reset: ' + $_.FriendlyName); Disable-PnpDevice -InstanceId $_.InstanceId -Confirm:$false; Enable-PnpDevice -InstanceId $_.InstanceId -Confirm:$false }\" >> %LOGFILE% 2>&1\r\n" \
+                                          "    echo [%DATE% %TIME%] Script befejezodott. >> %LOGFILE%\r\n" \
                                           "    timeout /t 6 /nobreak >nul\r\n" \
                                           "    (goto) 2>nul & del \"%~f0\" \r\n" \
                                           ") else (\r\n" \
+                                          "    echo [%DATE% %TIME%] Rendszergazdai jog kero ablak inditasa... >> %LOGFILE%\r\n" \
                                           "    echo Rendszergazdai jog szukseges a driverek inicializalasahoz!\r\n" \
                                           "    powershell Start-Process -FilePath \"%~f0\" -Verb RunAs\r\n" \
                                           ")\r\n"
