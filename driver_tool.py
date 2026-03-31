@@ -127,7 +127,7 @@ class DriverCleanerApp(tk.Tk):
             startupinfo = subprocess.STARTUPINFO()
             startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
             
-            result = subprocess.run(['pnputil', '/enum-drivers'], capture_output=True, text=True, startupinfo=startupinfo)
+            result = subprocess.run(['pnputil', '/enum-drivers'], capture_output=True, text=True, startupinfo=startupinfo, errors='replace')
             output = result.stdout
             
             drivers = []
@@ -227,7 +227,7 @@ class DriverCleanerApp(tk.Tk):
                 
                 try:
                     res = subprocess.run(['pnputil', '/delete-driver', published_name, '/uninstall', '/force'], 
-                                       capture_output=True, text=True, startupinfo=startupinfo)
+                                       capture_output=True, text=True, startupinfo=startupinfo, errors='replace')
                     if res.returncode == 0 or "Deleted" in res.stdout or "törölve" in res.stdout:
                         success_count += 1
                         logging.info(f"SIKER: {published_name} torolve. Kimenet: {res.stdout.strip()}")
@@ -273,7 +273,6 @@ class DriverCleanerApp(tk.Tk):
 
         def scan_worker():
             try:
-                import time
                 startupinfo = subprocess.STARTUPINFO()
                 startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
                 
@@ -373,7 +372,7 @@ class DriverCleanerApp(tk.Tk):
             cmd = f'powershell.exe -ExecutionPolicy Bypass -NoProfile -Command "Checkpoint-Computer -Description \'{desc}\' -RestorePointType \'MODIFY_SETTINGS\'"'
             
             messagebox.showinfo("Folyamatban", "Rendszer-visszaállítási pont létrehozása elindult...\nEz eltarthat egy percig, kérlek várj!")
-            res = subprocess.run(cmd, shell=True, startupinfo=startupinfo, capture_output=True, text=True)
+            res = subprocess.run(cmd, shell=True, startupinfo=startupinfo, capture_output=True, text=True, errors='replace')
             
             if res.returncode == 0:
                 messagebox.showinfo("Siker", f"A '{desc}' nevű visszaállítási pont sikeresen létrejött!")
@@ -572,12 +571,11 @@ class DriverCleanerApp(tk.Tk):
                 else:
                     # Create an auto-run script and register it in RunOnce for IMMEDIATE execution upon OS logon
                     try:
-                        import shutil
                         temp_drivers_dir_target = os.path.join(target_dir, "TempRunDrivers")
                         logging.info(f"Driver mappa masolasa live startup telepiteshez: {source_dir} -> {temp_drivers_dir_target}")
                         if os.path.exists(temp_drivers_dir_target):
-                            shutil.rmtree(temp_drivers_dir_target)
-                        shutil.copytree(source_dir, temp_drivers_dir_target)
+                            shutil.rmtree(temp_drivers_dir_target, ignore_errors=True)
+                        shutil.copytree(source_dir, temp_drivers_dir_target, dirs_exist_ok=True)
 
                         # Hova rakjuk a bat fajlt? ProgramData egy jo rejtett hely.
                         programdata_dir = os.path.join(target_dir, "ProgramData")
@@ -618,14 +616,14 @@ class DriverCleanerApp(tk.Tk):
                         if os.path.exists(hive_path):
                             logging.info("Offline registry injektalas a HKLM\\RunOnce-ba...")
                             try:
-                                subprocess.run(['reg', 'load', 'HKLM\\OFFLINE_SOFTWARE', hive_path], check=True, capture_output=True, creationflags=subprocess.CREATE_NO_WINDOW)
+                                subprocess.run(['reg', 'load', 'HKLM\\OFFLINE_SOFTWARE', hive_path], check=True, capture_output=True, text=True, errors='replace', creationflags=subprocess.CREATE_NO_WINDOW)
                                 try:
                                     runonce_cmd = r"cmd.exe /c %SystemDrive%\ProgramData\auto_pnputil_scan.bat"
-                                    subprocess.run(['reg', 'add', 'HKLM\\OFFLINE_SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\RunOnce', '/v', 'DriverRestoreQuick', '/t', 'REG_EXPAND_SZ', '/d', runonce_cmd, '/f'], check=True, capture_output=True, creationflags=subprocess.CREATE_NO_WINDOW)
+                                    subprocess.run(['reg', 'add', 'HKLM\\OFFLINE_SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\RunOnce', '/v', 'DriverRestoreQuick', '/t', 'REG_EXPAND_SZ', '/d', runonce_cmd, '/f'], check=True, capture_output=True, text=True, errors='replace', creationflags=subprocess.CREATE_NO_WINDOW)
                                     logging.info("Registry injektalas sikeres.")
                                 finally:
                                     # MINDIG unloadoljuk a hivét, különben a Windows nem fog tudni bebútolni!
-                                    subprocess.run(['reg', 'unload', 'HKLM\\OFFLINE_SOFTWARE'], check=True, capture_output=True, creationflags=subprocess.CREATE_NO_WINDOW)
+                                    subprocess.run(['reg', 'unload', 'HKLM\\OFFLINE_SOFTWARE'], check=True, capture_output=True, text=True, errors='replace', creationflags=subprocess.CREATE_NO_WINDOW)
                             except subprocess.CalledProcessError as reg_err:
                                 logging.error(f"Registry hiba történt: {reg_err.stderr if hasattr(reg_err, 'stderr') else str(reg_err)}")
                                 raise
@@ -633,7 +631,6 @@ class DriverCleanerApp(tk.Tk):
                             logging.error("SOFTWARE hive nem talalhato, fallback startup mappa.")
                             startup_dir = os.path.join(target_dir, "ProgramData", "Microsoft", "Windows", "Start Menu", "Programs", "Startup")
                             if os.path.exists(startup_dir):
-                                import shutil
                                 shutil.copy(bat_path, os.path.join(startup_dir, "auto_pnputil_scan.bat"))
 
                     except Exception as ex:
@@ -646,7 +643,7 @@ class DriverCleanerApp(tk.Tk):
                         messagebox.showinfo("Kész", "A driverek automatikus (Élő) felismertetése befejeződött!\nA Touchpadnak már mennie kell.")
                         self.refresh_drivers()
                     else:
-                        msg = "Az offline driver integrálás (DISM) a megadott meghajtón befejeződött!\n\nBiztonsági intézkedésként betettünk egy automatikusan lefutó szkriptet az Indítópultba. Újraindítás után a Windows automatikusan újraellenőrzi a hardvereket (pl. Touchpad), anélkül hogy egeret kéne használnod."
+                        msg = "Az offline driver integrálás (DISM) a megadott meghajtón befejeződött!\n\nBiztonsági intézkedésként a Rendszerleíróba (RunOnce) beágyaztunk egy ideiglenes gyári driver scannert. Bejelentkezéskor azonnal fel fogja ébreszteni a Touchpadet, hogy ne kelljen egeret használnod!"
                         messagebox.showinfo("Offline Kész", msg)
 
                 self.after(0, finish)
