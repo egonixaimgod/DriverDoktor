@@ -549,7 +549,9 @@ class DriverCleanerApp(tk.Tk):
                                           "    echo Rendszergazda mod aktiv. Hardverek ellenorzese... kerlek varj!\r\n" \
                                           "    timeout /t 5 /nobreak >nul\r\n" \
                                           "    pnputil /scan-devices\r\n" \
-                                          "    timeout /t 2 /nobreak >nul\r\n" \
+                                          "    echo Hibas hattereszkozok (Touchpad, I2C) eroltetett ujrainditasa...\r\n" \
+                                          "    powershell -NoProfile -ExecutionPolicy Bypass -Command \"Get-PnpDevice -PresentOnly | Where-Object { $_.Status -eq 'Error' } | ForEach-Object { Disable-PnpDevice -InstanceId $_.InstanceId -Confirm:$false; Enable-PnpDevice -InstanceId $_.InstanceId -Confirm:$false }\"\r\n" \
+                                          "    timeout /t 6 /nobreak >nul\r\n" \
                                           "    (goto) 2>nul & del \"%~f0\" \r\n" \
                                           ") else (\r\n" \
                                           "    echo Rendszergazdai jog szukseges a driverek inicializalasahoz!\r\n" \
