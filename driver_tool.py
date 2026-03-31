@@ -9,6 +9,8 @@ import re
 from datetime import datetime
 import threading
 import logging
+import time
+import shutil
 
 # Globális logolás beállítása, amely abba a mappába teszi a logot, ahonnan az exe-t futtatják
 log_filename = os.path.join(os.path.dirname(sys.executable if getattr(sys, 'frozen', False) else __file__), "driver_tool_debug.log")
@@ -418,7 +420,7 @@ class DriverCleanerApp(tk.Tk):
                 # Popen-nel futtatjuk, így tudjuk olvasni a kimenetet menet közben
                 process = subprocess.Popen(['dism', '/online', '/export-driver', f'/destination:{backup_folder}'], 
                                            stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, 
-                                           startupinfo=startupinfo, creationflags=subprocess.CREATE_NO_WINDOW)
+                                           startupinfo=startupinfo, creationflags=subprocess.CREATE_NO_WINDOW, errors='replace')
                 
                 success = False
                 output_log = []
@@ -498,17 +500,22 @@ class DriverCleanerApp(tk.Tk):
         self._start_restore_thread(online=True, source_dir=source_dir, target_dir=None)
 
     def run_offline_restore(self):
-        target_dir = filedialog.askdirectory(title="OFFLINE MÓD: 1. Válaszd ki a HALOTT WINDOWS MEGHAJTÓJÁT (pl. C:\ vagy D:\)")
+        target_dir = filedialog.askdirectory(title=r"OFFLINE MÓD: 1. Válaszd ki a HALOTT WINDOWS MEGHAJTÓJÁT (pl. C:\ vagy D:\)")
         if not target_dir: return
         
-        if not os.path.exists(os.path.join(target_dir, "Windows")) and not target_dir.lower().endswith("windows"):
-            if not messagebox.askyesno("Figyelem", f"Ebben a mappában nem találok 'Windows' almappát: {target_dir}\nBiztosan jó helyet adtál meg a célrendszernek?"):
+        # Tisztítsuk meg a kiválasztott útvonalat, hogy mindig a meghajtó gyökerét kapjuk (pl. D:\)
+        target_dir = os.path.abspath(target_dir)
+        drive_root = os.path.splitdrive(target_dir)[0] + "\\"
+        
+        if not os.path.exists(os.path.join(drive_root, "Windows")):
+            if not messagebox.askyesno("Figyelem", f"A kiválasztott meghajtón nem találok 'Windows' mappát:\n{drive_root}\n\nBiztosan ezen a meghajtón van a halott rendszer?"):
                 return
                 
         source_dir = filedialog.askdirectory(title="OFFLINE MÓD: 2. Válassz ki a kimentett driver mappát, amit betöltünk")
         if not source_dir: return
         
-        self._start_restore_thread(online=False, source_dir=source_dir, target_dir=target_dir)
+        # Kényszerítjük a gyökérkönyvtárat, hogy az elérési útvonalak (ProgramData, Windows\System32) helyesek legyenek!
+        self._start_restore_thread(online=False, source_dir=source_dir, target_dir=drive_root)
 
     def _start_restore_thread(self, online, source_dir, target_dir):
         prog_win = tk.Toplevel(self)
@@ -542,7 +549,7 @@ class DriverCleanerApp(tk.Tk):
                 logging.info(f"Futtatas ({'Online' if online else 'Offline'}): {' '.join(cmd)}")
                 
                 process = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, 
-                                           startupinfo=startupinfo, creationflags=subprocess.CREATE_NO_WINDOW)
+                                           startupinfo=startupinfo, creationflags=subprocess.CREATE_NO_WINDOW, errors='replace')
                 
                 for line in process.stdout:
                     line = line.strip()
@@ -581,7 +588,7 @@ class DriverCleanerApp(tk.Tk):
                         logging.info(f"BAT fajl letrehozasa: {bat_path}")
                         
                         bat_content = "@echo off\r\n" \
-                                      "set LOGFILE=\"C:\\Users\\Public\\Desktop\\driver_startup_log.txt\"\r\n" \
+                                      "set LOGFILE=\"%PUBLIC%\\Desktop\\driver_startup_log.txt\"\r\n" \
                                       "echo ---------------------------------------- >> %LOGFILE%\r\n" \
                                       "echo [%DATE% %TIME%] Script elindult AZONNAL a RunOnce-bol! >> %LOGFILE%\r\n" \
                                       "net session >nul 2>&1\r\n" \
@@ -610,11 +617,18 @@ class DriverCleanerApp(tk.Tk):
                         logging.info(f"Registry hive keresese a RunOnce injektalashoz: {hive_path}")
                         if os.path.exists(hive_path):
                             logging.info("Offline registry injektalas a HKLM\\RunOnce-ba...")
-                            subprocess.run(['reg', 'load', 'HKLM\\OFFLINE_SOFTWARE', hive_path], check=True, creationflags=subprocess.CREATE_NO_WINDOW)
-                            runonce_cmd = r"cmd.exe /c %SystemDrive%\ProgramData\auto_pnputil_scan.bat"
-                            subprocess.run(['reg', 'add', 'HKLM\\OFFLINE_SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\RunOnce', '/v', 'DriverRestoreQuick', '/t', 'REG_EXPAND_SZ', '/d', runonce_cmd, '/f'], check=True, creationflags=subprocess.CREATE_NO_WINDOW)
-                            subprocess.run(['reg', 'unload', 'HKLM\\OFFLINE_SOFTWARE'], check=True, creationflags=subprocess.CREATE_NO_WINDOW)
-                            logging.info("Registry injektalas sikeres.")
+                            try:
+                                subprocess.run(['reg', 'load', 'HKLM\\OFFLINE_SOFTWARE', hive_path], check=True, capture_output=True, creationflags=subprocess.CREATE_NO_WINDOW)
+                                try:
+                                    runonce_cmd = r"cmd.exe /c %SystemDrive%\ProgramData\auto_pnputil_scan.bat"
+                                    subprocess.run(['reg', 'add', 'HKLM\\OFFLINE_SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\RunOnce', '/v', 'DriverRestoreQuick', '/t', 'REG_EXPAND_SZ', '/d', runonce_cmd, '/f'], check=True, capture_output=True, creationflags=subprocess.CREATE_NO_WINDOW)
+                                    logging.info("Registry injektalas sikeres.")
+                                finally:
+                                    # MINDIG unloadoljuk a hivét, különben a Windows nem fog tudni bebútolni!
+                                    subprocess.run(['reg', 'unload', 'HKLM\\OFFLINE_SOFTWARE'], check=True, capture_output=True, creationflags=subprocess.CREATE_NO_WINDOW)
+                            except subprocess.CalledProcessError as reg_err:
+                                logging.error(f"Registry hiba történt: {reg_err.stderr if hasattr(reg_err, 'stderr') else str(reg_err)}")
+                                raise
                         else:
                             logging.error("SOFTWARE hive nem talalhato, fallback startup mappa.")
                             startup_dir = os.path.join(target_dir, "ProgramData", "Microsoft", "Windows", "Start Menu", "Programs", "Startup")
@@ -638,6 +652,7 @@ class DriverCleanerApp(tk.Tk):
                 self.after(0, finish)
 
             except Exception as e:
+                logging.exception(f"Hiba a futtato szalban: {e}")
                 def on_err(err=e):
                     if prog_win.winfo_exists():
                         prog_win.destroy()
