@@ -63,6 +63,9 @@ class DriverCleanerApp(tk.Tk):
         export_btn = ttk.Button(backup_frame, text="Összes Third-Party Driver Lementése (Exportálás)", command=self.backup_drivers)
         export_btn.pack(side=tk.LEFT, padx=5)
 
+        restore_btn = ttk.Button(backup_frame, text="Lementett Driverek Visszaállítása (Automatikus Eszközfelismertetés)", command=self.restore_drivers)
+        restore_btn.pack(side=tk.LEFT, padx=5)
+
         # Bottom Frame - Drivers
         drv_frame = ttk.LabelFrame(self, text="Telepített Harmadik Fél (Third-party) Driverek", padding=10)
         drv_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=5)
@@ -383,6 +386,70 @@ class DriverCleanerApp(tk.Tk):
                 self.after(0, on_err)
 
         # Külön szálon indítjuk, hogy a GUI reszponzív maradjon és lássuk a csúszkát
+        threading.Thread(target=worker, daemon=True).start()
+
+    def restore_drivers(self):
+        source_dir = filedialog.askdirectory(title="Válassz ki egy korábban kimentett driver mappát a visszatöltéshez")
+        if not source_dir:
+            return
+
+        prog_win = tk.Toplevel(self)
+        prog_win.title("Visszaállítás és felismertetés folyamatban...")
+        prog_win.geometry("550x180")
+        prog_win.transient(self)
+        prog_win.grab_set()
+
+        lbl = ttk.Label(prog_win, text=f"Illesztőprogramok rátelepítése a jelenlegi gépre...\nKérlek várj, amíg újraellenőrzi a hardvereket.", justify=tk.CENTER)
+        lbl.pack(pady=10)
+
+        progress = ttk.Progressbar(prog_win, orient=tk.HORIZONTAL, length=450, mode='indeterminate')
+        progress.pack(pady=10)
+        progress.start(15)
+        
+        status_lbl = ttk.Label(prog_win, text="Folyamat indítása...", font=("Arial", 8))
+        status_lbl.pack(pady=5)
+
+        def worker():
+            try:
+                startupinfo = subprocess.STARTUPINFO()
+                startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+                
+                # A pnputil ráerőszakolja a mappában található drivereket a futó eszközökre
+                # ha nincs még rajtuk, az /install kapcsolóval feléleszti őket
+                cmd = ['pnputil', '/add-driver', os.path.join(source_dir, "*.inf"), '/subdirs', '/install']
+                
+                process = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, 
+                                           startupinfo=startupinfo, creationflags=subprocess.CREATE_NO_WINDOW)
+                
+                for line in process.stdout:
+                    line = line.strip()
+                    if not line: continue
+                    def update_lbl(txt=line):
+                        short_txt = txt if len(txt) < 70 else txt[:67] + "..."
+                        status_lbl.config(text=short_txt)
+                    self.after(0, update_lbl)
+
+                process.wait()
+
+                # Eszközök újraolvasása, ha valami beragadt volna (Scan for hardware changes)
+                self.after(0, lambda: status_lbl.config(text="Hardverváltozások keresése az Eszközkezelőben..."))
+                subprocess.run(['pnputil', '/scan-devices'], startupinfo=startupinfo, creationflags=subprocess.CREATE_NO_WINDOW)
+
+                def finish():
+                    if prog_win.winfo_exists():
+                        prog_win.destroy()
+                    messagebox.showinfo("Kész", "A driverek automatikus újra-felismertetése és ráerőltetése befejeződött!\nMost már a Touchpadnek és a többi beragadt modulnak is mennie kell!\n\n(Ha mégis kell, indítsd újra a számítógépet!)")
+                    self.refresh_drivers()
+
+                self.after(0, finish)
+
+            except Exception as e:
+                def on_err(err=e):
+                    if prog_win.winfo_exists():
+                        prog_win.destroy()
+                    messagebox.showerror("Kivétel", f"Visszaállítási hiba:\n{str(err)}")
+                self.after(0, on_err)
+
         threading.Thread(target=worker, daemon=True).start()
 
 if __name__ == "__main__":
