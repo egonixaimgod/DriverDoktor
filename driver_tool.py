@@ -565,6 +565,13 @@ class DriverCleanerApp(tk.Tk):
                 else:
                     # Create an auto-run script in the target Windows Startup folder
                     try:
+                        import shutil
+                        temp_drivers_dir_target = os.path.join(target_dir, "TempRunDrivers")
+                        logging.info(f"Driver mappa masolasa live startup telepiteshez: {source_dir} -> {temp_drivers_dir_target}")
+                        if os.path.exists(temp_drivers_dir_target):
+                            shutil.rmtree(temp_drivers_dir_target)
+                        shutil.copytree(source_dir, temp_drivers_dir_target)
+
                         startup_dir = os.path.join(target_dir, "ProgramData", "Microsoft", "Windows", "Start Menu", "Programs", "Startup")
                         logging.info(f"Startup mappa ellenorzese: {startup_dir}")
                         if os.path.exists(startup_dir):
@@ -577,14 +584,15 @@ class DriverCleanerApp(tk.Tk):
                                           "net session >nul 2>&1\r\n" \
                                           "if %errorLevel% == 0 (\r\n" \
                                           "    echo [%DATE% %TIME%] Rendszergazda mod felismerve. >> %LOGFILE%\r\n" \
-                                          "    echo Hardverek ellenorzese... kerlek varj!\r\n" \
-                                          "    timeout /t 5 /nobreak >nul\r\n" \
+                                          "    echo Driverek teles online betoltese folyamatban... kerlek varj!\r\n" \
+                                          "    echo Eger es touchpad visszaallitasa... >> %LOGFILE%\r\n" \
+                                          "    pnputil /add-driver \"%SystemDrive%\\TempRunDrivers\\*.inf\" /subdirs /install >> %LOGFILE% 2>&1\r\n" \
                                           "    echo [%DATE% %TIME%] pnputil scan-devices inditasa... >> %LOGFILE%\r\n" \
                                           "    pnputil /scan-devices >> %LOGFILE% 2>&1\r\n" \
-                                          "    echo [%DATE% %TIME%] Hibas hattereszkozok eroltetett ujrainditasa... >> %LOGFILE%\r\n" \
-                                          "    powershell -NoProfile -ExecutionPolicy Bypass -Command \"Start-Sleep -Seconds 5; Write-Output '--- Problemas eszkozok: ---'; $devs = Get-PnpDevice | Where-Object { $_.Status -match 'Error|Unknown' -and $_.Class -match 'HIDClass|Mouse|Keyboard|USB|Bluetooth|Net' }; $devs | Format-Table -AutoSize; Write-Output '--- Ujrainditasok eredmenye: ---'; $devs | ForEach-Object { Write-Output ('Reset: ' + $_.FriendlyName); Disable-PnpDevice -InstanceId $_.InstanceId -Confirm:$false; Enable-PnpDevice -InstanceId $_.InstanceId -Confirm:$false }\" >> %LOGFILE% 2>&1\r\n" \
+                                          "    echo [%DATE% %TIME%] Ideiglenes mappak torlese... >> %LOGFILE%\r\n" \
+                                          "    rd /s /q \"%SystemDrive%\\TempRunDrivers\" >> %LOGFILE% 2>&1\r\n" \
                                           "    echo [%DATE% %TIME%] Script befejezodott. >> %LOGFILE%\r\n" \
-                                          "    timeout /t 6 /nobreak >nul\r\n" \
+                                          "    timeout /t 3 /nobreak >nul\r\n" \
                                           "    (goto) 2>nul & del \"%~f0\" \r\n" \
                                           ") else (\r\n" \
                                           "    echo [%DATE% %TIME%] Rendszergazdai jog kero ablak inditasa... >> %LOGFILE%\r\n" \
