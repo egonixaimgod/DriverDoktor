@@ -684,8 +684,8 @@ class DriverCleanerApp(tk.Tk):
                                       "echo [%DATE% %TIME%] Boot elotti SYSTEM telepites service (No UAC! Azonnali!) >> %LOGFILE%\r\n" \
                                       "echo [%DATE% %TIME%] Ideiglenes szerviz torlese a registrybol is... >> %LOGFILE%\r\n" \
                                       "sc delete DriverRestoreSvc >> %LOGFILE% 2>&1\r\n" \
-                                      "echo [%DATE% %TIME%] Varakozas a Windows PlugAndPlay szolgaltatasara (60 sec max)... >> %LOGFILE%\r\n" \
-                                      "ping 127.0.0.1 -n 60 > nul\r\n" \
+                                      "echo [%DATE% %TIME%] Varakozas a Windows PlugAndPlay szolgaltatasara (15 sec max)... >> %LOGFILE%\r\n" \
+                                      "ping 127.0.0.1 -n 15 > nul\r\n" \
                                       "echo [%DATE% %TIME%] Driverek betoltese (Csendes mod)... kerlek varj! >> %LOGFILE%\r\n" \
                                       "pnputil /add-driver \"%SystemDrive%\\TempRunDrivers\\*.inf\" /subdirs /install >> %LOGFILE% 2>&1\r\n" \
                                       "echo [%DATE% %TIME%] pnputil scan-devices inditasa... >> %LOGFILE%\r\n" \
