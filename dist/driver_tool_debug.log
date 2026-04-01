@@ -1,0 +1,16 @@
+2026-04-01 13:00:29 [INFO] ==================================================
+2026-04-01 13:00:29 [INFO] DRIVER TOOL ELINDITVA
+2026-04-01 13:00:29 [INFO] Futtatasi konyvtar: C:\Users\user\Desktop\driver_oles_uj\dist
+2026-04-01 13:00:29 [INFO] ==================================================
+2026-04-01 13:00:59 [INFO] WIM mountolasa: E:/sources/install.wim
+2026-04-01 13:01:00 [ERROR] Hiba WIM kinyeresekor: DISM Mount Hiba: 
+Deployment Image Servicing and Management tool
+Version: 10.0.19041.3636
+
+
+Error: 87
+
+A param‚ter nem megfelel‹.
+
+The DISM log file can be found at C:\Windows\Logs\DISM\dism.log
+
