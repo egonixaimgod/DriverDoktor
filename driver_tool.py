@@ -83,6 +83,20 @@ class DriverCleanerApp(tk.Tk):
         drv_frame = ttk.LabelFrame(self, text="Telepített Harmadik Fél (Third-party) Driverek", padding=10)
         drv_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=5)
 
+        # Target OS Selector
+        target_os_frame = ttk.Frame(drv_frame)
+        target_os_frame.pack(fill=tk.X, pady=(0, 5))
+        
+        self.target_os_path = None
+        self.target_lbl = ttk.Label(target_os_frame, text="Célpont: [ Élő Rendszer - Online ]", font=("Arial", 9, "bold"), foreground="green")
+        self.target_lbl.pack(side=tk.LEFT)
+        
+        change_os_btn = ttk.Button(target_os_frame, text="Melyik Windowst vizsgáljuk? (Offline PE / Másik C:)", command=self.change_target_os)
+        change_os_btn.pack(side=tk.RIGHT)
+
+        reset_os_btn = ttk.Button(target_os_frame, text="Vissza (Online)", command=self.reset_target_os)
+        reset_os_btn.pack(side=tk.RIGHT, padx=5)
+
         columns = ("published", "original", "provider", "class", "version")
         self.tree = ttk.Treeview(drv_frame, columns=columns, show="headings", selectmode="extended")
         
@@ -129,6 +143,56 @@ class DriverCleanerApp(tk.Tk):
         
         # Alapértelmezetten a listára dobjuk a fókuszt induláskor
         self.after(500, lambda: self.tree.focus_set())
+
+    def change_target_os(self):
+        d = filedialog.askdirectory(title="Válaszd ki a halott Windows meghajtóját (pl. C:\ vagy D:\, amin a Windows mappa van!)")
+        if d:
+            d = os.path.abspath(d).replace("/", "\\")
+            if not os.path.exists(os.path.join(d, "Windows")):
+                if not messagebox.askyesno("Nincs Windows mappa", f"Nem találok 'Windows' mappát ezen az útvonalon:\n{d}\n\nEgy biztos, hogy ezt választod? (Fura PE környezetben lehet máshol van)"):
+                    return
+            self.target_os_path = d
+            self.target_lbl.config(text=f"Célpont: [ OFFLINE mód: {self.target_os_path} ]", foreground="red")
+            messagebox.showinfo("Célpont Frissítve", f"Mostantól a(z) {d} meghajtó offline drivereit listázza és törli a program (DISM segítségével)!")
+            self.refresh_drivers()
+
+    def reset_target_os(self):
+        self.target_os_path = None
+        self.target_lbl.config(text="Célpont: [ Élő Rendszer - Online ]", foreground="green")
+        self.refresh_drivers()
+
+    def get_offline_drivers(self, all_drivers=False):
+        try:
+            startupinfo = subprocess.STARTUPINFO()
+            startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+            
+            # Using PowerShell Get-WindowsDriver for robust parsing
+            all_flag = "-All" if all_drivers else ""
+            cmd = ['powershell', '-NoProfile', '-Command', 
+                   f'Get-WindowsDriver -Path "{self.target_os_path}" {all_flag} | Select-Object ProviderName, ClassName, Version, Driver, OriginalFileName | ConvertTo-Json -Depth 2 -WarningAction SilentlyContinue']
+            res = subprocess.run(cmd, capture_output=True, text=True, startupinfo=startupinfo, errors='replace', creationflags=subprocess.CREATE_NO_WINDOW)
+            
+            import json
+            out = res.stdout.strip()
+            if not out: return []
+            
+            data = json.loads(out)
+            if isinstance(data, dict):
+                data = [data]
+                
+            drivers = []
+            for d in data:
+                drivers.append({
+                    "published": d.get("Driver", ""),
+                    "original": d.get("OriginalFileName", ""),
+                    "provider": d.get("ProviderName", ""),
+                    "class": d.get("ClassName", ""),
+                    "version": d.get("Version", "")
+                })
+            return drivers
+        except Exception as e:
+            logging.error(f"Hiba az Offline driver lekérdezésben (PowerShell Get-WindowsDriver -Path): {e}")
+            return []
 
     def get_third_party_drivers(self):
         try:
@@ -220,10 +284,15 @@ class DriverCleanerApp(tk.Tk):
         for item in self.tree.get_children():
             self.tree.delete(item)
             
-        if hasattr(self, 'list_all_var') and self.list_all_var.get():
-            drivers = self.get_all_drivers()
+        is_all = hasattr(self, 'list_all_var') and self.list_all_var.get()
+        
+        if hasattr(self, 'target_os_path') and self.target_os_path:
+            drivers = self.get_offline_drivers(all_drivers=is_all)
         else:
-            drivers = self.get_third_party_drivers()
+            if is_all:
+                drivers = self.get_all_drivers()
+            else:
+                drivers = self.get_third_party_drivers()
             
         for d in drivers:
             if "published" in d:
@@ -281,16 +350,33 @@ class DriverCleanerApp(tk.Tk):
                 self.after(0, update_status)
                 
                 try:
-                    res = subprocess.run(['pnputil', '/delete-driver', published_name, '/uninstall', '/force'], 
-                                       capture_output=True, text=True, startupinfo=startupinfo, errors='replace', creationflags=subprocess.CREATE_NO_WINDOW)
-                    if res.returncode == 0 or "Deleted" in res.stdout or "törölve" in res.stdout:
+                    is_offline = hasattr(self, 'target_os_path') and self.target_os_path
+                    is_oem = published_name.lower().startswith("oem")
+                    
+                    if is_offline and is_oem:
+                        res = subprocess.run(['dism', f'/Image:{self.target_os_path}', '/Remove-Driver', f'/Driver:{published_name}'],
+                                           capture_output=True, text=True, startupinfo=startupinfo, errors='replace', creationflags=subprocess.CREATE_NO_WINDOW)
+                    elif not is_offline:
+                        res = subprocess.run(['pnputil', '/delete-driver', published_name, '/uninstall', '/force'], 
+                                           capture_output=True, text=True, startupinfo=startupinfo, errors='replace', creationflags=subprocess.CREATE_NO_WINDOW)
+                    else:
+                        class DummyRes: 
+                            returncode = 1
+                            stdout = ""
+                        res = DummyRes()
+
+                    if res.returncode == 0 or "Deleted" in res.stdout or "törölve" in res.stdout or "successfully" in res.stdout.lower():
                         success_count += 1
                         logging.info(f"SIKER: {published_name} torolve. Kimenet: {res.stdout.strip()}")
                     else:
-                        if hasattr(self, 'list_all_var') and self.list_all_var.get() and not published_name.lower().startswith("oem"):
+                        if hasattr(self, 'list_all_var') and self.list_all_var.get() and not is_oem:
                             logging.info(f"Inbox driver erőszakos törlésének kísérlete: {published_name}")
                             import glob
-                            rep_path = r"C:\Windows\System32\DriverStore\FileRepository"
+                            if is_offline:
+                                rep_path = os.path.join(self.target_os_path, "Windows", "System32", "DriverStore", "FileRepository")
+                            else:
+                                rep_path = r"C:\Windows\System32\DriverStore\FileRepository"
+                            
                             base_name = published_name.replace(".inf", "")
                             dirs = glob.glob(os.path.join(rep_path, f"{base_name}*.inf_*"))
                             
@@ -307,7 +393,7 @@ class DriverCleanerApp(tk.Tk):
                                 logging.info(f"SIKER (Erőszakos): {published_name} mappa letörölve.")
                             else:
                                 fail_count += 1
-                                logging.error(f"HIBA: Nem találtam FileRepository mappát {published_name} számára.")
+                                logging.error(f"HIBA: Nem találtam FileRepository mappát {published_name} számára itt: {rep_path}")
                         else:
                             fail_count += 1
                             logging.error(f"HIBA: {published_name} torlesekor. Return code: {res.returncode}. Kimenet: {res.stdout.strip()}")
