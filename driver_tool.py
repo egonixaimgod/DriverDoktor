@@ -69,6 +69,16 @@ class DriverCleanerApp(tk.Tk):
         restore_btn = ttk.Button(backup_frame, text="Lementett Driverek Visszaállítása (Automatikus Eszközfelismertetés)", command=self.restore_drivers)
         restore_btn.pack(side=tk.LEFT, padx=5)
 
+        # Advanced Frame - Base Windows Drivers
+        wim_frame = ttk.LabelFrame(self, text="Extrém Helyreállítás: Gyári Windows (Alap) Driverek Kinyerése", padding=10)
+        wim_frame.pack(fill=tk.X, padx=10, pady=5)
+        
+        wim_lbl = ttk.Label(wim_frame, text="Ha minden gyári driver törlődött (Billentyűzet, Touchpad, Standard USB), a Windows ISO-ból (install.wim) visszahozhatod!")
+        wim_lbl.pack(side=tk.LEFT, padx=5)
+
+        wim_btn = ttk.Button(wim_frame, text="Alap Driverek Kinyerése (install.wim kiválasztása)", command=self.extract_wim_drivers)
+        wim_btn.pack(side=tk.RIGHT, padx=5)
+
         # Bottom Frame - Drivers
         drv_frame = ttk.LabelFrame(self, text="Telepített Harmadik Fél (Third-party) Driverek", padding=10)
         drv_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=5)
@@ -487,6 +497,95 @@ class DriverCleanerApp(tk.Tk):
         if answer is None: return
         elif answer: self.run_online_restore()
         else: self.run_offline_restore()
+
+    def extract_wim_drivers(self):
+        msg = "Ezzel az opcióval egy hivatalos Windows ISO 'sources\\install.wim' fájljából bányásszuk ki a TISZTA Windows drivereket (Standard USB Hdd, PS/2 Billentyűzet, Touchpad).\nEzután az 'Lementett Driverek Visszaállítása -> Offline (Nem)' opcióval rá is küldheted a halott gépre.\n\nAkarod folytatni?"
+        if not messagebox.askyesno("ISO / WIM Alap Driver Kinyerés", msg): return
+        
+        wim_path = filedialog.askopenfilename(title="Válaszd ki a Windows ISO 'install.wim' fájlját!", filetypes=[("Windows Image (.wim)", "*.wim")])
+        if not wim_path: return
+        
+        if wim_path.lower().endswith(".esd"):
+            messagebox.showerror("Hiba", "Az ESD fájl formátumot a Windows nem tudja közvetlenül kicsomagolni. Kérlek, szerez egy olyan ISO-t, amiben 'install.wim' van (pl. Rufus letöltés)!")
+            return
+            
+        dest_dir = filedialog.askdirectory(title="Válassz egy IDEIGLENES mappát, ahova kicsomagoljuk a teljes gyári driver készletet")
+        if not dest_dir: return
+        
+        target_folder = os.path.join(dest_dir, f"Windows_Gyari_Alap_Driverek_{datetime.now().strftime('%Y%m%d_%H%M')}")
+        os.makedirs(target_folder, exist_ok=True)
+        
+        mount_dir = os.path.join(dest_dir, "WIM_Mount_Temp")
+        if os.path.exists(mount_dir):
+            shutil.rmtree(mount_dir, ignore_errors=True)
+        os.makedirs(mount_dir, exist_ok=True)
+        
+        prog_win = tk.Toplevel(self)
+        prog_win.title("WIM csatolás folyamatban...")
+        prog_win.geometry("550x180")
+        prog_win.transient(self)
+        prog_win.grab_set()
+
+        lbl = ttk.Label(prog_win, text=f"Windows Image csatolása és gyári driverek kinyerése...\nEz több percig is eltarthat, a háttérben folyik a művelet!", justify=tk.CENTER)
+        lbl.pack(pady=10)
+        
+        progress = ttk.Progressbar(prog_win, orient=tk.HORIZONTAL, length=450, mode='indeterminate')
+        progress.pack(pady=10)
+        progress.start(15)
+
+        status_lbl = ttk.Label(prog_win, text="WIM fájl csatolása (Mount)...", font=("Arial", 8))
+        status_lbl.pack(pady=5)
+        
+        def worker():
+            try:
+                startupinfo = subprocess.STARTUPINFO()
+                startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+                
+                # 1. Mount image
+                self.after(0, lambda: status_lbl.config(text="1/3: Képfájl csatolása a Temp mappába (Türelem, 4-5 perc is lehet!)..."))
+                logging.info(f"WIM mountolasa: {wim_path}")
+                mount_cmd = ['dism', '/Mount-Image', f'/ImageFile:{wim_path}', '/Index:1', f'/MountDir:{mount_dir}', '/ReadOnly']
+                res = subprocess.run(mount_cmd, capture_output=True, text=True, startupinfo=startupinfo, errors='replace', creationflags=subprocess.CREATE_NO_WINDOW)
+                if res.returncode != 0:
+                    raise Exception(f"DISM Mount Hiba: {res.stdout}")
+                
+                # 2. Másolás robocopy-val (az XCOPY vagy shutil gyakran hibázik hosszú file nevek miatt)
+                self.after(0, lambda: status_lbl.config(text="2/3: Gyári DriverStore másolása (1-2 GB adat)..."))
+                driverstore_path = os.path.join(mount_dir, "Windows", "System32", "DriverStore", "FileRepository")
+                logging.info(f"DriverStore masolasa innen: {driverstore_path}")
+                if os.path.exists(driverstore_path):
+                    robo_cmd = ['robocopy', driverstore_path, target_folder, '/E', '/R:0', '/W:0', '/NFL', '/NDL', '/NJH', '/NJS', '/nc', '/ns', '/np']
+                    subprocess.run(robo_cmd, startupinfo=startupinfo, creationflags=subprocess.CREATE_NO_WINDOW)
+                else:
+                    raise Exception("A FileRepository (gyári driver mappa) nem található a csatolt WIM fájlban!")
+                
+                # 3. Biztonságos Unmount
+                self.after(0, lambda: status_lbl.config(text="3/3: WIM leválasztása (Takarítás)..."))
+                logging.info("WIM unmountolasa...")
+                unmount_cmd = ['dism', '/Unmount-Image', f'/MountDir:{mount_dir}', '/Discard']
+                subprocess.run(unmount_cmd, capture_output=True, text=True, startupinfo=startupinfo, errors='replace', creationflags=subprocess.CREATE_NO_WINDOW)
+                
+                try:
+                    shutil.rmtree(mount_dir, ignore_errors=True)
+                except: pass
+
+                def finish():
+                    if prog_win.winfo_exists(): prog_win.destroy()
+                    messagebox.showinfo("Kinyerés Kész", f"A TISZTA gyári driverek (alap USB, PS/2 Billentyűzet, Alaplapi chipek, Generic Touchpad) sikeresen kimentve ide:\n{target_folder}\n\nKövetkező lépés:\nKattints a 'Lementett Driverek Visszaállítása' gombra -> 'NEM' (Offline mód), és válaszd ki a halott D:\\ meghajtót, forrásnak pedig add meg ezt az új mappát!")
+                self.after(0, finish)
+
+            except Exception as e:
+                logging.error(f"Hiba WIM kinyeresekor: {e}")
+                subprocess.run(['dism', '/Unmount-Image', f'/MountDir:{mount_dir}', '/Discard'], capture_output=True, text=True, startupinfo=startupinfo, errors='replace', creationflags=subprocess.CREATE_NO_WINDOW)
+                try:
+                    shutil.rmtree(mount_dir, ignore_errors=True)
+                except: pass
+                def show_err(err=e):
+                    if prog_win.winfo_exists(): prog_win.destroy()
+                    messagebox.showerror("Hiba történt", f"Nem sikerült kibontani a WIM fájlt a következő hiba miatt:\n{str(err)}")
+                self.after(0, show_err)
+
+        threading.Thread(target=worker, daemon=True).start()
 
     def run_online_restore(self):
         source_dir = filedialog.askdirectory(title="ÉLŐ MÓD: Válassz egy korábban kimentett driver mappát")
