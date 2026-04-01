@@ -114,6 +114,10 @@ class DriverCleanerApp(tk.Tk):
         select_all_btn = ttk.Button(btn_frame, text="Összes Kijelölése", command=self.select_all_drivers)
         select_all_btn.pack(side=tk.LEFT, padx=5)
 
+        self.list_all_var = tk.BooleanVar(value=False)
+        self.list_all_chk = ttk.Checkbutton(btn_frame, text="Minden Driver Listázása (Veszélyes!)", variable=self.list_all_var, command=self.on_list_all_toggle)
+        self.list_all_chk.pack(side=tk.LEFT, padx=15)
+
         delete_btn = ttk.Button(btn_frame, text="Kiválasztott Driver(ek) TÖRLÉSE", command=self.delete_selected_drivers)
         delete_btn.pack(side=tk.RIGHT, padx=5)
 
@@ -170,11 +174,57 @@ class DriverCleanerApp(tk.Tk):
             messagebox.showerror("Hiba", f"Nem sikerült lekérdezni a drivereket:\n{str(e)}")
             return []
 
+    def on_list_all_toggle(self):
+        if self.list_all_var.get():
+            warn_msg = ("A Windows gyári / alapvető (inbox) drivereinek listázását választottad!\n\n"
+                        "HA EZEKET TÖRÖLGETJÜK, EL LEHET BASZARINTANI A GÉPET!\n"
+                        "(Pl. Kékhalál induláskor, nem működő egér/billentyűzet, USB portok halála)\n\n"
+                        "Biztosan bekapcsolod ezt a 'Minden Driver' nézetet?")
+            if not messagebox.askyesno("VESZÉLYES FUNKCIÓ BEKAPCSOLÁSA", warn_msg, icon='warning'):
+                self.list_all_var.set(False)
+                return
+        self.refresh_drivers()
+
+    def get_all_drivers(self):
+        try:
+            startupinfo = subprocess.STARTUPINFO()
+            startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+            cmd = ['powershell', '-NoProfile', '-Command', 
+                   'Get-WindowsDriver -Online -All | Select-Object ProviderName, ClassName, Version, Driver, OriginalFileName | ConvertTo-Json -Depth 2 -WarningAction SilentlyContinue']
+            res = subprocess.run(cmd, capture_output=True, text=True, startupinfo=startupinfo, errors='replace', creationflags=subprocess.CREATE_NO_WINDOW)
+            
+            import json
+            out = res.stdout.strip()
+            if not out: return []
+            
+            # Powershell gives pure JSON
+            data = json.loads(out)
+            if isinstance(data, dict):
+                data = [data]
+                
+            drivers = []
+            for d in data:
+                drivers.append({
+                    "published": d.get("Driver", ""),
+                    "original": d.get("OriginalFileName", ""),
+                    "provider": d.get("ProviderName", ""),
+                    "class": d.get("ClassName", ""),
+                    "version": d.get("Version", "")
+                })
+            return drivers
+        except Exception as e:
+            logging.error(f"Hiba a gyári driver lekérdezésben (Powershell Get-WindowsDriver): {e}")
+            return []
+
     def refresh_drivers(self):
         for item in self.tree.get_children():
             self.tree.delete(item)
             
-        drivers = self.get_third_party_drivers()
+        if hasattr(self, 'list_all_var') and self.list_all_var.get():
+            drivers = self.get_all_drivers()
+        else:
+            drivers = self.get_third_party_drivers()
+            
         for d in drivers:
             if "published" in d:
                 self.tree.insert("", tk.END, values=(
@@ -232,14 +282,36 @@ class DriverCleanerApp(tk.Tk):
                 
                 try:
                     res = subprocess.run(['pnputil', '/delete-driver', published_name, '/uninstall', '/force'], 
-                                       capture_output=True, text=True, startupinfo=startupinfo, errors='replace')
+                                       capture_output=True, text=True, startupinfo=startupinfo, errors='replace', creationflags=subprocess.CREATE_NO_WINDOW)
                     if res.returncode == 0 or "Deleted" in res.stdout or "törölve" in res.stdout:
                         success_count += 1
                         logging.info(f"SIKER: {published_name} torolve. Kimenet: {res.stdout.strip()}")
                     else:
-                        fail_count += 1
-                        logging.error(f"HIBA: {published_name} torlesekor. Return code: {res.returncode}. Kimenet: {res.stdout.strip()}")
-                        print(f"Hiba a {published_name} törlésekor: {res.stdout}")
+                        if hasattr(self, 'list_all_var') and self.list_all_var.get() and not published_name.lower().startswith("oem"):
+                            logging.info(f"Inbox driver erőszakos törlésének kísérlete: {published_name}")
+                            import glob
+                            rep_path = r"C:\Windows\System32\DriverStore\FileRepository"
+                            base_name = published_name.replace(".inf", "")
+                            dirs = glob.glob(os.path.join(rep_path, f"{base_name}*.inf_*"))
+                            
+                            if dirs:
+                                for d in dirs:
+                                    try:
+                                        subprocess.run(f'takeown /f "{d}" /r /d y', shell=True, startupinfo=startupinfo, creationflags=subprocess.CREATE_NO_WINDOW, capture_output=True)
+                                        subprocess.run(f'icacls "{d}" /grant administrators:F /t', shell=True, startupinfo=startupinfo, creationflags=subprocess.CREATE_NO_WINDOW, capture_output=True)
+                                        shutil.rmtree(d, ignore_errors=True)
+                                        subprocess.run(f'rmdir /s /q "{d}"', shell=True, startupinfo=startupinfo, creationflags=subprocess.CREATE_NO_WINDOW, capture_output=True)
+                                    except Exception as ex:
+                                        logging.error(f"Hiba {d} mappának törlésekor: {ex}")
+                                success_count += 1
+                                logging.info(f"SIKER (Erőszakos): {published_name} mappa letörölve.")
+                            else:
+                                fail_count += 1
+                                logging.error(f"HIBA: Nem találtam FileRepository mappát {published_name} számára.")
+                        else:
+                            fail_count += 1
+                            logging.error(f"HIBA: {published_name} torlesekor. Return code: {res.returncode}. Kimenet: {res.stdout.strip()}")
+                            print(f"Hiba a {published_name} törlésekor: {res.stdout}")
                 except Exception as e:
                     fail_count += 1
                     logging.exception(f"Kivétel a {published_name} torlese kozben: {e}")
