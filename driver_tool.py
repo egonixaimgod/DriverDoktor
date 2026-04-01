@@ -35,15 +35,19 @@ class DriverCleanerApp(tk.Tk):
         # Let's apply a more modern style if possible
         style = ttk.Style(self)
         try:
-            style.theme_use("xpnative") # Or xpnative/clam/vista
+            style.theme_use("clam")
+            style.configure(".", background="#FFFFFF")
+            style.configure("TFrame", background="#FFFFFF")
+            style.configure("TLabel", background="#FFFFFF")
+            style.configure("TButton", background="#0078D7", foreground="white")
         except:
             pass
         
         # Configure fonts
         style.configure(".", font=("Segoe UI", 10))
-        style.configure("TLabelframe.Label", font=("Segoe UI", 11, "bold"), foreground="#003366")
-        style.configure("TButton", font=("Segoe UI", 10, "bold"), padding=6)
-        style.configure("Danger.TButton", font=("Segoe UI", 10, "bold"), foreground="red")
+        style.configure("TLabelframe.Label", font=("Segoe UI", 11), foreground="#003366")
+        style.configure("TButton", font=("Segoe UI", 10), padding=6)
+        style.configure("Danger.TButton", font=("Segoe UI", 10), foreground="red")
         
         try:
             self.iconbitmap(resource_path("icon.ico"))
