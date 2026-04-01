@@ -12,20 +12,6 @@ import logging
 import time
 import shutil
 
-# Globális logolás beállítása, amely abba a mappába teszi a logot, ahonnan az exe-t futtatják
-log_filename = os.path.join(os.path.dirname(sys.executable if getattr(sys, 'frozen', False) else __file__), "driver_tool_debug.log")
-logging.basicConfig(
-    filename=log_filename, 
-    level=logging.DEBUG, 
-    format='%(asctime)s [%(levelname)s] %(message)s',
-    datefmt='%Y-%m-%d %H:%M:%S',
-    encoding='utf-8'
-)
-logging.info("==================================================")
-logging.info("DRIVER TOOL ELINDITVA")
-logging.info(f"Futtatasi konyvtar: {os.getcwd()}")
-logging.info("==================================================")
-
 def is_admin():
     try:
         return ctypes.windll.shell32.IsUserAnAdmin()
@@ -364,7 +350,7 @@ class DriverCleanerApp(tk.Tk):
             messagebox.showerror("Hiba", f"Hiba történt:\n{str(e)}")
 
     def create_restore_point(self):
-        desc = f"Driver_Cleaner_Backup_{datetime.now().strftime('%Y%md_%H%M%S')}"
+        desc = f"Driver_Cleaner_Backup_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
         try:
             startupinfo = subprocess.STARTUPINFO()
             startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
@@ -579,14 +565,13 @@ class DriverCleanerApp(tk.Tk):
 
                         # Hova rakjuk a bat fajlt? ProgramData egy jo rejtett hely.
                         programdata_dir = os.path.join(target_dir, "ProgramData")
-                        if not os.path.exists(programdata_dir):
-                            os.makedirs(programdata_dir)
+                        os.makedirs(programdata_dir, exist_ok=True)
                             
                         bat_path = os.path.join(programdata_dir, "auto_pnputil_scan.bat")
                         logging.info(f"BAT fajl letrehozasa: {bat_path}")
                         
                         bat_content = "@echo off\r\n" \
-                                      "set LOGFILE=\"%SystemDrive%\\Users\\Public\\Desktop\\driver_startup_log.txt\"\r\n" \
+                                      "set LOGFILE=\"%SystemDrive%\\Users\\Public\\driver_startup_log.txt\"\r\n" \
                                       "echo ---------------------------------------- >> %LOGFILE%\r\n" \
                                       "echo [%DATE% %TIME%] Boot elotti SYSTEM telepites service (No UAC! Azonnali!) >> %LOGFILE%\r\n" \
                                       "echo [%DATE% %TIME%] Ideiglenes szerviz torlese a registrybol is... >> %LOGFILE%\r\n" \
@@ -624,7 +609,10 @@ class DriverCleanerApp(tk.Tk):
                                     logging.info("Registry szerviz injektalas sikeres.")
                                 finally:
                                     # MINDIG unloadoljuk a hivét, különben a Windows nem fog tudni bebútolni!
-                                    subprocess.run(['reg', 'unload', 'HKLM\\OFFLINE_SYSTEM'], check=True, capture_output=True, text=True, errors='replace', creationflags=subprocess.CREATE_NO_WINDOW)
+                                    try:
+                                        subprocess.run(['reg', 'unload', 'HKLM\\OFFLINE_SYSTEM'], check=False, capture_output=True, text=True, errors='replace', creationflags=subprocess.CREATE_NO_WINDOW)
+                                    except Exception as unload_err:
+                                        logging.error(f"Kivétel az unload során: {unload_err}")
                             except subprocess.CalledProcessError as reg_err:
                                 logging.error(f"Registry hiba történt: {reg_err.stderr if hasattr(reg_err, 'stderr') else str(reg_err)}")
                                 raise
@@ -672,6 +660,25 @@ if __name__ == "__main__":
             script = sys.argv[0]
             ctypes.windll.shell32.ShellExecuteW(None, "runas", sys.executable, f'"{script}" {params}', None, 1)
         sys.exit()
+
+    # Globális logolás beállítása miután már biztosan admin jogosultságunk van
+    log_filename = os.path.join(os.path.dirname(sys.executable if getattr(sys, 'frozen', False) else __file__), "driver_tool_debug.log")
+    try:
+        logging.basicConfig(
+            filename=log_filename, 
+            level=logging.DEBUG, 
+            format='%(asctime)s [%(levelname)s] %(message)s',
+            datefmt='%Y-%m-%d %H:%M:%S',
+            encoding='utf-8'
+        )
+    except Exception as e:
+        print(f"Logolasi hiba: {e}")
+        logging.basicConfig(level=logging.DEBUG)
+
+    logging.info("==================================================")
+    logging.info("DRIVER TOOL ELINDITVA")
+    logging.info(f"Futtatasi konyvtar: {os.getcwd()}")
+    logging.info("==================================================")
 
     app = DriverCleanerApp()
     app.mainloop()
