@@ -1010,39 +1010,41 @@ class DriverCleanerApp(tk.Tk):
                 norm_source = os.path.normpath(source_dir).replace('/', '\\')
                 norm_target = os.path.normpath(target_dir).replace('/', '\\')
 
-                if online:
-                    cmd = ['pnputil', '/add-driver', f"{norm_source}\\\*.inf", '/subdirs', '/install']
+                is_inbox_restore = (not online) and ("Windows_Gyari_Alap_Driverek" in norm_source)
+
+                if is_inbox_restore:
+                    write_log("Gyári Windows (inbox) driverek felismerve!")
+                    write_log("A DISM offline /Add-Driver nem képes inbox drivereket telepíteni => Boot Service módszer aktiválva.")
+                    write_log("A driverek a célrendszerre másolódnak, és az ELSŐ BOOTOLÁSKOR automatikusan telepítődnek online PnP-vel.")
+                elif online:
+                    cmd = ['pnputil', '/add-driver', f"{norm_source}\\*.inf", '/subdirs', '/install']
+                    write_log(f"Végrehajtandó parancssor: {' '.join(cmd)}")
+                    process = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, 
+                                               startupinfo=startupinfo, creationflags=subprocess.CREATE_NO_WINDOW, errors='replace')
+                    for line in process.stdout:
+                        line = line.strip()
+                        if not line: continue
+                        write_log(line)
+                    process.wait()
+                    write_log(f"\n--- Alapfolyamat befejeződött, visszatérési kód (Return Code): {process.returncode} ---")
                 else:
-                    is_inbox_restore = "Windows_Gyari_Alap_Driverek" in norm_source
-
-                    if is_inbox_restore:
-                        write_log("VIGYÁZAT: Gyári Windows (inbox) driverek felismerve! A DISM kihagyása, közvetlen másolás a DriverStore alá...")
-                        target_filerepo = os.path.join(norm_target, "Windows", "System32", "DriverStore", "FileRepository")
-                        # Robocopy a legbiztonságosabb könyvtárszerkezet szinkronizáláshoz hosszú elérési utakkal
-                        cmd = ['robocopy', norm_source, target_filerepo, '/E', '/R:0', '/W:0', '/MT:8', '/NFL', '/NDL', '/NJH']
-                        write_log(f"Fájlok tömeges átmásolása: {norm_source} -> {target_filerepo}")
-                    else:
-                        scratch_dir = os.path.join(norm_target, "Scratch")
-                        try:
-                            os.makedirs(scratch_dir, exist_ok=True)
-                            write_log(f"Scratch mappa létrehozva: {scratch_dir}")
-                        except Exception as e:
-                            write_log(f"Figyelem: Scratch mappa létrehozása sikertelen ({scratch_dir}): {e}")
-                        
-                        cmd = ['dism', f'/Image:{norm_target}', '/Add-Driver', f'/Driver:{norm_source}', '/Recurse', '/ForceUnsigned', f'/ScratchDir:{scratch_dir}']
-                
-                write_log(f"Végrehajtandó parancssor: {' '.join(cmd)}")
-
-                process = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, 
-                                           startupinfo=startupinfo, creationflags=subprocess.CREATE_NO_WINDOW, errors='replace')
-                
-                for line in process.stdout:
-                    line = line.strip()
-                    if not line: continue
-                    write_log(line)
-
-                process.wait()
-                write_log(f"\n--- Alapfolyamat befejeződött, visszatérési kód (Return Code): {process.returncode} ---")
+                    scratch_dir = os.path.join(norm_target, "Scratch")
+                    try:
+                        os.makedirs(scratch_dir, exist_ok=True)
+                        write_log(f"Scratch mappa létrehozva: {scratch_dir}")
+                    except Exception as e:
+                        write_log(f"Figyelem: Scratch mappa létrehozása sikertelen ({scratch_dir}): {e}")
+                    
+                    cmd = ['dism', f'/Image:{norm_target}', '/Add-Driver', f'/Driver:{norm_source}', '/Recurse', '/ForceUnsigned', f'/ScratchDir:{scratch_dir}']
+                    write_log(f"Végrehajtandó parancssor: {' '.join(cmd)}")
+                    process = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, 
+                                               startupinfo=startupinfo, creationflags=subprocess.CREATE_NO_WINDOW, errors='replace')
+                    for line in process.stdout:
+                        line = line.strip()
+                        if not line: continue
+                        write_log(line)
+                    process.wait()
+                    write_log(f"\n--- Alapfolyamat befejeződött, visszatérési kód (Return Code): {process.returncode} ---")
 
                 if True:
                     if online:
