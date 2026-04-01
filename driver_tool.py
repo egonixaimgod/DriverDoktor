@@ -243,6 +243,7 @@ class DriverCleanerApp(tk.Tk):
             self.backup_view.pack(fill=tk.BOTH, expand=True)
         elif view_name == "wu":
             self.wu_view.pack(fill=tk.BOTH, expand=True)
+            self.check_wu_status()
 
     def change_target_os(self):
         d = filedialog.askdirectory(title="Válaszd ki a halott Windows meghajtóját (pl. C:\\ vagy D:\\, amin a Windows mappa van!)")
@@ -688,19 +689,38 @@ class DriverCleanerApp(tk.Tk):
                     winreg.DeleteValue(key, "NoAutoUpdate")
             except: pass
 
-            # WU szolgáltatás leállítása + CACHE TÖRLÉS + újraindítás (az örök keresés javítása!)
-            subprocess.run("net stop wuauserv & net stop bits", shell=True, startupinfo=startupinfo, creationflags=subprocess.CREATE_NO_WINDOW)
+            # WU szolgáltatás leállítása + TELJES RESET (DLL regisztráció, cache, catroot2)
+            subprocess.run("net stop wuauserv & net stop bits & net stop cryptsvc", shell=True, startupinfo=startupinfo, creationflags=subprocess.CREATE_NO_WINDOW)
             
-            # WU cache törlése - ez oldja meg az örökké tartó "frissítések keresése" problémát
-            sw_dist = os.path.join(os.environ.get('SYSTEMROOT', r'C:\Windows'), 'SoftwareDistribution')
+            # WU cache törlése / átnevezése
+            sysroot = os.environ.get('SYSTEMROOT', r'C:\Windows')
+            sw_dist = os.path.join(sysroot, 'SoftwareDistribution')
+            catroot2 = os.path.join(sysroot, 'System32', 'catroot2')
             try:
                 if os.path.exists(sw_dist):
                     shutil.rmtree(sw_dist, ignore_errors=True)
             except: pass
+            try:
+                bak = catroot2 + '.bak'
+                if os.path.exists(bak):
+                    shutil.rmtree(bak, ignore_errors=True)
+                if os.path.exists(catroot2):
+                    os.rename(catroot2, bak)
+            except: pass
             
-            subprocess.run("net start bits & net start wuauserv", shell=True, startupinfo=startupinfo, creationflags=subprocess.CREATE_NO_WINDOW)
+            # WU DLL-ek újraregisztrálása (ha a szolgáltatás regisztráció sérült: 0x80248014)
+            for dll in ['wuaueng.dll', 'wuapi.dll', 'wups.dll', 'wups2.dll', 'wuwebv.dll', 'wucltux.dll']:
+                subprocess.run(f'regsvr32.exe /s {dll}', shell=True, startupinfo=startupinfo, creationflags=subprocess.CREATE_NO_WINDOW)
+            
+            # Winsock reset (hálózati komponens javítás)
+            subprocess.run('netsh winsock reset', shell=True, startupinfo=startupinfo, creationflags=subprocess.CREATE_NO_WINDOW)
+            
+            subprocess.run("net start cryptsvc & net start bits & net start wuauserv", shell=True, startupinfo=startupinfo, creationflags=subprocess.CREATE_NO_WINDOW)
+            
+            # Kényszerített frissítés-keresés indítása
+            subprocess.run('wuauclt.exe /resetauthorization /detectnow', shell=True, startupinfo=startupinfo, creationflags=subprocess.CREATE_NO_WINDOW)
 
-            messagebox.showinfo("Siker", "Windows Update driver telepítés sikeresen VISSZAÁLLÍTVA.\n\n• A házirend policy TÖRÖLVE (nem csak 0-ra állítva)\n• A WU cache törölve (SoftwareDistribution mappa)\n• A Windows Update szolgáltatás újraindítva\n\nMenj a Beállítások > Frissítések oldalra és kattints a 'Frissítések keresése' gombra!")
+            messagebox.showinfo("Siker", "Windows Update driver telepítés sikeresen VISSZAÁLLÍTVA.\n\n• Házirend policy TÖRÖLVE\n• WU cache törölve (SoftwareDistribution)\n• Catroot2 alaphelyzetbe állítva\n• WU DLL-ek újraregisztrálva\n• Winsock reset\n• WU szolgáltatás újraindítva\n• Frissítés-keresés elindítva\n\nMenj a Beállítások > Frissítések oldalra!")
             self.check_wu_status()
         except PermissionError:
             messagebox.showerror("Hiba", "Nincs jogosultság a Registry írásához. Futtasd Rendszergazdaként!")
