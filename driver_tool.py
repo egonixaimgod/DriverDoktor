@@ -934,20 +934,25 @@ class DriverCleanerApp(tk.Tk):
                 startupinfo = subprocess.STARTUPINFO()
                 startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
                 
+                # Force strictly backward slashes for Windows native CLI tools
+                norm_source = os.path.normpath(source_dir).replace('/', '\\')
+                norm_target = os.path.normpath(target_dir).replace('/', '\\')
+
                 if online:
-                    cmd = ['pnputil', '/add-driver', os.path.join(source_dir, "*.inf"), '/subdirs', '/install']
+                    cmd = ['pnputil', '/add-driver', f"{norm_source}\\*.inf", '/subdirs', '/install']
                 else:
-                    cmd = ['dism', f'/Image:{target_dir}', '/Add-Driver', f'/Driver:{source_dir}', '/Recurse', '/ForceUnsigned']
+                    cmd = ['dism', f'/Image:{norm_target}', '/Add-Driver', f'/Driver:{norm_source}', '/Recurse', '/ForceUnsigned']
                 
                 logging.info(f"Futtatas ({'Online' if online else 'Offline'}): {' '.join(cmd)}")
                 
                 process = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, 
                                            startupinfo=startupinfo, creationflags=subprocess.CREATE_NO_WINDOW, errors='replace')
                 
+                # Ezt látja a user a WinPE-ben és írjuk a logba
                 for line in process.stdout:
                     line = line.strip()
                     if not line: continue
-                    logging.debug(f"[KIMENET] {line}")
+                    logging.debug(f"[DISM/PNPUTIL KIMENET] {line}")
                     def update_lbl(txt=line):
                         short_txt = txt if len(txt) < 70 else txt[:67] + "..."
                         status_lbl.config(text=short_txt)
