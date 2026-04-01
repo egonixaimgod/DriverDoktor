@@ -29,8 +29,21 @@ def resource_path(relative_path):
 class DriverCleanerApp(tk.Tk):
     def __init__(self):
         super().__init__()
-        self.title("Third-Party Driver Kezelő és WU Letiltó")
-        self.geometry("900x600")
+        self.title("Windows Driver Szerviz & Tisztító Eszköz")
+        self.geometry("1100x700")
+
+        # Let's apply a more modern style if possible
+        style = ttk.Style(self)
+        try:
+            style.theme_use("xpnative") # Or xpnative/clam/vista
+        except:
+            pass
+        
+        # Configure fonts
+        style.configure(".", font=("Segoe UI", 10))
+        style.configure("TLabelframe.Label", font=("Segoe UI", 11, "bold"), foreground="#003366")
+        style.configure("TButton", font=("Segoe UI", 10, "bold"), padding=6)
+        style.configure("Danger.TButton", font=("Segoe UI", 10, "bold"), foreground="red")
         
         try:
             self.iconbitmap(resource_path("icon.ico"))
@@ -85,16 +98,23 @@ class DriverCleanerApp(tk.Tk):
 
         # Target OS Selector
         target_os_frame = ttk.Frame(drv_frame)
-        target_os_frame.pack(fill=tk.X, pady=(0, 5))
+        target_os_frame.pack(fill=tk.X, pady=(0, 10))
         
         self.target_os_path = None
-        self.target_lbl = ttk.Label(target_os_frame, text="Célpont: [ Élő Rendszer - Online ]", font=("Arial", 9, "bold"), foreground="green")
+        
+        target_title_lbl = ttk.Label(target_os_frame, text="Vizsgált Célpont:", font=("Segoe UI", 12, "bold"), foreground="#666666")
+        target_title_lbl.pack(side=tk.LEFT, padx=(0, 10))
+
+        # Getting the current system drive dynamically
+        self.sys_drive = os.path.splitdrive(os.environ.get('WINDIR', 'C:\\'))[0] + "\\"
+        
+        self.target_lbl = ttk.Label(target_os_frame, text=f"JELENLEGI RENDSZER ({self.sys_drive})", font=("Segoe UI", 16, "bold"), foreground="#2e7d32")
         self.target_lbl.pack(side=tk.LEFT)
         
-        change_os_btn = ttk.Button(target_os_frame, text="Melyik Windowst vizsgáljuk? (Offline PE / Másik C:)", command=self.change_target_os)
+        change_os_btn = ttk.Button(target_os_frame, text="Halott gép / Offline Windows választása (Külső lemez vagy PE)", command=self.change_target_os, width=45)
         change_os_btn.pack(side=tk.RIGHT)
 
-        reset_os_btn = ttk.Button(target_os_frame, text="Vissza (Online)", command=self.reset_target_os)
+        reset_os_btn = ttk.Button(target_os_frame, text="Vissza (Jelenlegi rendszer)", command=self.reset_target_os)
         reset_os_btn.pack(side=tk.RIGHT, padx=5)
 
         columns = ("published", "original", "provider", "class", "version")
@@ -132,7 +152,7 @@ class DriverCleanerApp(tk.Tk):
         self.list_all_chk = ttk.Checkbutton(btn_frame, text="Minden Driver Listázása (Veszélyes!)", variable=self.list_all_var, command=self.on_list_all_toggle)
         self.list_all_chk.pack(side=tk.LEFT, padx=15)
 
-        delete_btn = ttk.Button(btn_frame, text="Kiválasztott Driver(ek) TÖRLÉSE", command=self.delete_selected_drivers)
+        delete_btn = ttk.Button(btn_frame, text="Kiválasztott Driver(ek) TÖRLÉSE", command=self.delete_selected_drivers, style="Danger.TButton")
         delete_btn.pack(side=tk.RIGHT, padx=5)
 
         # Teljes billentyűzetes navigáció az "egér nélküli" gépekhez
@@ -152,13 +172,13 @@ class DriverCleanerApp(tk.Tk):
                 if not messagebox.askyesno("Nincs Windows mappa", f"Nem találok 'Windows' mappát ezen az útvonalon:\n{d}\n\nEgy biztos, hogy ezt választod? (Fura PE környezetben lehet máshol van)"):
                     return
             self.target_os_path = d
-            self.target_lbl.config(text=f"Célpont: [ OFFLINE mód: {self.target_os_path} ]", foreground="red")
+            self.target_lbl.config(text=f"OFFLINE MÓD ({self.target_os_path})", foreground="#c62828", font=("Segoe UI", 16, "bold"))
             messagebox.showinfo("Célpont Frissítve", f"Mostantól a(z) {d} meghajtó offline drivereit listázza és törli a program (DISM segítségével)!")
             self.refresh_drivers()
 
     def reset_target_os(self):
         self.target_os_path = None
-        self.target_lbl.config(text="Célpont: [ Élő Rendszer - Online ]", foreground="green")
+        self.target_lbl.config(text=f"JELENLEGI RENDSZER ({self.sys_drive})", foreground="#2e7d32", font=("Segoe UI", 16, "bold"))
         self.refresh_drivers()
 
     def get_offline_drivers(self, all_drivers=False):
