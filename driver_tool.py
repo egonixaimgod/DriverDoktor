@@ -1,4 +1,4 @@
-BUILD_NUMBER = 12
+BUILD_NUMBER = 13
 
 import tkinter as tk
 from tkinter import ttk, messagebox, filedialog
@@ -1217,7 +1217,7 @@ try {
     
     if ($Result.Updates.Count -eq 0) {
         Write-Output "EMPTY: Nem található elérhető driver frissítés."
-        exit
+        return
     }
     
     $ToInstall = New-Object -ComObject Microsoft.Update.UpdateColl
@@ -1249,7 +1249,7 @@ try {
     
     if ($ToInstall.Count -eq 0) {
         Write-Output "EMPTY: Nem található egyező driver frissítés a kiválasztott eszközökhöz."
-        exit
+        return
     }
     
     $total = $ToInstall.Count
