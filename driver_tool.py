@@ -1,4 +1,4 @@
-BUILD_NUMBER = 8
+BUILD_NUMBER = 9
 
 import tkinter as tk
 from tkinter import ttk, messagebox, filedialog
@@ -542,7 +542,7 @@ try {
                 if isinstance(data, dict):
                     data = [data]
                 logging.info(f"WU COM API talált {len(data)} db frissítést")
-                return data if isinstance(data, list) else []
+                return data if isinstance(data, list) else None
         except subprocess.TimeoutExpired:
             logging.error("WU COM API keresés timeout (300s)")
         except Exception as e:
@@ -649,7 +649,9 @@ try {
                     except Exception: return []
                 except Exception: return []
 
-            self.after(0, lambda: self.install_hw_btn.config(state=tk.DISABLED))
+            self.after(0, lambda: self.install_hw_btn.config(state=tk.DISABLED, text="🚀 Kijelöltek Telepítése"))
+            self.after(0, lambda: self.select_all_hw_btn.config(state=tk.DISABLED))
+            self.after(0, lambda: self.deselect_all_hw_btn.config(state=tk.DISABLED))
             self.hw_updates_pool = []
 
             # HWID extrahálás (VEN_XXXX&DEV_YYYY, VID_XXXX&PID_YYYY, ACPI\XXXX)
@@ -1056,6 +1058,11 @@ try {
             self.install_hw_btn.config(state=tk.NORMAL)
             self.select_all_hw_btn.config(state=tk.NORMAL)
             self.deselect_all_hw_btn.config(state=tk.NORMAL)
+        else:
+            # Nincs letölthető driver → gombok letiltása
+            self.install_hw_btn.config(state=tk.DISABLED, text="🚀 Kijelöltek Telepítése")
+            self.select_all_hw_btn.config(state=tk.DISABLED)
+            self.deselect_all_hw_btn.config(state=tk.DISABLED)
         
         # === ALSÓ RÉSZ: Már telepített (naprakész) driverek ===
         installed_devs = getattr(self, '_hw_installed_devs', [])
