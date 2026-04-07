@@ -1,3 +1,5 @@
+BUILD_NUMBER = 5
+
 import tkinter as tk
 from tkinter import ttk, messagebox, filedialog
 import subprocess
@@ -15,7 +17,7 @@ import shutil
 def is_admin():
     try:
         return ctypes.windll.shell32.IsUserAnAdmin()
-    except:
+    except Exception:
         return False
 
 def resource_path(relative_path):
@@ -41,7 +43,7 @@ class DriverCleanerApp(tk.Tk):
             style.configure("TFrame", background="#FFFFFF")
             style.configure("TLabel", background="#FFFFFF")
             style.configure("TButton", background="#0078D7", foreground="white")
-        except:
+        except Exception:
             pass
         
         # Configure fonts
@@ -54,7 +56,7 @@ class DriverCleanerApp(tk.Tk):
         icon_path = resource_path("icon.ico")
         try:
             self.iconbitmap(icon_path)
-        except:
+        except Exception:
             pass
         # PhotoImage fallback - ha az iconbitmap nem működik (pl. PyInstaller)
         try:
@@ -63,7 +65,7 @@ class DriverCleanerApp(tk.Tk):
             _icon_img = _icon_img.resize((32, 32), Image.LANCZOS)
             self._app_icon = ImageTk.PhotoImage(_icon_img)
             self.iconphoto(True, self._app_icon)
-        except:
+        except Exception:
             pass
         
         self.create_widgets()
@@ -86,10 +88,10 @@ class DriverCleanerApp(tk.Tk):
         self.target_lbl = ttk.Label(top_bar, text=f"JELENLEGI RENDSZER ({self.sys_drive})", font=("Segoe UI", 16, "bold"), foreground="#2e7d32")
         self.target_lbl.pack(side=tk.LEFT, padx=10)
 
-        change_os_btn = ttk.Button(top_bar, text="Halott gép / Offline Windows választása (Külső lemez)", command=self.change_target_os, width=45)
+        change_os_btn = ttk.Button(top_bar, text="Másik lemez kiválasztása", command=self.change_target_os, width=45)
         change_os_btn.pack(side=tk.LEFT, padx=5)
 
-        reset_os_btn = ttk.Button(top_bar, text="Vissza (Jelenlegi rendszer)", command=self.reset_target_os)
+        reset_os_btn = ttk.Button(top_bar, text="Vissza (Jelenlegi lemez)", command=self.reset_target_os)
         reset_os_btn.pack(side=tk.LEFT, padx=5)
 
 
@@ -105,10 +107,10 @@ class DriverCleanerApp(tk.Tk):
         
         ttk.Label(sidebar_frame, text="Kategóriák", font=("Segoe UI", 12, "bold"), foreground="#003366", background="#E5F3FF").pack(pady=15, padx=10, anchor="w")
 
-        btn_drivers = ttk.Button(sidebar_frame, text="📦 Kezelés", command=lambda: self.switch_view("drivers"))
+        btn_drivers = ttk.Button(sidebar_frame, text="📦 Driverek kezelése", command=lambda: self.switch_view("drivers"))
         btn_drivers.pack(fill=tk.X, padx=10, pady=5)
         
-        btn_backup = ttk.Button(sidebar_frame, text="💾 Mentés és Extrém", command=lambda: self.switch_view("backup"))
+        btn_backup = ttk.Button(sidebar_frame, text="💾 Mentés és Visszaállítás", command=lambda: self.switch_view("backup"))
         btn_backup.pack(fill=tk.X, padx=10, pady=5)
 
         btn_wu = ttk.Button(sidebar_frame, text="🔄 Windows Update", command=lambda: self.switch_view("wu"))
@@ -133,7 +135,7 @@ class DriverCleanerApp(tk.Tk):
         # -----------------------------
         # DRIVER VIEW CONTENT (Drivers list & removal)
         # -----------------------------
-        drv_frame = ttk.LabelFrame(self.driver_view, text="Telepített Driverek Kezelése", padding=10)
+        drv_frame = ttk.LabelFrame(self.driver_view, text="Telepített Driverek Kezelése (Alapból csak a third party, windows telepítés után felrakott drivereket listázza, ha azt akarod hogy a gép összes driverét listázza akkor jobb alul a minden driver gombbal ezt is megteheted!)", padding=10)
         drv_frame.pack(fill=tk.BOTH, expand=True, pady=(0, 10))
 
         columns = ("published", "original", "provider", "class", "version")
@@ -174,11 +176,13 @@ class DriverCleanerApp(tk.Tk):
         select_all_btn = ttk.Button(btn_frame, text="Összes Kijelölése", command=self.select_all_drivers)
         select_all_btn.grid(row=0, column=1, padx=5, pady=5)
 
-        self.list_all_chk = ttk.Checkbutton(btn_frame, text="Minden Driver (Veszélyes!)", variable=self.list_all_var, command=self.on_list_all_toggle)
+        self.list_all_chk = ttk.Checkbutton(btn_frame, text="Minden Driver megjelenítése", variable=self.list_all_var, command=self.on_list_all_toggle)
         self.list_all_chk.grid(row=0, column=2, padx=5, pady=5)
 
-        delete_btn = ttk.Button(btn_frame, text="Kiválasztott Driver(ek) TÖRLÉSE (Del)", command=self.delete_selected_drivers, style="Danger.TButton")
-        delete_btn.grid(row=1, column=0, columnspan=3, pady=(0, 5), sticky="ew", padx=5)
+        delete_btn = tk.Button(btn_frame, text="⚠ Kiválasztott Driver(ek) TÖRLÉSE ⚠", command=self.delete_selected_drivers,
+                            bg="#CC0000", fg="white", activebackground="#990000", activeforeground="white",
+                            font=("Segoe UI", 11, "bold"), relief=tk.RAISED, bd=2, padx=15, pady=6, cursor="hand2")
+        delete_btn.grid(row=1, column=0, columnspan=3, pady=(5, 8), sticky="ew", padx=5)
 
         btn_frame.columnconfigure(0, weight=1)
         btn_frame.columnconfigure(1, weight=1)
@@ -190,10 +194,10 @@ class DriverCleanerApp(tk.Tk):
         backup_frame = ttk.LabelFrame(self.backup_view, text="Biztonsági Mentés (Driver Export és Visszaállítás)", padding=10)
         backup_frame.pack(fill=tk.X, padx=10, pady=10)
 
-        rp_btn = ttk.Button(backup_frame, text="Új Rendszer-vissz. Pont", command=self.create_restore_point)
+        rp_btn = ttk.Button(backup_frame, text="Új Rendszer-visszaállítási Pont", command=self.create_restore_point)
         rp_btn.grid(row=0, column=0, padx=5, pady=5, sticky="ew")
 
-        export_btn = ttk.Button(backup_frame, text="Összes Lementése (Export)", command=self.backup_drivers)
+        export_btn = ttk.Button(backup_frame, text="Összes third party Driver Lementése (Export)", command=self.backup_drivers)
         export_btn.grid(row=0, column=1, padx=5, pady=5, sticky="ew")
 
         restore_btn = ttk.Button(backup_frame, text="Lementett Driverek Visszaállítása", command=self.restore_drivers)
@@ -202,10 +206,10 @@ class DriverCleanerApp(tk.Tk):
         backup_frame.columnconfigure(0, weight=1)
         backup_frame.columnconfigure(1, weight=1)
 
-        wim_frame = ttk.LabelFrame(self.backup_view, text="Extrém Helyreállítás: Gyári Windows (Alap) Driverek Kinyerése", padding=10)
+        wim_frame = ttk.LabelFrame(self.backup_view, text="Extrém Helyreállítás: Gyári Windows (Alap) Driverek Kinyerése (WINDOWS ISO-BÓL!)", padding=10)
         wim_frame.pack(fill=tk.X, padx=10, pady=10)
 
-        wim_lbl = ttk.Label(wim_frame, text="Ha minden gyári driver törlődött (Billentyűzet, Touchpad, Standard USB), a Windows ISO-ból (install.wim) visszahozhatod!", font=("Segoe UI", 8), wraplength=480)
+        wim_lbl = ttk.Label(wim_frame, text="Ha minden gyári driver törlődött (Billentyűzet, Touchpad, Standard USB), a Windows ISO-ból (install.wim-et betallózva) visszahozhatod!", font=("Segoe UI", 8), wraplength=480)
         wim_lbl.pack(pady=(0, 10))
 
         wim_btn = ttk.Button(wim_frame, text="Alap Driverek Kinyerése (install.wim)", command=self.extract_wim_drivers)
@@ -221,13 +225,13 @@ class DriverCleanerApp(tk.Tk):
         self.wu_status_lbl = ttk.Label(wu_frame, text="Állapot: Ismeretlen", font=("Segoe UI", 10, "bold"))
         self.wu_status_lbl.grid(row=0, column=0, columnspan=2, pady=5)
 
-        disable_wu_btn = ttk.Button(wu_frame, text="WU Letöltés LETILTÁSA", command=self.disable_wu_drivers)
+        disable_wu_btn = ttk.Button(wu_frame, text="Windows Update-n belüli driverek letöltésének illetve frissítésének letiltása", command=self.disable_wu_drivers)
         disable_wu_btn.grid(row=1, column=0, padx=5, pady=5, sticky="ew")
 
-        enable_wu_btn = ttk.Button(wu_frame, text="WU Letöltés ENGEDÉLYEZÉSE", command=self.enable_wu_drivers)
+        enable_wu_btn = ttk.Button(wu_frame, text="Windows Update-n belüli driverek letöltésének illetve frissítésének engedélyezése", command=self.enable_wu_drivers)
         enable_wu_btn.grid(row=1, column=1, padx=5, pady=5, sticky="ew")
 
-        restart_wu_btn = ttk.Button(wu_frame, text="⚡ WU Szolgáltatások Újraindítása (Gyors Javítás)", command=self.restart_wu_services)
+        restart_wu_btn = ttk.Button(wu_frame, text="⚡ Windows Update Szolgáltatások Újraindítása (Gyors Javítás)", command=self.restart_wu_services)
         restart_wu_btn.grid(row=2, column=0, columnspan=2, padx=5, pady=5, sticky="ew")
 
         wu_frame.columnconfigure(0, weight=1)
@@ -251,18 +255,44 @@ class DriverCleanerApp(tk.Tk):
         get_hw_btn = ttk.Button(hardware_btn_frame, text="🔍 Hardverek Scannelése", command=self.load_hardware_info)
         get_hw_btn.grid(row=0, column=0, padx=5, pady=5)
 
-        self.install_hw_btn = ttk.Button(hardware_btn_frame, text="🚀 WU Driverek Letöltése és Telepítése", command=self.install_wu_drivers, state=tk.DISABLED)
+        self.install_hw_btn = ttk.Button(hardware_btn_frame, text="🚀 Kijelöltek Telepítése", command=self.install_wu_drivers, state=tk.DISABLED)
         self.install_hw_btn.grid(row=0, column=1, padx=5, pady=5)
 
-        self.hw_tree = ttk.Treeview(hw_frame, columns=("Type", "Name", "ID", "DriverVer"), show="headings", height=12)
-        self.hw_tree.heading("Type", text="Kategória")
-        self.hw_tree.heading("Name", text="Eszköz Neve / Típus")
-        self.hw_tree.heading("ID", text="Hardver Azonosító (HWID)")
-        self.hw_tree.heading("DriverVer", text="Aktuális Driver")
-        self.hw_tree.column("Type", width=120, anchor="w")
-        self.hw_tree.column("Name", width=250, anchor="w")
-        self.hw_tree.column("ID", width=200, anchor="w")
-        self.hw_tree.column("DriverVer", width=150, anchor="w")
+        self.select_all_hw_btn = ttk.Button(hardware_btn_frame, text="☑ Összes kiválasztása", command=self._select_all_hw, state=tk.DISABLED)
+        self.select_all_hw_btn.grid(row=0, column=2, padx=5, pady=5)
+
+        self.deselect_all_hw_btn = ttk.Button(hardware_btn_frame, text="☐ Kijelölés törlése", command=self._deselect_all_hw, state=tk.DISABLED)
+        self.deselect_all_hw_btn.grid(row=0, column=3, padx=5, pady=5)
+
+        # Progress bar + részletes állapot
+        progress_frame = tk.Frame(hw_frame, bg="#FFFFFF")
+        progress_frame.pack(fill=tk.X, pady=(0, 6))
+
+        self.hw_progress = ttk.Progressbar(progress_frame, mode='indeterminate', length=300)
+        self.hw_progress.pack(side=tk.LEFT, padx=(0, 10))
+
+        self.hw_status_lbl = tk.Label(progress_frame, text="", font=("Segoe UI", 9), fg="#555555", bg="#FFFFFF", anchor="w")
+        self.hw_status_lbl.pack(side=tk.LEFT, fill=tk.X, expand=True)
+
+        self.hw_tree = ttk.Treeview(hw_frame, columns=("Select", "WUTitle", "HWID"), show="tree headings", height=14)
+        self.hw_tree.heading("#0", text="Eszköz / Kategória")
+        self.hw_tree.heading("Select", text="✓")
+        self.hw_tree.heading("WUTitle", text="Elérhető WU driver csomag")
+        self.hw_tree.heading("HWID", text="Azonosító (HWID)")
+        self.hw_tree.column("#0", width=260, anchor="w")
+        self.hw_tree.column("Select", width=30, anchor="center", stretch=False)
+        self.hw_tree.column("WUTitle", width=300, anchor="w")
+        self.hw_tree.column("HWID", width=180, anchor="w")
+
+        self.hw_tree.tag_configure("category", font=("Segoe UI", 10, "bold"), background="#E5F3FF")
+        self.hw_tree.tag_configure("checked", foreground="#006600")
+        self.hw_tree.tag_configure("unchecked", foreground="#333333")
+        self.hw_tree.tag_configure("separator", font=("Segoe UI", 9, "bold"), background="#D0D0D0", foreground="#555555")
+        self.hw_tree.tag_configure("installed_cat", font=("Segoe UI", 9, "bold"), background="#E8F5E9", foreground="#2E7D32")
+        self.hw_tree.tag_configure("installed", foreground="#888888")
+        self.hw_tree.bind("<ButtonRelease-1>", self._on_hw_tree_click)
+
+        self._hw_selected = {}  # iid -> bool (True = selected)
 
         hw_scrollbar = ttk.Scrollbar(hw_frame, orient=tk.VERTICAL, command=self.hw_tree.yview)
         self.hw_tree.configure(yscrollcommand=hw_scrollbar.set)
@@ -271,6 +301,10 @@ class DriverCleanerApp(tk.Tk):
 
         # Show drivers by default
         self.driver_view.pack(fill=tk.BOTH, expand=True)
+
+        # Build szám jobb alsó sarokban
+        build_lbl = tk.Label(self, text=f"Build {BUILD_NUMBER:03d}", font=("Segoe UI", 8), fg="#999999", bg="#F3F3F3", anchor="e")
+        build_lbl.pack(side=tk.BOTTOM, fill=tk.X, padx=10, pady=(0, 2))
 
     def switch_view(self, view_name):
         self.driver_view.pack_forget()
@@ -398,12 +432,12 @@ class DriverCleanerApp(tk.Tk):
                     elif "Driver Version" in key or "Illesztőprogram verziója" in key:
                         current_driver["version"] = val
 
-            if current_driver:
+            if current_driver and "published" in current_driver:
                 drivers.append(current_driver)
                 
             return drivers
         except Exception as e:
-            messagebox.showerror("Hiba", f"Nem sikerült lekérdezni a drivereket:\n{str(e)}")
+            logging.error(f"Nem sikerült lekérdezni a drivereket: {e}")
             return []
 
     def on_list_all_toggle(self):
@@ -516,6 +550,9 @@ try {
         self._hw_scanning = True
         
         self.sys_info_lbl.config(text="🔍 Hardverek ellenőrzése folyamatban... Kérlek várj!")
+        self.hw_status_lbl.config(text="⏳ PnP eszközök lekérdezése a Windowstól...")
+        self.hw_progress.config(mode='indeterminate')
+        self.hw_progress.start(15)
         for item in self.hw_tree.get_children():
             self.hw_tree.delete(item)
 
@@ -559,33 +596,44 @@ try {
                         data = json.loads(out)
                         if isinstance(data, dict): return [data]
                         return data if isinstance(data, list) else []
-                    except: return []
-                except: return []
+                    except Exception: return []
+                except Exception: return []
 
-            self.install_hw_btn.config(state=tk.DISABLED)
+            self.after(0, lambda: self.install_hw_btn.config(state=tk.DISABLED))
             self.hw_updates_pool = []
 
             # HWID extrahálás (VEN_XXXX&DEV_YYYY, VID_XXXX&PID_YYYY, ACPI\XXXX)
             def extract_hwid(pnp_id):
                 if not pnp_id: return None
+                # PCI: VEN_XXXX&DEV_YYYY
                 m_pci = re.search(r'(VEN_[0-9A-F]+&DEV_[0-9A-F]+)', pnp_id, re.I)
                 if m_pci: return m_pci.group(1)
+                # USB: VID_XXXX&PID_YYYY
                 m_usb = re.search(r'(VID_[0-9A-F]+&PID_[0-9A-F]+)', pnp_id, re.I)
                 if m_usb: return m_usb.group(1)
+                # ACPI: ACPI\XXXXX
                 m_acpi = re.search(r'(ACPI\\[A-Z0-9_]+)', pnp_id, re.I)
                 if m_acpi: return m_acpi.group(1)
+                # HDAUDIO: HDAUDIO\FUNC_XX&VEN_XXXX&DEV_XXXX
+                m_hda = re.search(r'(HDAUDIO\\FUNC_[0-9A-F]+&VEN_[0-9A-F]+&DEV_[0-9A-F]+)', pnp_id, re.I)
+                if m_hda: return m_hda.group(1)
+                # HID eszközök VID/PID-vel: HID\VID_XXXX&PID_XXXX
+                m_hid = re.search(r'HID\\(VID_[0-9A-F]+&PID_[0-9A-F]+)', pnp_id, re.I)
+                if m_hid: return m_hid.group(1)
+                # USB eszköz VID/PID prefix nélkül: USB\VID_XXXX&PID_XXXX
+                m_usb2 = re.search(r'USB\\(VID_[0-9A-F]+&PID_[0-9A-F]+)', pnp_id, re.I)
+                if m_usb2: return m_usb2.group(1)
+                # DISPLAY\XXXX (monitor/GPU)
+                m_disp = re.search(r'(DISPLAY\\[A-Z0-9]+)', pnp_id, re.I)
+                if m_disp: return m_disp.group(1)
+                # SWD driver enum eszközök: kihagyjuk (nyomtatók, szoftveres eszközök) — nincs WU driver hozzá
+                # STORAGE, USBSTOR, SCSI: kihagyjuk — nincs WU driver hozzá
                 return None
 
             devices_to_check = []
 
-            # 1. Alaplap infó tájékoztató jelleggel
-            mb_data = get_wmi_devices("Win32_BaseBoard", "", "Manufacturer", "Product")
-            for d in mb_data:
-                name = f"{d.get('Manufacturer','')} {d.get('Product','')}"
-                self.after(0, lambda n=name: self.hw_tree.insert("", tk.END, values=("⚙️ Chipset / Alaplap", n, "Alaplapi integrált", "Nem frissíthető (Csak info)")))
-
             # 2. MINDEN Plug & Play eszköz lekérdezése, aminek van értelmezhető HWID-ja
-            ignored_classes = ['Volume', 'VolumeSnapshot', 'DiskDrive', 'CDROM', 'Monitor', 'Battery', 'SoftwareDevice', 'Processor', 'Computer', 'LegacyDriver', 'Endpoint', 'AudioEndpoint']
+            ignored_classes = ['Volume', 'VolumeSnapshot', 'DiskDrive', 'CDROM', 'Monitor', 'Battery', 'SoftwareDevice', 'SoftwareComponent', 'Processor', 'Computer', 'LegacyDriver', 'Endpoint', 'AudioEndpoint', 'PrintQueue', 'Printer', 'WPD']
             
             # Kicsit bolondbiztosabb lekérdezés: minden eszközt lehúzunk, pythonban szűrjük a $null miatti bugok helyett
             def pull_pnp():
@@ -606,26 +654,55 @@ try {
                         return out if isinstance(out, list) else [out]
                     else:
                         logging.error("NINCS STDOUT (Üres a JSON). Valami megfogta a PowerShellt.")
-                except Exception as ex:
+                except Exception as ex:  # noqa: bare except fixed
                     import traceback
                     logging.error(f"PNP Query Váratlan Python Hiba:\n{traceback.format_exc()}")
                 return []
             
             pnp_data = pull_pnp()
             logging.info(f"PnP feldolgozando elemek szama: {len(pnp_data)}")
+            self.after(0, lambda _n=len(pnp_data): self.hw_status_lbl.config(text=f"📋 {_n} PnP eszköz szűrése..."))
+            
+            # Diagnosztika: első 5 nyers PnP elem kiloggolása
+            for _di, _dd in enumerate(pnp_data[:5]):
+                logging.info(f"PnP MINTA [{_di}]: Name={_dd.get('Name','?')!r}, PNPClass={_dd.get('PNPClass','?')!r}, PNPDeviceID={_dd.get('PNPDeviceID','?')!r}")
             
             seen_hwids = set()
+            skipped_no_pid = 0
+            skipped_virtual = 0
+            skipped_root = 0
+            skipped_class = 0
+            skipped_no_hwid = 0
+            skipped_dup = 0
+            skipped_no_hwid_samples = []
             for d in pnp_data:
-                n = d.get("Name", "Ismeretlen Eszköz")
-                pid = d.get("PNPDeviceID", "")
-                pclass = d.get("PNPClass", "") or ""
+                n = d.get("Name") or "Ismeretlen Eszköz"
+                pid = d.get("PNPDeviceID") or ""
+                pclass = d.get("PNPClass") or ""
                 
                 # Kiszűrjük a virtuális, szoftveres és irreleváns cuccokat
-                if not pid or "virtual" in n.lower() or "pseudo" in n.lower() or "vmware" in n.lower() or "root\\" in pid.lower(): continue
-                if pclass in ignored_classes: continue
+                if not pid:
+                    skipped_no_pid += 1
+                    continue
+                if "virtual" in n.lower() or "pseudo" in n.lower() or "vmware" in n.lower():
+                    skipped_virtual += 1
+                    continue
+                if pid.upper().startswith("ROOT\\"):
+                    skipped_root += 1
+                    continue
+                if pclass in ignored_classes:
+                    skipped_class += 1
+                    continue
                 
                 hwid_clean = extract_hwid(pid)
-                if not hwid_clean or hwid_clean in seen_hwids: continue
+                if not hwid_clean:
+                    skipped_no_hwid += 1
+                    if len(skipped_no_hwid_samples) < 15:
+                        skipped_no_hwid_samples.append(f"{n} | PID={pid} | class={pclass}")
+                    continue
+                if hwid_clean in seen_hwids:
+                    skipped_dup += 1
+                    continue
                 
                 seen_hwids.add(hwid_clean)
                 
@@ -643,39 +720,73 @@ try {
                 
                 devices_to_check.append({"cat": cat, "name": n, "id": hwid_clean, "pnp_id": pid})
 
-            # A megkeresett eszkozoket eloszor regisztraljuk a fofonalon a Treeview-ba, majd WU API-val keressuk a frissiteseket
-            def start_wu_checks():
-                for dev in devices_to_check:
-                    dev['iid'] = self.hw_tree.insert("", tk.END, values=(dev['cat'], dev['name'], dev['id'], "🔄 Keresés a Windows Update-en..."))
-                
+            logging.info(f"PnP szures eredmenye: {len(devices_to_check)} eszkoz atment a szuron. "
+                         f"Kiszurve: no_pid={skipped_no_pid}, virtual={skipped_virtual}, root={skipped_root}, "
+                         f"class={skipped_class}, no_hwid={skipped_no_hwid}, dup={skipped_dup}")
+            if skipped_no_hwid_samples:
+                logging.info(f"no_hwid miatt kiszurt eszkozok mintai ({len(skipped_no_hwid_samples)}):")
+                for _s in skipped_no_hwid_samples:
+                    logging.info(f"  SKIP_NO_HWID: {_s}")
+            # Átmenő eszközök logja
+            for _dd in devices_to_check[:10]:
+                logging.info(f"  PASSED: {_dd['name']} => HWID={_dd['id']} cat={_dd['cat']}")
+            
+            self.after(0, lambda _n=len(devices_to_check): self.hw_status_lbl.config(text=f"✅ {_n} eszköz azonosítva, WU keresés indul..."))
+
+            # WU keresés háttérszálon — a treeview-t NEM töltjük fel előre, csak az eredményt mutatjuk
+            def start_wu_search():
                 def wu_search_thread():
                     total_devs = len(devices_to_check)
+                    
+                    # Progress bar indítása
+                    self.after(0, lambda: self.hw_progress.config(mode='indeterminate'))
+                    self.after(0, lambda: self.hw_progress.start(15))
+                    self._wu_search_cancelled = False
+                    
+                    # Eltelt idő kijelző
+                    _start_time = time.time()
+                    def _update_elapsed():
+                        if self._wu_search_cancelled:
+                            return
+                        elapsed = int(time.time() - _start_time)
+                        m, s = divmod(elapsed, 60)
+                        time_str = f"{m}:{s:02d}" if m else f"{s} mp"
+                        phase = getattr(self, '_wu_phase', '')
+                        self.hw_status_lbl.config(text=f"{phase}  ⏱ {time_str}")
+                        self.after(1000, _update_elapsed)
+                    self.after(0, _update_elapsed)
+                    
                     self.after(0, lambda: self.sys_info_lbl.config(
-                        text=f"{sys_info_text} | ⏳ Windows Update szerveren keresés... (ez 1-3 percig tarthat, várj türelemmel!)"))
+                        text=f"{sys_info_text} | ⏳ Driver keresés folyamatban..."))
                     
                     self.hw_updates_pool = []
+                    self._hw_installed_devs = []
                     self.wu_api_mode = True
                     
-                    # --- 1. FÁZIS: WU COM API keresés (megbízható, OS-kompatibilis találatok) ---
+                    # --- 1. FÁZIS: WU COM API keresés ---
+                    self._wu_phase = f"🔍 Fázis 1/2: WU szerver lekérdezése ({total_devs} eszköz)..."
                     logging.info("WU COM API driver keresés indítása...")
                     wu_results = self._search_wu_api()
                     
+                    self._wu_phase = f"📋 Fázis 2/2: Eredmények feldolgozása..."
                     matched_hwids = set()
                     if wu_results:
                         logging.info(f"WU COM API {len(wu_results)} db elérhető driver frissítést talált!")
+                        _match_idx = 0
                         for wu in wu_results:
+                            _match_idx += 1
                             wu_hwid_raw = (wu.get('HardwareID') or '').upper()
                             wu_title = wu.get('Title', '')
                             wu_model = wu.get('DriverModel', '')
+                            self.after(0, lambda _i=_match_idx, _tot=len(wu_results), _t=wu_title[:50]:
+                                self.hw_status_lbl.config(text=f"📋 Egyeztetés: {_i}/{_tot} — {_t}"))
                             
-                            # HWID egyeztetés a PnP eszközökkel
                             for dev in devices_to_check:
                                 if dev['id'] in matched_hwids:
                                     continue
                                 dev_hwid = dev['id'].upper()
                                 dev_pnp = dev.get('pnp_id', '').upper()
                                 
-                                # Ellenőrizzük, hogy a WU HWID illeszkedik-e az eszközhöz
                                 if (dev_hwid and dev_hwid in wu_hwid_raw) or \
                                    (wu_hwid_raw and wu_hwid_raw in dev_pnp):
                                     matched_hwids.add(dev['id'])
@@ -686,16 +797,13 @@ try {
                                         "wu_title": wu_title,
                                         "pnp_id": dev.get('pnp_id', '')
                                     })
-                                    iid = dev['iid']
-                                    c, n, h = dev['cat'], dev['name'], dev['id']
-                                    title_short = wu_title[:40] + '...' if len(wu_title) > 40 else wu_title
-                                    self.after(0, lambda _iid=iid, _c=c, _n=n, _h=h, _t=title_short:
-                                        self.hw_tree.item(_iid, values=(_c, _n, _h, f"📦 {_t}")))
                                     break
                         
-                        # WU-hoz nem illeszthető frissítéseket is hozzáadjuk (pl. más eszközosztály)
+                        # WU-hoz nem illeszthető frissítések (más eszközosztály)
                         for wu in wu_results:
                             wu_hwid_raw = (wu.get('HardwareID') or '').upper()
+                            if not wu_hwid_raw:
+                                continue
                             already_matched = False
                             for dev in devices_to_check:
                                 if dev['id'].upper() in wu_hwid_raw or wu_hwid_raw in dev.get('pnp_id', '').upper():
@@ -710,19 +818,22 @@ try {
                                     "wu_title": wu_title,
                                     "pnp_id": ''
                                 })
-                        
-                        if self.hw_updates_pool:
-                            self.after(0, lambda: self.install_hw_btn.config(state=tk.NORMAL))
                     
-                    # --- 2. FÁZIS: Ha WU API nem talált semmit, fallback a MS Catalog webes keresésre ---
+                    # Telepített (nincs WU frissítés) eszközök gyűjtése
+                    self._hw_installed_devs = [dev for dev in devices_to_check if dev['id'] not in matched_hwids]
+                    
+                    # --- 2. FÁZIS: Katalógus fallback ha WU API üres ---
                     if not self.hw_updates_pool:
                         self.wu_api_mode = False
                         logging.info("WU COM API nem talált frissítést, fallback: MS Update Catalog webes keresés...")
+                        self._wu_phase = f"🌐 Katalógus keresés ({total_devs} eszköz)..."
+                        self.after(0, lambda: self.hw_progress.stop())
+                        self.after(0, lambda: self.hw_progress.config(mode='determinate', maximum=total_devs, value=0))
                         self.after(0, lambda: self.sys_info_lbl.config(
                             text=f"{sys_info_text} | 🔎 WU API üres, MS katalógus ellenőrzés ({total_devs} eszköz)..."))
                         
                         import urllib.request, urllib.parse, ssl
-                        ssl_ctx = ssl._create_unverified_context()
+                        ssl_ctx = ssl.create_default_context()
                         
                         checked_devs = 0
                         lock = threading.Lock()
@@ -733,7 +844,6 @@ try {
                             name = item_dict['name']
                             hwid = item_dict['id']
                             pnp_id = item_dict.get('pnp_id', '')
-                            item_iid = item_dict.get('iid')
                             try:
                                 url = 'https://www.catalog.update.microsoft.com/Search.aspx?q=' + urllib.parse.quote(hwid)
                                 req = urllib.request.Request(url, headers={'User-Agent': 'Mozilla/5.0'})
@@ -743,30 +853,30 @@ try {
                                 best_id = match_ids[0] if match_ids else None
                                 
                                 if best_id:
-                                    dl_url = f'https://www.catalog.update.microsoft.com/DownloadDialog.aspx?updateIDs=[{{"size":0,"fileUrl":"","lazyId":"{best_id}","updateId":"{best_id}"}}]'
-                                    dl_req = urllib.request.Request(dl_url, headers={'User-Agent': 'Mozilla/5.0'})
+                                    dl_post_body = f'updateIDs=[{{"size":0,"languages":"","uidInfo":"{best_id}","updateID":"{best_id}"}}]'
+                                    dl_req = urllib.request.Request(
+                                        'https://www.catalog.update.microsoft.com/DownloadDialog.aspx',
+                                        data=dl_post_body.encode('utf-8'),
+                                        headers={'User-Agent': 'Mozilla/5.0', 'Content-Type': 'application/x-www-form-urlencoded'})
                                     dl_html = urllib.request.urlopen(dl_req, context=ssl_ctx, timeout=30).read().decode('utf-8')
-                                    cab_link = re.search(r'downloadInformation\[0\]\.files\[0\]\.url \s*=\s*[\"\']([^\"\']+)[\"\']', dl_html)
+                                    cab_link = re.search(r'downloadInformation\[0\]\.files\[0\]\.url\s*=\s*[\"\']([^\"\']+)[\"\']', dl_html)
                                     
                                     if cab_link:
                                         dl_target = cab_link.group(1)
                                         logging.info(f"Katalógus találat: {name} (HWID={hwid}). Link: {dl_target}")
-                                        self.hw_updates_pool.append({"name": name, "cat": cat, "hwid": hwid, "url": dl_target, "pnp_id": pnp_id})
-                                        self.after(0, lambda _iid=item_iid, _c=cat, _n=name, _h=hwid:
-                                            self.hw_tree.item(_iid, values=(_c, _n, _h, "📦 Letölthető verzió elérhető!")))
-                                        self.after(0, lambda: self.install_hw_btn.config(state=tk.NORMAL))
+                                        with lock:
+                                            self.hw_updates_pool.append({"name": name, "cat": cat, "hwid": hwid, "url": dl_target, "pnp_id": pnp_id, "wu_title": f"MS Katalógus: {name}"})
                                         return
-                                self.after(0, lambda _iid=item_iid, _c=cat, _n=name, _h=hwid:
-                                    self.hw_tree.item(_iid, values=(_c, _n, _h, "✅ Legfrissebb")))
                             except Exception as e:
                                 logging.error(f"Katalógus hiba ({name} / HWID={hwid}): {e}")
-                                self.after(0, lambda _iid=item_iid, _c=cat, _n=name, _h=hwid, _e=str(e):
-                                    self.hw_tree.item(_iid, values=(_c, _n, _h, f"⚠ Hiba: {_e[:30]}")))
                             finally:
                                 with lock:
                                     checked_devs += 1
-                                    self.after(0, lambda _c=checked_devs:
-                                        self.sys_info_lbl.config(text=f"{sys_info_text} | 🔎 Katalógus vizsgálat: {_c} / {total_devs}"))
+                                    _cd = checked_devs
+                                    self.after(0, lambda _c=_cd:
+                                        self.hw_progress.config(value=_c))
+                                    self.after(0, lambda _c=_cd, _n=name:
+                                        self.hw_status_lbl.config(text=f"🔎 {_c}/{total_devs}: {_n[:40]}"))
                         
                         import queue
                         q = queue.Queue()
@@ -777,41 +887,226 @@ try {
                             while not q.empty():
                                 try:
                                     dev = q.get_nowait()
-                                except:
+                                except Exception:
                                     break
                                 check_catalog(dev)
                                 q.task_done()
                         
                         cat_threads = []
-                        for _ in range(5):  # 5 szál (kevesebb, hogy ne blokkoljuk a szervert)
+                        for _ in range(5):
                             t = threading.Thread(target=catalog_worker, daemon=True)
                             t.start()
                             cat_threads.append(t)
                         for t in cat_threads:
-                            t.join(timeout=120)  # Max 2 perc várakozás szálanként
+                            t.join(timeout=120)
+                        
+                        # Katalógus után újraszámoljuk a telepített eszközöket
+                        catalog_hwids = {drv['hwid'] for drv in self.hw_updates_pool}
+                        self._hw_installed_devs = [dev for dev in devices_to_check if dev['id'] not in catalog_hwids]
                     
-                    # --- 3. FÁZIS: Nem illeszkedő eszközök megjelölése ---
-                    for dev in devices_to_check:
-                        if dev['id'] not in matched_hwids:
-                            iid = dev['iid']
-                            c, n, h = dev['cat'], dev['name'], dev['id']
-                            # Csak akkor jelöljük zöldre ha a WU API módban vagyunk (katalógus mód saját maga kezeli)
-                            if self.wu_api_mode:
-                                self.after(0, lambda _iid=iid, _c=c, _n=n, _h=h:
-                                    self.hw_tree.item(_iid, values=(_c, _n, _h, "✅ Legfrissebb")))
-                    
+                    # --- 3. FÁZIS: Eredmények megjelenítése kategorizálva ---
                     found = len(self.hw_updates_pool)
-                    self.after(0, lambda: setattr(self, '_hw_scanning', False))
+                    self._wu_search_cancelled = True
+                    elapsed_total = int(time.time() - _start_time)
+                    _em, _es = divmod(elapsed_total, 60)
+                    _time_final = f"{_em} perc {_es} mp" if _em else f"{_es} mp"
+                    self.after(0, lambda: self.hw_progress.stop())
+                    self.after(0, lambda: self.hw_progress.config(mode='determinate', maximum=100, value=100))
+                    
                     mode_txt = "WU API" if self.wu_api_mode else "Katalógus"
-                    self.after(0, lambda _txt=sys_info_text, _f=found, _t=total_devs, _m=mode_txt:
-                        self.sys_info_lbl.config(text=f"{_txt} | ✅ Kész ({_m})! {_f} frissítés elérhető ({_t} eszköz vizsgálva)"))
+                    installed_count = len(self._hw_installed_devs)
+                    if found > 0:
+                        self.after(0, lambda _tf=_time_final, _f=found, _ic=installed_count:
+                            self.hw_status_lbl.config(text=f"✅ Kész! {_f} letölthető + {_ic} telepített driver, idő: {_tf}"))
+                        self.after(0, lambda _txt=sys_info_text, _f=found, _t=total_devs, _m=mode_txt:
+                            self.sys_info_lbl.config(text=f"{_txt} | ✅ Kész ({_m})! {_f} frissítés elérhető ({_t} eszköz vizsgálva)"))
+                        self.after(0, self._populate_hw_results)
+                    else:
+                        self.after(0, lambda _tf=_time_final, _ic=installed_count:
+                            self.hw_status_lbl.config(text=f"✅ Minden driver naprakész! ({_ic} eszköz, idő: {_tf})"))
+                        self.after(0, lambda _txt=sys_info_text, _t=total_devs, _m=mode_txt:
+                            self.sys_info_lbl.config(text=f"{_txt} | ✅ Kész ({_m})! Minden driver naprakész ({_t} eszköz vizsgálva)"))
+                        self.after(0, self._populate_hw_results)  # Telepített eszközök mutatása is
+                    
+                    self.after(0, lambda: setattr(self, '_hw_scanning', False))
                 
                 threading.Thread(target=wu_search_thread, daemon=True).start()
             
-            # Switch back to main thread to populate the treeview and then spawn threads
-            self.after(0, start_wu_checks)
+            # Háttérszálon indítjuk a WU keresést
+            self.after(0, start_wu_search)
 
-        threading.Thread(target=worker, daemon=True).start()
+        def safe_worker():
+            try:
+                worker()
+            except Exception as exc:
+                logging.error(f"load_hardware_info worker crashed: {exc}")
+                import traceback
+                logging.error(traceback.format_exc())
+                self.after(0, lambda: self.hw_progress.stop())
+                self.after(0, lambda: self.hw_progress.config(mode='determinate', maximum=100, value=0))
+                self.after(0, lambda: self.hw_status_lbl.config(text="❌ Hiba történt!"))
+                self.after(0, lambda: self.sys_info_lbl.config(text="❌ Hardver scan hiba! Próbáld újra."))
+                self.after(0, lambda: setattr(self, '_hw_scanning', False))
+                self._wu_search_cancelled = True
+
+        threading.Thread(target=safe_worker, daemon=True).start()
+
+    def _populate_hw_results(self):
+        """Kategorizált treeview feltöltése: felül letölthető, alul telepített driverek."""
+        # Treeview kiürítése
+        for item in self.hw_tree.get_children():
+            self.hw_tree.delete(item)
+        self._hw_selected = {}
+        
+        # Kategória sorrend
+        cat_order = [
+            "🎮 Videókártya (VGA)", "🎵 Hangkártya (Audio)", "🌐 Hálózat (LAN/Wi-Fi)",
+            "🔵 Bluetooth", "📷 Webkamera", "🖱️ Periféria", "🔒 Ujjlenyomat / Biometria",
+            "🔌 USB Vezérlő", "⚙️ Rendszereszköz", "🔄 WU Driver"
+        ]
+        
+        def sort_cats(cat_dict):
+            sorted_list = []
+            for c in cat_order:
+                if c in cat_dict:
+                    sorted_list.append(c)
+            for c in cat_dict:
+                if c not in sorted_list:
+                    sorted_list.append(c)
+            return sorted_list
+        
+        # === FELSŐ RÉSZ: Letölthető driverek ===
+        if self.hw_updates_pool:
+            cats = {}
+            for idx, drv in enumerate(self.hw_updates_pool):
+                cat = drv.get('cat', '🔧 Egyéb')
+                if cat not in cats:
+                    cats[cat] = []
+                cats[cat].append((idx, drv))
+            
+            for cat_name in sort_cats(cats):
+                items = cats[cat_name]
+                cat_iid = self.hw_tree.insert("", tk.END, text=f"⬇️ {cat_name}  ({len(items)} db)", 
+                                              values=("", "", ""), tags=("category",), open=True)
+                
+                for pool_idx, drv in items:
+                    wu_title = drv.get('wu_title', '')
+                    title_short = wu_title[:55] + '...' if len(wu_title) > 55 else wu_title
+                    hwid = drv.get('hwid', '')
+                    name = drv.get('name', 'Ismeretlen')
+                    
+                    iid = self.hw_tree.insert(cat_iid, tk.END, text=f"  {name}",
+                                              values=("☑", title_short, hwid), tags=("checked",))
+                    self._hw_selected[iid] = pool_idx
+            
+            # Gombok engedélyezése
+            self.install_hw_btn.config(state=tk.NORMAL)
+            self.select_all_hw_btn.config(state=tk.NORMAL)
+            self.deselect_all_hw_btn.config(state=tk.NORMAL)
+        
+        # === ALSÓ RÉSZ: Már telepített (naprakész) driverek ===
+        installed_devs = getattr(self, '_hw_installed_devs', [])
+        if installed_devs:
+            inst_cats = {}
+            for dev in installed_devs:
+                cat = dev.get('cat', '🔧 Egyéb')
+                if cat not in inst_cats:
+                    inst_cats[cat] = []
+                inst_cats[cat].append(dev)
+            
+            # Elválasztó sor
+            sep_iid = self.hw_tree.insert("", tk.END, text="━━━━━━━━━━━━ ✅ Telepített / Naprakész driverek ━━━━━━━━━━━━",
+                                          values=("", "", ""), tags=("separator",), open=False)
+            
+            for cat_name in sort_cats(inst_cats):
+                items = inst_cats[cat_name]
+                cat_iid = self.hw_tree.insert("", tk.END, text=f"✅ {cat_name}  ({len(items)} db)",
+                                              values=("", "", ""), tags=("installed_cat",), open=False)
+                
+                for dev in items:
+                    self.hw_tree.insert(cat_iid, tk.END, text=f"  {dev['name']}",
+                                        values=("✅", "Naprakész", dev.get('id', '')), tags=("installed",))
+
+    def _on_hw_tree_click(self, event):
+        """Kattintásra checkbox toggle a treeview-ban."""
+        region = self.hw_tree.identify_region(event.x, event.y)
+        col = self.hw_tree.identify_column(event.x)
+        iid = self.hw_tree.identify_row(event.y)
+        
+        if not iid:
+            return
+        
+        tags = self.hw_tree.item(iid, 'tags')
+        
+        # Separator, telepített sorok: nem kattinthatóak
+        if 'separator' in tags or 'installed_cat' in tags or 'installed' in tags:
+            return
+        
+        # Kategória sorokra kattintás: összesét toggle alatta
+        if 'category' in tags:
+            children = self.hw_tree.get_children(iid)
+            if not children:
+                return
+            # Ha bármelyik checked, mindet uncheckre; különben mindet checkre
+            any_checked = any(self.hw_tree.item(c, 'values')[0] == '☑' for c in children)
+            new_state = '☐' if any_checked else '☑'
+            new_tag = 'unchecked' if any_checked else 'checked'
+            for child in children:
+                vals = list(self.hw_tree.item(child, 'values'))
+                vals[0] = new_state
+                self.hw_tree.item(child, values=vals, tags=(new_tag,))
+            self._recalc_selected()
+            return
+        
+        # Driver sorokra: toggle
+        if iid not in self._hw_selected:
+            return
+        
+        vals = list(self.hw_tree.item(iid, 'values'))
+        if vals[0] == '☑':
+            vals[0] = '☐'
+            self.hw_tree.item(iid, values=vals, tags=('unchecked',))
+        else:
+            vals[0] = '☑'
+            self.hw_tree.item(iid, values=vals, tags=('checked',))
+        self._recalc_selected()
+
+    def _recalc_selected(self):
+        """Számoljuk újra a kijelölt driverek számát és frissítjük a gombot."""
+        count = 0
+        for iid in self._hw_selected:
+            try:
+                vals = self.hw_tree.item(iid, 'values')
+                if vals and vals[0] == '☑':
+                    count += 1
+            except Exception:
+                pass
+        if count > 0:
+            self.install_hw_btn.config(text=f"🚀 Kijelöltek Telepítése ({count} db)", state=tk.NORMAL)
+        else:
+            self.install_hw_btn.config(text="🚀 Kijelöltek Telepítése", state=tk.DISABLED)
+
+    def _select_all_hw(self):
+        """Összes driver kiválasztása."""
+        for iid in self._hw_selected:
+            try:
+                vals = list(self.hw_tree.item(iid, 'values'))
+                vals[0] = '☑'
+                self.hw_tree.item(iid, values=vals, tags=('checked',))
+            except Exception:
+                pass
+        self._recalc_selected()
+
+    def _deselect_all_hw(self):
+        """Összes kijelölés törlése."""
+        for iid in self._hw_selected:
+            try:
+                vals = list(self.hw_tree.item(iid, 'values'))
+                vals[0] = '☐'
+                self.hw_tree.item(iid, values=vals, tags=('unchecked',))
+            except Exception:
+                pass
+        self._recalc_selected()
 
     def install_wu_drivers(self):
         if not hasattr(self, 'hw_updates_pool') or not self.hw_updates_pool:
@@ -822,6 +1117,23 @@ try {
                 "• A Windows Update szerver nem érhető el\n"
                 "• Próbáld meg újra a 'Hardverek Scannelése' gombbal")
             return
+        
+        # Kijelölt driverek szűrése
+        selected_pool = []
+        for iid, pool_idx in self._hw_selected.items():
+            try:
+                vals = self.hw_tree.item(iid, 'values')
+                if vals and vals[0] == '☑' and 0 <= pool_idx < len(self.hw_updates_pool):
+                    selected_pool.append(self.hw_updates_pool[pool_idx])
+            except Exception:
+                pass
+        
+        if not selected_pool:
+            messagebox.showinfo("Nincs kijelölve", "Nincs kijelölt driver a telepítéshez.\nJelöld ki a kívánt drivereket a listában!")
+            return
+        
+        # Kijelölt driverek mentése telepítéshez (nem írjuk felül a teljes pool-t)
+        self._install_pool = selected_pool
         
         # WU API mód: a Windows Update COM API-n keresztül telepítünk (megbízhatóbb)
         if hasattr(self, 'wu_api_mode') and self.wu_api_mode:
@@ -837,7 +1149,7 @@ try {
         prog_win.transient(self)
         prog_win.grab_set()
 
-        lbl = ttk.Label(prog_win, text=f"{len(self.hw_updates_pool)} db driver frissítés letöltése és telepítése\nWindows Update COM API-n keresztül...", justify=tk.CENTER)
+        lbl = ttk.Label(prog_win, text=f"{len(self._install_pool)} db driver frissítés letöltése és telepítése\nWindows Update COM API-n keresztül...", justify=tk.CENTER)
         lbl.pack(pady=5)
 
         progress = ttk.Progressbar(prog_win, orient=tk.HORIZONTAL, length=550, mode='indeterminate')
@@ -866,7 +1178,11 @@ try {
             startupinfo = subprocess.STARTUPINFO()
             startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
 
-            ps_script = r"""
+            # HWID-ok átadása a PS scriptnek, hogy csak a releváns drivereket telepítse
+            pool_hwids = [drv.get('hwid', '').upper() for drv in self._install_pool if drv.get('hwid')]
+            hwid_list_ps = ','.join(f'"{h}"' for h in pool_hwids)
+
+            ps_script = '$TargetHWIDs = @(' + hwid_list_ps + ')\n' + r"""
 [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
 try {
     Write-Output "INIT: Windows Update Session létrehozása..."
@@ -890,6 +1206,26 @@ try {
     
     $ToInstall = New-Object -ComObject Microsoft.Update.UpdateColl
     foreach ($U in $Result.Updates) {
+        # Csak a kiválasztott HWID-okhoz tartozó drivereket telepítsük
+        $matchFound = $false
+        if ($TargetHWIDs.Count -eq 0) {
+            $matchFound = $true
+        } else {
+            foreach ($hwid in $U.DriverHardwareID) {
+                $hUpper = $hwid.ToUpper()
+                foreach ($target in $TargetHWIDs) {
+                    if ($hUpper.Contains($target) -or $target.Contains($hUpper)) {
+                        $matchFound = $true
+                        break
+                    }
+                }
+                if ($matchFound) { break }
+            }
+        }
+        if (-not $matchFound) {
+            Write-Output "SKIP: $($U.Title) - nem egyezik a kiválasztott eszközökkel"
+            continue
+        }
         if (-not $U.EulaAccepted) { $U.AcceptEula() }
         $ToInstall.Add($U) | Out-Null
         Write-Output "FOUND: $($U.Title) [$($U.DriverModel)]"
@@ -989,28 +1325,50 @@ try {
                 self.after(0, lambda: append_log("✅ Eszközök frissítve!"))
 
             def finish():
-                progress.stop()
+                try:
+                    progress.stop()
+                except Exception:
+                    pass
                 if success_count > 0:
-                    progress.config(mode='determinate', maximum=success_count + fail_count, value=success_count)
-                    status_lbl.config(text=f"Kész! {success_count} sikeres, {fail_count} sikertelen")
+                    try:
+                        progress.config(mode='determinate', maximum=success_count + fail_count, value=success_count)
+                        status_lbl.config(text=f"Kész! {success_count} sikeres, {fail_count} sikertelen")
+                    except Exception:
+                        pass
                     messagebox.showinfo("Befejezve",
                         f"Driver frissítések telepítve!\n\n"
                         f"✅ Sikeres: {success_count}\n"
                         f"❌ Sikertelen: {fail_count}\n\n"
                         f"Ajánlott a gép újraindítása a változások érvényesítéséhez.")
                 else:
-                    status_lbl.config(text="Nem sikerült drivereket telepíteni")
+                    try:
+                        status_lbl.config(text="Nem sikerült drivereket telepíteni")
+                    except Exception:
+                        pass
                     if fail_count > 0:
                         messagebox.showwarning("Telepítés sikertelen",
                             f"Egy driver sem települt sikeresen.\nSikertelen: {fail_count}\n\n"
                             f"Próbáld újraindítani a gépet és futtasd újra!")
                     else:
                         messagebox.showinfo("Nincs frissítés", "Nem található telepíthető driver frissítés.")
-                prog_win.destroy()
+                if prog_win.winfo_exists():
+                    prog_win.destroy()
 
             self.after(0, finish)
 
-        threading.Thread(target=worker, daemon=True).start()
+        def safe_worker():
+            try:
+                worker()
+            except Exception as e:
+                logging.error(f"WU API install worker hiba: {e}")
+                def on_error(err=e):
+                    try: progress.stop()
+                    except Exception: pass
+                    if prog_win.winfo_exists(): prog_win.destroy()
+                    messagebox.showerror("Hiba", f"Váratlan hiba a WU telepítés közben:\n{str(err)}")
+                self.after(0, on_error)
+
+        threading.Thread(target=safe_worker, daemon=True).start()
 
     def _install_via_catalog(self):
         """MS Update Catalog-ból letöltött CAB fájlok telepítése pnputil-lal (fallback mód)."""
@@ -1020,12 +1378,12 @@ try {
         prog_win.transient(self)
         prog_win.grab_set()
 
-        lbl = ttk.Label(prog_win, text=f"{len(self.hw_updates_pool)} db Windows Update driver letöltése és telepítése...", justify=tk.CENTER)
+        lbl = ttk.Label(prog_win, text=f"{len(self._install_pool)} db Windows Update driver letöltése és telepítése...", justify=tk.CENTER)
         lbl.pack(pady=5)
 
         progress = ttk.Progressbar(prog_win, orient=tk.HORIZONTAL, length=500, mode='determinate')
         progress.pack(pady=5)
-        progress.config(maximum=len(self.hw_updates_pool))
+        progress.config(maximum=len(self._install_pool))
         
         status_lbl = ttk.Label(prog_win, text="Inicializálás...", font=("Arial", 8))
         status_lbl.pack(pady=5)
@@ -1048,7 +1406,7 @@ try {
         def worker():
             import os, urllib.request, ssl, shutil
             import subprocess
-            ssl_ctx = ssl._create_unverified_context()
+            ssl_ctx = ssl.create_default_context()
             
             temp_dir = os.path.join(os.environ.get('TEMP', 'C:\\Temp'), 'driver_tool_wu')
             os.makedirs(temp_dir, exist_ok=True)
@@ -1057,20 +1415,23 @@ try {
             startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
 
             success_count = 0
+            skipped_count = 0
+            pool_snapshot = list(self._install_pool)
             
-            for i, drv in enumerate(self.hw_updates_pool):
+            for i, drv in enumerate(pool_snapshot):
                 name = drv['name']
                 url = drv.get('url', '')
                 hwid = drv['hwid']
                 
                 if not url:
+                    skipped_count += 1
                     self.after(0, lambda m=f"   [KIHAGYÁS] {name} - nincs letöltési link": append_log(m))
                     continue
                 
                 cab_path = os.path.join(temp_dir, f"drv_{i}.cab")
                 ext_path = os.path.join(temp_dir, f"drv_ext_{i}")
                 
-                self.after(0, lambda val=i, txt=f"[{i+1}/{len(self.hw_updates_pool)}] Letöltés: {name}...": (progress.configure(value=val), status_lbl.config(text=txt)))
+                self.after(0, lambda val=i, txt=f"[{i+1}/{len(pool_snapshot)}] Letöltés: {name}...": (progress.configure(value=val), status_lbl.config(text=txt)))
                 self.after(0, lambda m=f"-> {name} letöltése a Microsoft szerveréről...": append_log(m))
                 
                 try:
@@ -1087,7 +1448,15 @@ try {
                 if expand_res.returncode != 0:
                     self.after(0, lambda m=f"   [ÉRTESÍTÉS] expand.exe figyelmeztetéssel tért vissza: kód={expand_res.returncode}. Log: {expand_res.stdout[:100]}": append_log(m))
 
-                self.after(0, lambda txt=f"[{i+1}/{len(self.hw_updates_pool)}] Telepítés: {name}...": status_lbl.config(text=txt))
+                # Nested CAB-ok kicsomagolása (CAB-in-CAB struktúra kezelése)
+                import glob
+                for inner_cab in glob.glob(os.path.join(ext_path, '*.cab')):
+                    inner_ext = inner_cab + '_ext'
+                    os.makedirs(inner_ext, exist_ok=True)
+                    subprocess.run(['expand', inner_cab, '-F:*', inner_ext], capture_output=True, text=True, startupinfo=startupinfo, creationflags=subprocess.CREATE_NO_WINDOW)
+                    self.after(0, lambda m=f"   Belső CAB kicsomagolva: {os.path.basename(inner_cab)}": append_log(m))
+
+                self.after(0, lambda txt=f"[{i+1}/{len(pool_snapshot)}] Telepítés: {name}...": status_lbl.config(text=txt))
                 self.after(0, lambda m=f"   Telepítés pnp/dism futtatása...": append_log(m))
                 
                 is_offline = hasattr(self, 'target_os_path') and self.target_os_path
@@ -1107,14 +1476,20 @@ try {
                 else:
                     self.after(0, lambda m=f"   [HIBA] PnP telepítési hiba. Kód: {res.returncode}. LOG:\n{res.stdout.strip()[:150]}": append_log(m))
 
-            self.after(0, lambda: progress.configure(value=len(self.hw_updates_pool)))
-            self.after(0, lambda: append_log(f"--- FOLYAMAT VÉGE. SIKERES: {success_count}/{len(self.hw_updates_pool)} ---"))
+            self.after(0, lambda: progress.configure(value=len(pool_snapshot)))
+            attempted = len(pool_snapshot) - skipped_count
+            self.after(0, lambda: append_log(f"--- FOLYAMAT VÉGE. SIKERES: {success_count}/{attempted} (kihagyva: {skipped_count}) ---"))
             
             is_offline = hasattr(self, 'target_os_path') and self.target_os_path
             is_pe = os.environ.get('SystemDrive', 'C:') == 'X:' or getattr(self, 'sys_drive', '').upper() == 'X:\\'
             
             if success_count > 0 and (not is_offline or is_pe):
+                scan_win_ready = threading.Event()
+
                 def show_scan_win():
+                    if not prog_win.winfo_exists():
+                        scan_win_ready.set()
+                        return
                     w = tk.Toplevel(prog_win)
                     w.title("Aktiválás folyamatban")
                     w.geometry("450x150")
@@ -1129,60 +1504,88 @@ try {
                     lbl.pack(expand=True, fill=tk.BOTH, padx=10, pady=20)
                     self.__scan_win = w
                     w.update()
+                    scan_win_ready.set()
                 
                 self.after(0, show_scan_win)
-                time.sleep(1.0)
+                scan_win_ready.wait(timeout=5.0)
                 
                 self.after(0, lambda m=f"-> Telepített eszközök újraindítása (Azonnali érvényesítés)...": append_log(m))
-                for drv in self.hw_updates_pool:
+                for drv in pool_snapshot:
                     pnp_id = drv.get('pnp_id')
                     if pnp_id:
                         subprocess.run(['pnputil', '/restart-device', pnp_id], startupinfo=startupinfo, capture_output=True, creationflags=subprocess.CREATE_NO_WINDOW)
                 self.after(0, lambda m=f"-> Hardverváltozások (eszközkezelő) újraszkennelése (pnputil /scan-devices)...": append_log(m))
                 self.after(0, lambda txt=f"Sikeres telepítések aktiválása...": status_lbl.config(text=txt))
-                subprocess.run(['pnputil', '/scan-devices'], startupinfo=startupinfo, creationflags=subprocess.CREATE_NO_WINDOW)
+                subprocess.run(['pnputil', '/scan-devices'], startupinfo=startupinfo, capture_output=True, creationflags=subprocess.CREATE_NO_WINDOW)
                 self.after(0, lambda m=f"   [KÉSZ] Hardverek frissítése megtörtént a Windowsban!": append_log(m))
                 
                 def close_scan_win():
-                    if hasattr(self, '__scan_win') and self.__scan_win:
+                    if hasattr(self, '_DriverCleanerApp__scan_win') and self.__scan_win and self.__scan_win.winfo_exists():
                         self.__scan_win.destroy()
                 self.after(0, close_scan_win)
 
-            try:
-                shutil.rmtree(temp_dir, ignore_errors=True)
-            except: pass
-
             def finish():
-                prog_win.destroy()
-                messagebox.showinfo("Befejezve", f"Minden letöltött driver ({success_count} db) sikeresen feltelepítve a rendszerre.")
+                if prog_win.winfo_exists():
+                    prog_win.destroy()
+                attempted = len(pool_snapshot) - skipped_count
+                if attempted <= 0:
+                    messagebox.showinfo("Nincs telepíthető", "Egyetlen driverhez sem volt letöltési link.")
+                elif success_count == attempted:
+                    messagebox.showinfo("Befejezve", f"Minden letöltött driver ({success_count} db) sikeresen feltelepítve a rendszerre.")
+                elif success_count > 0:
+                    messagebox.showwarning("Részben sikeres", f"Telepítve: {success_count} / {attempted}\nSikertelen: {attempted - success_count}")
+                else:
+                    messagebox.showerror("Sikertelen", f"Egy driver sem települt sikeresen ({attempted} db kísérletből).")
                 
             self.after(0, finish)
 
-        threading.Thread(target=worker, daemon=True).start()
+        def safe_worker():
+            try:
+                worker()
+            except Exception as e:
+                logging.error(f"Katalógus install worker hiba: {e}")
+                def on_error(err=e):
+                    if prog_win.winfo_exists(): prog_win.destroy()
+                    messagebox.showerror("Hiba", f"Váratlan hiba a telepítés közben:\n{str(err)}")
+                self.after(0, on_error)
+            finally:
+                temp_dir = os.path.join(os.environ.get('TEMP', 'C:\\Temp'), 'driver_tool_wu')
+                try:
+                    import shutil as _shutil
+                    _shutil.rmtree(temp_dir, ignore_errors=True)
+                except Exception:
+                    pass
+
+        threading.Thread(target=safe_worker, daemon=True).start()
 
     def refresh_drivers(self):
         for item in self.tree.get_children():
             self.tree.delete(item)
-            
+
         is_all = hasattr(self, 'list_all_var') and self.list_all_var.get()
-        
-        if hasattr(self, 'target_os_path') and self.target_os_path:
-            drivers = self.get_offline_drivers(all_drivers=is_all)
-        else:
-            if is_all:
-                drivers = self.get_all_drivers()
+
+        def _refresh_worker():
+            if hasattr(self, 'target_os_path') and self.target_os_path:
+                drivers = self.get_offline_drivers(all_drivers=is_all)
             else:
-                drivers = self.get_third_party_drivers()
-            
-        for d in drivers:
-            if "published" in d:
-                self.tree.insert("", tk.END, values=(
-                    d.get("published", ""),
-                    d.get("original", ""),
-                    d.get("provider", ""),
-                    d.get("class", ""),
-                    d.get("version", "")
-                ))
+                if is_all:
+                    drivers = self.get_all_drivers()
+                else:
+                    drivers = self.get_third_party_drivers()
+
+            def populate(d_list=drivers):
+                for d in d_list:
+                    if "published" in d:
+                        self.tree.insert("", tk.END, values=(
+                            d.get("published", ""),
+                            d.get("original", ""),
+                            d.get("provider", ""),
+                            d.get("class", ""),
+                            d.get("version", "")
+                        ))
+            self.after(0, populate)
+
+        threading.Thread(target=_refresh_worker, daemon=True).start()
 
     def select_all_drivers(self):
         for item in self.tree.get_children():
@@ -1319,7 +1722,17 @@ try {
 
             self.after(0, finish_delete)
 
-        threading.Thread(target=worker, daemon=True).start()
+        def safe_worker():
+            try:
+                worker()
+            except Exception as e:
+                logging.error(f"Driver törlés worker hiba: {e}")
+                def on_error(err=e):
+                    if prog_win.winfo_exists(): prog_win.destroy()
+                    messagebox.showerror("Hiba", f"Váratlan hiba a törlés közben:\n{str(err)}")
+                self.after(0, on_error)
+
+        threading.Thread(target=safe_worker, daemon=True).start()
 
     def _run_hardware_scan_window(self):
         scan_win = tk.Toplevel(self)
@@ -1344,7 +1757,7 @@ try {
                 startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
                 
                 time.sleep(1) # Pici pihenő
-                subprocess.run(['pnputil', '/scan-devices'], startupinfo=startupinfo, creationflags=subprocess.CREATE_NO_WINDOW)
+                subprocess.run(['pnputil', '/scan-devices'], startupinfo=startupinfo, capture_output=True, creationflags=subprocess.CREATE_NO_WINDOW)
                 time.sleep(3) # Várjunk, amíg a Windows a háttérben telepíti az eszközöket
             except Exception as ex:
                 print(f"Hiba a PnP hardver scan során: {ex}")
@@ -1403,396 +1816,472 @@ try {
 
     def restart_wu_services(self):
         """Gyors javítás: WU szolgáltatások force-stop + restart, cache nélkül"""
-        log_lines = []
-        def L(msg):
-            logging.info(f"[WU_RESTART] {msg}")
-            log_lines.append(msg)
-        
-        try:
-            startupinfo = subprocess.STARTUPINFO()
-            startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+        # Progress ablak megjelenítése, hogy a felhasználó lássa, történik valami
+        prog_win = tk.Toplevel(self)
+        prog_win.title("WU Szolgáltatások Újraindítása")
+        prog_win.geometry("500x120")
+        prog_win.transient(self)
+        prog_win.grab_set()
+        lbl = ttk.Label(prog_win, text="Windows Update szolgáltatások újraindítása folyamatban...\nKérlek várj!", justify=tk.CENTER)
+        lbl.pack(pady=10)
+        wu_progress = ttk.Progressbar(prog_win, orient=tk.HORIZONTAL, length=400, mode='indeterminate')
+        wu_progress.pack(pady=10)
+        wu_progress.start(15)
+
+        def _wu_restart_worker():
+            log_lines = []
+            def L(msg):
+                logging.info(f"[WU_RESTART] {msg}")
+                log_lines.append(msg)
             
-            def run_cmd(cmd, shell=False):
-                return subprocess.run(cmd, shell=shell, startupinfo=startupinfo, creationflags=subprocess.CREATE_NO_WINDOW, capture_output=True, text=True, errors='replace')
-            
-            L("=== WU SZOLGÁLTATÁSOK GYORS ÚJRAINDÍTÁSA ===")
-            
-            # 1. Leállítás
-            services = ['wuauserv', 'bits', 'cryptsvc', 'msiserver']
-            L("1. Szolgáltatások leállítása...")
-            for svc in services:
-                res = run_cmd(f'net stop {svc} /y', shell=True)
-                L(f"   net stop {svc}: rc={res.returncode}")
-            
-            # 2. Várakozás + force kill ha kell
-            import time as _time
-            _time.sleep(2)
-            for svc in ['wuauserv', 'bits']:
-                chk = run_cmd(['sc', 'queryex', svc])
-                if 'STOP_PENDING' in chk.stdout or 'RUNNING' in chk.stdout:
-                    for line in chk.stdout.splitlines():
-                        if 'PID' in line:
-                            parts = line.split(':')
-                            if len(parts) >= 2:
-                                pid = parts[1].strip()
-                                if pid and pid != '0':
-                                    L(f"   FORCE KILL {svc} (PID {pid})")
-                                    run_cmd(f'taskkill /f /pid {pid}', shell=True)
-                                    _time.sleep(1)
-            
-            # 3. Függőségek biztosítása
-            L("2. Függő szolgáltatások indítása...")
-            for svc in ['rpcss', 'cryptsvc', 'bits', 'msiserver', 'wuauserv']:
-                for attempt in range(3):
-                    res = run_cmd(f'net start {svc}', shell=True)
-                    started = res.returncode == 0
-                    already = 'already' in res.stderr.lower() or 'already' in res.stdout.lower() or 'elindult' in res.stdout.lower() or 'm\xe1r' in res.stdout.lower()
-                    L(f"   net start {svc} ({attempt+1}.): rc={res.returncode} | {res.stdout.strip()[:80]}")
-                    if started or already:
-                        break
-                    _time.sleep(3)
-            
-            # 4. Állapot ellenőrzés
-            L("3. Végső állapot...")
-            for svc in ['wuauserv', 'bits', 'cryptsvc']:
-                chk = run_cmd(['sc', 'query', svc])
-                state = 'RUNNING' if 'RUNNING' in chk.stdout else 'STOPPED' if 'STOPPED' in chk.stdout else 'UNKNOWN'
-                L(f"   {svc}: {state}")
-            
-            # 5. Frissítés-keresés indítása
-            L("4. Frissítés-keresés indítása...")
-            run_cmd('wuauclt.exe /resetauthorization /detectnow', shell=True)
-            run_cmd('UsoClient.exe StartScan', shell=True)
-            
-            L("=== ÚJRAINDÍTÁS KÉSZ ===")
-            
-            # Összesített állapot
-            chk_wu = run_cmd(['sc', 'query', 'wuauserv'])
-            chk_bits = run_cmd(['sc', 'query', 'bits'])
-            wu_ok = 'RUNNING' in chk_wu.stdout
-            bits_ok = 'RUNNING' in chk_bits.stdout
-            
-            if wu_ok and bits_ok:
-                messagebox.showinfo("Siker", "WU szolgáltatások sikeresen újraindítva!\n\n✓ Windows Update (wuauserv): FUT\n✓ BITS: FUT\n\nFrissítés-keresés elindítva.\nMenj a Beállítások > Frissítések oldalra!")
-            else:
-                status_msg = f"Windows Update: {'FUT ✓' if wu_ok else 'NEM FUT ✗'}\nBITS: {'FUT ✓' if bits_ok else 'NEM FUT ✗'}"
-                messagebox.showwarning("Részben sikeres", f"Nem minden szolgáltatás indult el:\n\n{status_msg}\n\nAjánlott: Indítsd ÚJRA a gépet!\n\nLog: driver_tool_debug.log")
-            
-            self.check_wu_status()
-        except Exception as e:
-            L(f"HIBA: {e}")
-            messagebox.showerror("Hiba", f"Hiba történt:\n{str(e)}")
+            try:
+                startupinfo = subprocess.STARTUPINFO()
+                startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+                
+                def run_cmd(cmd, shell=False):
+                    return subprocess.run(cmd, shell=shell, startupinfo=startupinfo, creationflags=subprocess.CREATE_NO_WINDOW, capture_output=True, text=True, errors='replace')
+                
+                L("=== WU SZOLGÁLTATÁSOK GYORS ÚJRAINDÍTÁSA ===")
+                
+                # 1. Leállítás
+                services = ['wuauserv', 'bits', 'cryptsvc', 'msiserver']
+                L("1. Szolgáltatások leállítása...")
+                for svc in services:
+                    res = run_cmd(f'net stop {svc} /y', shell=True)
+                    L(f"   net stop {svc}: rc={res.returncode}")
+                
+                # 2. Várakozás + force kill ha kell
+                import time as _time
+                _time.sleep(2)
+                for svc in ['wuauserv', 'bits']:
+                    chk = run_cmd(['sc', 'queryex', svc])
+                    if 'STOP_PENDING' in chk.stdout or 'RUNNING' in chk.stdout:
+                        for line in chk.stdout.splitlines():
+                            if 'PID' in line:
+                                parts = line.split(':')
+                                if len(parts) >= 2:
+                                    pid = parts[1].strip()
+                                    if pid and pid != '0':
+                                        L(f"   FORCE KILL {svc} (PID {pid})")
+                                        run_cmd(f'taskkill /f /pid {pid}', shell=True)
+                                        _time.sleep(1)
+                
+                # 3. Függőségek biztosítása
+                L("2. Függő szolgáltatások indítása...")
+                for svc in ['rpcss', 'cryptsvc', 'bits', 'msiserver', 'wuauserv']:
+                    for attempt in range(3):
+                        res = run_cmd(f'net start {svc}', shell=True)
+                        started = res.returncode == 0
+                        already = 'already' in res.stderr.lower() or 'already' in res.stdout.lower() or 'elindult' in res.stdout.lower() or 'm\xe1r' in res.stdout.lower()
+                        L(f"   net start {svc} ({attempt+1}.): rc={res.returncode} | {res.stdout.strip()[:80]}")
+                        if started or already:
+                            break
+                        _time.sleep(3)
+                
+                # 4. Állapot ellenőrzés
+                L("3. Végső állapot...")
+                for svc in ['wuauserv', 'bits', 'cryptsvc']:
+                    chk = run_cmd(['sc', 'query', svc])
+                    state = 'RUNNING' if 'RUNNING' in chk.stdout else 'STOPPED' if 'STOPPED' in chk.stdout else 'UNKNOWN'
+                    L(f"   {svc}: {state}")
+                
+                # 5. Frissítés-keresés indítása
+                L("4. Frissítés-keresés indítása...")
+                run_cmd('wuauclt.exe /resetauthorization /detectnow', shell=True)
+                run_cmd('UsoClient.exe StartScan', shell=True)
+                
+                L("=== ÚJRAINDÍTÁS KÉSZ ===")
+                
+                # Összesített állapot
+                chk_wu = run_cmd(['sc', 'query', 'wuauserv'])
+                chk_bits = run_cmd(['sc', 'query', 'bits'])
+                wu_ok = 'RUNNING' in chk_wu.stdout
+                bits_ok = 'RUNNING' in chk_bits.stdout
+                
+                def show_result():
+                    if prog_win.winfo_exists(): prog_win.destroy()
+                    if wu_ok and bits_ok:
+                        messagebox.showinfo("Siker", "WU szolgáltatások sikeresen újraindítva!\n\n✓ Windows Update (wuauserv): FUT\n✓ BITS: FUT\n\nFrissítés-keresés elindítva.\nMenj a Beállítások > Frissítések oldalra!")
+                    else:
+                        status_msg = f"Windows Update: {'FUT ✓' if wu_ok else 'NEM FUT ✗'}\nBITS: {'FUT ✓' if bits_ok else 'NEM FUT ✗'}"
+                        messagebox.showwarning("Részben sikeres", f"Nem minden szolgáltatás indult el:\n\n{status_msg}\n\nAjánlott: Indítsd ÚJRA a gépet!\n\nLog: driver_tool_debug.log")
+                    self.check_wu_status()
+                self.after(0, show_result)
+            except Exception as e:
+                L(f"HIBA: {e}")
+                def show_err(err=e):
+                    if prog_win.winfo_exists(): prog_win.destroy()
+                    messagebox.showerror("Hiba", f"Hiba történt:\n{str(err)}")
+                self.after(0, show_err)
+
+        threading.Thread(target=_wu_restart_worker, daemon=True).start()
 
     def disable_wu_drivers(self):
-        log_lines = []
-        def L(msg):
-            logging.info(f"[WU_DISABLE] {msg}")
-            log_lines.append(msg)
-        
-        try:
-            startupinfo = subprocess.STARTUPINFO()
-            startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
-            
-            L("=== WU DRIVER LETILTÁS INDÍTÁSA ===")
-            
-            # Policy - ExcludeWUDriversInQualityUpdate
-            L("1. ExcludeWUDriversInQualityUpdate = 1 beállítása...")
+        prog_win = tk.Toplevel(self)
+        prog_win.title("WU Driver Letiltás")
+        prog_win.geometry("500x120")
+        prog_win.transient(self)
+        prog_win.grab_set()
+        lbl = ttk.Label(prog_win, text="Windows Update driver letiltás folyamatban...\nKérlek várj!", justify=tk.CENTER)
+        lbl.pack(pady=10)
+        wu_progress = ttk.Progressbar(prog_win, orient=tk.HORIZONTAL, length=400, mode='indeterminate')
+        wu_progress.pack(pady=10)
+        wu_progress.start(15)
+
+        def _wu_disable_worker():
+            log_lines = []
+            def L(msg):
+                logging.info(f"[WU_DISABLE] {msg}")
+                log_lines.append(msg)
+
             try:
-                key_path = r"SOFTWARE\Policies\Microsoft\Windows\WindowsUpdate"
-                with winreg.CreateKeyEx(winreg.HKEY_LOCAL_MACHINE, key_path, 0, winreg.KEY_WRITE) as key:
-                    winreg.SetValueEx(key, "ExcludeWUDriversInQualityUpdate", 0, winreg.REG_DWORD, 1)
-                L("   OK: winreg beállítva")
+                startupinfo = subprocess.STARTUPINFO()
+                startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+
+                L("=== WU DRIVER LETILTÁS INDÍTÁSA ===")
+
+                # Policy - ExcludeWUDriversInQualityUpdate
+                L("1. ExcludeWUDriversInQualityUpdate = 1 beállítása...")
+                try:
+                    key_path = r"SOFTWARE\Policies\Microsoft\Windows\WindowsUpdate"
+                    with winreg.CreateKeyEx(winreg.HKEY_LOCAL_MACHINE, key_path, 0, winreg.KEY_WRITE) as key:
+                        winreg.SetValueEx(key, "ExcludeWUDriversInQualityUpdate", 0, winreg.REG_DWORD, 1)
+                    L("   OK: winreg beállítva")
+                except Exception as e:
+                    L(f"   HIBA winreg: {e}")
+
+                res = subprocess.run(['reg', 'add', r'HKLM\SOFTWARE\Policies\Microsoft\Windows\WindowsUpdate', '/v', 'ExcludeWUDriversInQualityUpdate', '/t', 'REG_DWORD', '/d', '1', '/f'],
+                                     startupinfo=startupinfo, creationflags=subprocess.CREATE_NO_WINDOW, capture_output=True, text=True, errors='replace')
+                L(f"   reg.exe eredmény: rc={res.returncode} | {res.stdout.strip()} {res.stderr.strip()}")
+
+                # SearchOrderConfig = 0
+                L("2. SearchOrderConfig = 0 beállítása...")
+                try:
+                    key_path2 = r"SOFTWARE\Microsoft\Windows\CurrentVersion\DriverSearching"
+                    with winreg.CreateKeyEx(winreg.HKEY_LOCAL_MACHINE, key_path2, 0, winreg.KEY_WRITE) as key:
+                        winreg.SetValueEx(key, "SearchOrderConfig", 0, winreg.REG_DWORD, 0)
+                    L("   OK: winreg beállítva")
+                except Exception as e:
+                    L(f"   HIBA winreg: {e}")
+
+                res = subprocess.run(['reg', 'add', r'HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\DriverSearching', '/v', 'SearchOrderConfig', '/t', 'REG_DWORD', '/d', '0', '/f'],
+                                     startupinfo=startupinfo, creationflags=subprocess.CREATE_NO_WINDOW, capture_output=True, text=True, errors='replace')
+                L(f"   reg.exe eredmény: rc={res.returncode} | {res.stdout.strip()} {res.stderr.strip()}")
+
+                # WU újraindítás
+                L("3. WU szolgáltatás újraindítása...")
+                res = subprocess.run("net stop wuauserv & net start wuauserv", shell=True, startupinfo=startupinfo, creationflags=subprocess.CREATE_NO_WINDOW, capture_output=True, text=True, errors='replace')
+                L(f"   net stop/start: rc={res.returncode} | {res.stdout.strip()}")
+
+                # Ellenőrzés
+                L("4. Ellenőrzés (visszaolvasás)...")
+                try:
+                    res_chk = subprocess.run(['reg', 'query', r'HKLM\SOFTWARE\Policies\Microsoft\Windows\WindowsUpdate', '/v', 'ExcludeWUDriversInQualityUpdate'],
+                                             startupinfo=startupinfo, creationflags=subprocess.CREATE_NO_WINDOW, capture_output=True, text=True, errors='replace')
+                    L(f"   ExcludeWUDrivers: {res_chk.stdout.strip()}")
+                except Exception: pass
+                try:
+                    res_chk2 = subprocess.run(['reg', 'query', r'HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\DriverSearching', '/v', 'SearchOrderConfig'],
+                                              startupinfo=startupinfo, creationflags=subprocess.CREATE_NO_WINDOW, capture_output=True, text=True, errors='replace')
+                    L(f"   SearchOrderConfig: {res_chk2.stdout.strip()}")
+                except Exception: pass
+
+                L("=== LETILTÁS BEFEJEZVE ===")
+
+                def show_result():
+                    if prog_win.winfo_exists(): prog_win.destroy()
+                    messagebox.showinfo("Siker", "Windows Update driver telepítés sikeresen LETILTVA.\n\n(A Windows Update szolgáltatás újraindult a háttérben.)\n\nRészletes log: driver_tool_debug.log")
+                    self.check_wu_status()
+                self.after(0, show_result)
+            except PermissionError:
+                L("PERMISSION ERROR - Nincs admin jog!")
+                def show_perm_err():
+                    if prog_win.winfo_exists(): prog_win.destroy()
+                    messagebox.showerror("Hiba", "Nincs jogosultság a Registry írásához. Futtasd Rendszergazdaként!")
+                self.after(0, show_perm_err)
             except Exception as e:
-                L(f"   HIBA winreg: {e}")
-            
-            res = subprocess.run(['reg', 'add', r'HKLM\SOFTWARE\Policies\Microsoft\Windows\WindowsUpdate', '/v', 'ExcludeWUDriversInQualityUpdate', '/t', 'REG_DWORD', '/d', '1', '/f'],
-                                 startupinfo=startupinfo, creationflags=subprocess.CREATE_NO_WINDOW, capture_output=True, text=True, errors='replace')
-            L(f"   reg.exe eredmény: rc={res.returncode} | {res.stdout.strip()} {res.stderr.strip()}")
-            
-            # SearchOrderConfig = 0
-            L("2. SearchOrderConfig = 0 beállítása...")
-            try:
-                key_path2 = r"SOFTWARE\Microsoft\Windows\CurrentVersion\DriverSearching"
-                with winreg.CreateKeyEx(winreg.HKEY_LOCAL_MACHINE, key_path2, 0, winreg.KEY_WRITE) as key:
-                    winreg.SetValueEx(key, "SearchOrderConfig", 0, winreg.REG_DWORD, 0)
-                L("   OK: winreg beállítva")
-            except Exception as e:
-                L(f"   HIBA winreg: {e}")
-            
-            res = subprocess.run(['reg', 'add', r'HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\DriverSearching', '/v', 'SearchOrderConfig', '/t', 'REG_DWORD', '/d', '0', '/f'],
-                                 startupinfo=startupinfo, creationflags=subprocess.CREATE_NO_WINDOW, capture_output=True, text=True, errors='replace')
-            L(f"   reg.exe eredmény: rc={res.returncode} | {res.stdout.strip()} {res.stderr.strip()}")
-            
-            # WU újraindítás
-            L("3. WU szolgáltatás újraindítása...")
-            res = subprocess.run("net stop wuauserv & net start wuauserv", shell=True, startupinfo=startupinfo, creationflags=subprocess.CREATE_NO_WINDOW, capture_output=True, text=True, errors='replace')
-            L(f"   net stop/start: rc={res.returncode} | {res.stdout.strip()}")
-            
-            # Ellenőrzés
-            L("4. Ellenőrzés (visszaolvasás)...")
-            try:
-                res_chk = subprocess.run(['reg', 'query', r'HKLM\SOFTWARE\Policies\Microsoft\Windows\WindowsUpdate', '/v', 'ExcludeWUDriversInQualityUpdate'],
-                                         startupinfo=startupinfo, creationflags=subprocess.CREATE_NO_WINDOW, capture_output=True, text=True, errors='replace')
-                L(f"   ExcludeWUDrivers: {res_chk.stdout.strip()}")
-            except: pass
-            try:
-                res_chk2 = subprocess.run(['reg', 'query', r'HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\DriverSearching', '/v', 'SearchOrderConfig'],
-                                          startupinfo=startupinfo, creationflags=subprocess.CREATE_NO_WINDOW, capture_output=True, text=True, errors='replace')
-                L(f"   SearchOrderConfig: {res_chk2.stdout.strip()}")
-            except: pass
-            
-            L("=== LETILTÁS BEFEJEZVE ===")
-            
-            messagebox.showinfo("Siker", "Windows Update driver telepítés sikeresen LETILTVA.\n\n(A Windows Update szolgáltatás újraindult a háttérben.)\n\nRészletes log: driver_tool_debug.log")
-            self.check_wu_status()
-        except PermissionError:
-            L("PERMISSION ERROR - Nincs admin jog!")
-            messagebox.showerror("Hiba", "Nincs jogosultság a Registry írásához. Futtasd Rendszergazdaként!")
-        except Exception as e:
-            L(f"VÁRATLAN HIBA: {e}")
-            messagebox.showerror("Hiba", f"Hiba történt:\n{str(e)}\n\nLog:\n" + "\n".join(log_lines[-10:]))
+                L(f"VÁRATLAN HIBA: {e}")
+                def show_err(err=e):
+                    if prog_win.winfo_exists(): prog_win.destroy()
+                    messagebox.showerror("Hiba", f"Hiba történt:\n{str(err)}\n\nLog:\n" + "\n".join(log_lines[-10:]))
+                self.after(0, show_err)
+
+        threading.Thread(target=_wu_disable_worker, daemon=True).start()
 
     def enable_wu_drivers(self):
-        log_lines = []
-        def L(msg):
-            logging.info(f"[WU_ENABLE] {msg}")
-            log_lines.append(msg)
-        
-        def run_cmd(cmd, shell=False):
-            return subprocess.run(cmd, shell=shell, startupinfo=startupinfo, creationflags=subprocess.CREATE_NO_WINDOW, capture_output=True, text=True, errors='replace')
-        
-        def stop_service(svc):
-            """Szolgáltatás leállítása force-kill-lel ha kell"""
-            L(f"   Leállítás: {svc}...")
-            res = run_cmd(f'net stop {svc} /y', shell=True)
-            L(f"   net stop {svc}: rc={res.returncode} | {res.stdout.strip()}")
-            
-            # Várjunk max 15 mp-et hogy tényleg leálljon
-            import time as _time
-            for i in range(15):
-                chk = run_cmd(['sc', 'query', svc])
-                if 'STOPPED' in chk.stdout or 'not been started' in chk.stderr.lower() or chk.returncode != 0:
-                    L(f"   {svc}: STOPPED ({i}s)")
-                    return True
-                if 'STOP_PENDING' in chk.stdout:
-                    L(f"   {svc}: STOP_PENDING... várakozás ({i+1}/15)")
-                    _time.sleep(1)
-                else:
-                    break
-            
-            # Ha még mindig fut/pending, force kill a PID-jén
-            chk = run_cmd(['sc', 'queryex', svc])
-            L(f"   {svc} queryex: {chk.stdout.strip()}")
-            if 'STOP_PENDING' in chk.stdout or 'RUNNING' in chk.stdout:
-                # PID kinyerése
-                for line in chk.stdout.splitlines():
-                    if 'PID' in line:
-                        parts = line.split(':')
-                        if len(parts) >= 2:
-                            pid = parts[1].strip()
-                            if pid and pid != '0':
-                                L(f"   FORCE KILL: taskkill /f /pid {pid}")
-                                kres = run_cmd(f'taskkill /f /pid {pid}', shell=True)
-                                L(f"   taskkill: rc={kres.returncode} | {kres.stdout.strip()} {kres.stderr.strip()}")
-                                _time.sleep(2)
-                                return True
-            
-            L(f"   {svc}: Nem sikerült leállítani, de folytatjuk...")
-            return False
-        
-        try:
-            startupinfo = subprocess.STARTUPINFO()
-            startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
-            import time as _time
-            
-            L("=== WU DRIVER ENGEDÉLYEZÉS + TELJES RESET INDÍTÁSA ===")
-            
-            # 1. Policy törlés winreg-gel
-            key_path = r"SOFTWARE\Policies\Microsoft\Windows\WindowsUpdate"
-            L("1. ExcludeWUDriversInQualityUpdate policy TÖRLÉSE (winreg)...")
+        prog_win = tk.Toplevel(self)
+        prog_win.title("WU Driver Engedélyezés + Reset")
+        prog_win.geometry("500x120")
+        prog_win.transient(self)
+        prog_win.grab_set()
+        lbl = ttk.Label(prog_win, text="Windows Update driver engedélyezés és teljes reset folyamatban...\nEz akár 1-2 percig is eltarthat, kérlek várj!", justify=tk.CENTER)
+        lbl.pack(pady=10)
+        wu_progress = ttk.Progressbar(prog_win, orient=tk.HORIZONTAL, length=400, mode='indeterminate')
+        wu_progress.pack(pady=10)
+        wu_progress.start(15)
+
+        def _wu_enable_worker():
+            log_lines = []
+            def L(msg):
+                logging.info(f"[WU_ENABLE] {msg}")
+                log_lines.append(msg)
+
             try:
-                with winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, key_path, 0, winreg.KEY_WRITE) as key:
-                    winreg.DeleteValue(key, "ExcludeWUDriversInQualityUpdate")
-                L("   OK: winreg DeleteValue sikeres")
-            except FileNotFoundError:
-                L("   INFO: Nem létezett (FileNotFoundError) - nincs teendő")
-            except Exception as e:
-                L(f"   HIBA winreg törlés: {e} - fallback 0-ra állítás...")
+                startupinfo = subprocess.STARTUPINFO()
+                startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+                import time as _time
+
+                def run_cmd(cmd, shell=False):
+                    return subprocess.run(cmd, shell=shell, startupinfo=startupinfo, creationflags=subprocess.CREATE_NO_WINDOW, capture_output=True, text=True, errors='replace')
+
+                def stop_service(svc):
+                    L(f"   Leállítás: {svc}...")
+                    res = run_cmd(f'net stop {svc} /y', shell=True)
+                    L(f"   net stop {svc}: rc={res.returncode} | {res.stdout.strip()}")
+                    for i in range(15):
+                        chk = run_cmd(['sc', 'query', svc])
+                        if 'STOPPED' in chk.stdout or 'not been started' in chk.stderr.lower() or chk.returncode != 0:
+                            L(f"   {svc}: STOPPED ({i}s)")
+                            return True
+                        if 'STOP_PENDING' in chk.stdout:
+                            L(f"   {svc}: STOP_PENDING... várakozás ({i+1}/15)")
+                            _time.sleep(1)
+                        else:
+                            break
+                    chk = run_cmd(['sc', 'queryex', svc])
+                    L(f"   {svc} queryex: {chk.stdout.strip()}")
+                    if 'STOP_PENDING' in chk.stdout or 'RUNNING' in chk.stdout:
+                        for line in chk.stdout.splitlines():
+                            if 'PID' in line:
+                                parts = line.split(':')
+                                if len(parts) >= 2:
+                                    pid = parts[1].strip()
+                                    if pid and pid != '0':
+                                        L(f"   FORCE KILL: taskkill /f /pid {pid}")
+                                        kres = run_cmd(f'taskkill /f /pid {pid}', shell=True)
+                                        L(f"   taskkill: rc={kres.returncode} | {kres.stdout.strip()} {kres.stderr.strip()}")
+                                        _time.sleep(2)
+                                        return True
+                    L(f"   {svc}: Nem sikerült leállítani, de folytatjuk...")
+                    return False
+
+                L("=== WU DRIVER ENGEDÉLYEZÉS + TELJES RESET INDÍTÁSA ===")
+
+                # 1. Policy törlés winreg-gel
+                key_path = r"SOFTWARE\Policies\Microsoft\Windows\WindowsUpdate"
+                L("1. ExcludeWUDriversInQualityUpdate policy TÖRLÉSE (winreg)...")
                 try:
-                    with winreg.CreateKeyEx(winreg.HKEY_LOCAL_MACHINE, key_path, 0, winreg.KEY_WRITE) as key:
-                        winreg.SetValueEx(key, "ExcludeWUDriversInQualityUpdate", 0, winreg.REG_DWORD, 0)
-                    L("   OK: fallback 0-ra állítás sikeres")
-                except Exception as e2:
-                    L(f"   HIBA fallback is: {e2}")
-
-            # 2. SearchOrderConfig = 1 winreg-gel
-            key_path2 = r"SOFTWARE\Microsoft\Windows\CurrentVersion\DriverSearching"
-            L("2. SearchOrderConfig = 1 beállítása (winreg)...")
-            try:
-                with winreg.CreateKeyEx(winreg.HKEY_LOCAL_MACHINE, key_path2, 0, winreg.KEY_WRITE) as key:
-                    winreg.SetValueEx(key, "SearchOrderConfig", 0, winreg.REG_DWORD, 1)
-                L("   OK: winreg beállítva")
-            except Exception as e:
-                L(f"   HIBA winreg: {e}")
-
-            # 3. reg.exe fallback - SearchOrderConfig
-            L("3. reg.exe fallback: SearchOrderConfig = 1...")
-            res = run_cmd(['reg', 'add', r'HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\DriverSearching', '/v', 'SearchOrderConfig', '/t', 'REG_DWORD', '/d', '1', '/f'])
-            L(f"   rc={res.returncode} | {res.stdout.strip()} {res.stderr.strip()}")
-
-            # 4. reg.exe fallback - Policy törlés
-            L("4. reg.exe fallback: ExcludeWUDrivers policy törlése...")
-            res = run_cmd(['reg', 'delete', r'HKLM\SOFTWARE\Policies\Microsoft\Windows\WindowsUpdate', '/v', 'ExcludeWUDriversInQualityUpdate', '/f'])
-            L(f"   rc={res.returncode} | {res.stdout.strip()} {res.stderr.strip()}")
-
-            # 5. NoAutoUpdate törlés
-            L("5. NoAutoUpdate policy törlése...")
-            try:
-                with winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, r"SOFTWARE\Policies\Microsoft\Windows\WindowsUpdate\AU", 0, winreg.KEY_WRITE) as key:
-                    winreg.DeleteValue(key, "NoAutoUpdate")
-                L("   OK: NoAutoUpdate törölve")
-            except FileNotFoundError:
-                L("   INFO: NoAutoUpdate nem létezett")
-            except Exception as e:
-                L(f"   HIBA: {e}")
-
-            # 6. Szolgáltatások leállítása (FORCE KILL ha kell!)
-            L("6. WU szolgáltatások leállítása (force kill ha kell)...")
-            for svc in ['wuauserv', 'bits', 'cryptsvc']:
-                stop_service(svc)
-            
-            # Extra várakozás hogy a fájlok felszabaduljanak
-            L("   Extra 3s várakozás fájl-zárolás feloldásra...")
-            _time.sleep(3)
-            
-            # 7. SoftwareDistribution törlése (retry-val!)
-            sysroot = os.environ.get('SYSTEMROOT', r'C:\Windows')
-            sw_dist = os.path.join(sysroot, 'SoftwareDistribution')
-            L(f"7. SoftwareDistribution mappa törlése: {sw_dist}")
-            for attempt in range(3):
-                try:
-                    if os.path.exists(sw_dist):
-                        shutil.rmtree(sw_dist, ignore_errors=False)
-                        L(f"   OK: törölve ({attempt+1}. próbálkozás)")
-                        break
-                    else:
-                        L("   INFO: Mappa nem létezett")
-                        break
+                    with winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, key_path, 0, winreg.KEY_WRITE) as key:
+                        winreg.DeleteValue(key, "ExcludeWUDriversInQualityUpdate")
+                    L("   OK: winreg DeleteValue sikeres")
+                except FileNotFoundError:
+                    L("   INFO: Nem létezett (FileNotFoundError) - nincs teendő")
                 except Exception as e:
-                    L(f"   {attempt+1}. próba HIBA: {e}")
-                    if attempt < 2:
-                        L(f"   Újrapróbálás 3s múlva...")
-                        _time.sleep(3)
-            # Ha még mindig ott van, próbáljuk ignore_errors-szal + rd /s /q
-            if os.path.exists(sw_dist):
-                shutil.rmtree(sw_dist, ignore_errors=True)
-                res = run_cmd(f'rd /s /q "{sw_dist}"', shell=True)
-                L(f"   rd /s /q fallback: rc={res.returncode} | létezik még: {os.path.exists(sw_dist)}")
-            
-            # 8. catroot2 átnevezése
-            catroot2 = os.path.join(sysroot, 'System32', 'catroot2')
-            bak = catroot2 + '.bak'
-            L(f"8. catroot2 átnevezése: {catroot2} -> {bak}")
-            try:
-                if os.path.exists(bak):
-                    shutil.rmtree(bak, ignore_errors=True)
-                    L("   Régi .bak törölve")
-                if os.path.exists(catroot2):
-                    os.rename(catroot2, bak)
-                    L("   OK: átnevezve")
-                else:
-                    L("   INFO: catroot2 mappa nem létezett")
-            except Exception as e:
-                L(f"   HIBA: {e}")
-            
-            # 9. WU DLL-ek újraregisztrálása (TELJES ÚTVONALLAL!)
-            sys32 = os.path.join(sysroot, 'System32')
-            L(f"9. WU DLL-ek újraregisztrálása ({sys32})...")
-            for dll in ['wuaueng.dll', 'wuapi.dll', 'wups.dll', 'wups2.dll', 'wuwebv.dll', 'wucltux.dll']:
-                full_path = os.path.join(sys32, dll)
-                exists = os.path.exists(full_path)
-                L(f"   {dll}: létezik={exists}")
-                if exists:
-                    res = run_cmd(f'regsvr32.exe /s "{full_path}"', shell=True)
-                    L(f"   regsvr32 {dll}: rc={res.returncode} | {res.stderr.strip()}")
-                else:
-                    L(f"   KIHAGYVA (nem létezik): {full_path}")
-            
-            # 10. Winsock reset
-            L("10. Winsock reset...")
-            res = run_cmd('netsh winsock reset', shell=True)
-            L(f"    rc={res.returncode} | {res.stdout.strip()} {res.stderr.strip()}")
-            
-            # 11. Szolgáltatások indítása (retry-val!)
-            L("11. Szolgáltatások indítása (cryptsvc, bits, wuauserv)...")
-            for svc in ['cryptsvc', 'bits', 'wuauserv']:
-                for attempt in range(3):
-                    res = run_cmd(f'net start {svc}', shell=True)
-                    L(f"    net start {svc} ({attempt+1}.): rc={res.returncode} | {res.stdout.strip()} {res.stderr.strip()}")
-                    if res.returncode == 0 or 'already been started' in res.stderr.lower() or 'already been started' in res.stdout.lower() or 'm\xe1r elindult' in res.stdout.lower():
-                        break
-                    if 'elindul vagy' in res.stdout or 'being started' in res.stderr.lower():
-                        L(f"    {svc}: Még indul... várunk 5s")
-                        _time.sleep(5)
-                    else:
-                        _time.sleep(2)
-            
-            # 12. Kényszerített frissítés-keresés
-            L("12. wuauclt /resetauthorization /detectnow...")
-            res = run_cmd('wuauclt.exe /resetauthorization /detectnow', shell=True)
-            L(f"    rc={res.returncode} | {res.stdout.strip()} {res.stderr.strip()}")
-            
-            # Próbáljuk a modernebb UsoClient-et is
-            L("12b. UsoClient StartScan (Win10+)...")
-            res = run_cmd('UsoClient.exe StartScan', shell=True)
-            L(f"    rc={res.returncode} | {res.stdout.strip()} {res.stderr.strip()}")
-            
-            # 13. Végső ellenőrzés
-            L("13. Végső ellenőrzés (registry + service visszaolvasás)...")
-            try:
-                res_chk = run_cmd(['reg', 'query', r'HKLM\SOFTWARE\Policies\Microsoft\Windows\WindowsUpdate', '/v', 'ExcludeWUDriversInQualityUpdate'])
-                L(f"    ExcludeWUDrivers: rc={res_chk.returncode} | {res_chk.stdout.strip()} {res_chk.stderr.strip()}")
-            except: pass
-            try:
-                res_chk2 = run_cmd(['reg', 'query', r'HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\DriverSearching', '/v', 'SearchOrderConfig'])
-                L(f"    SearchOrderConfig: {res_chk2.stdout.strip()}")
-            except: pass
-            try:
-                res_chk3 = run_cmd(['sc', 'query', 'wuauserv'])
-                L(f"    wuauserv állapot: {res_chk3.stdout.strip()}")
-            except: pass
-            L(f"    SoftwareDistribution létezik: {os.path.exists(sw_dist)}")
-            L(f"    catroot2 létezik: {os.path.exists(catroot2)}")
-            L(f"    catroot2.bak létezik: {os.path.exists(bak)}")
-            
-            L("=== WU ENGEDÉLYEZÉS + RESET BEFEJEZVE ===")
+                    L(f"   HIBA winreg törlés: {e} - fallback 0-ra állítás...")
+                    try:
+                        with winreg.CreateKeyEx(winreg.HKEY_LOCAL_MACHINE, key_path, 0, winreg.KEY_WRITE) as key:
+                            winreg.SetValueEx(key, "ExcludeWUDriversInQualityUpdate", 0, winreg.REG_DWORD, 0)
+                        L("   OK: fallback 0-ra állítás sikeres")
+                    except Exception as e2:
+                        L(f"   HIBA fallback is: {e2}")
 
-            messagebox.showinfo("Siker", "Windows Update driver telepítés sikeresen VISSZAÁLLÍTVA.\n\n• Házirend policy TÖRÖLVE\n• WU cache törölve (SoftwareDistribution)\n• Catroot2 alaphelyzetbe állítva\n• WU DLL-ek újraregisztrálva\n• Winsock reset\n• WU szolgáltatás újraindítva\n• Frissítés-keresés elindítva\n\nRészletes log: driver_tool_debug.log\n\nAjánlott: Indítsd ÚJRA a gépet, majd menj a\nBeállítások > Frissítések oldalra!")
-            self.check_wu_status()
-        except PermissionError:
-            L("PERMISSION ERROR - Nincs admin jog!")
-            messagebox.showerror("Hiba", "Nincs jogosultság a Registry írásához. Futtasd Rendszergazdaként!")
-        except Exception as e:
-            L(f"VÁRATLAN HIBA: {e}")
-            messagebox.showerror("Hiba", f"Hiba történt:\n{str(e)}\n\nLog:\n" + "\n".join(log_lines[-10:]))
+                # 2. SearchOrderConfig = 1 winreg-gel
+                key_path2 = r"SOFTWARE\Microsoft\Windows\CurrentVersion\DriverSearching"
+                L("2. SearchOrderConfig = 1 beállítása (winreg)...")
+                try:
+                    with winreg.CreateKeyEx(winreg.HKEY_LOCAL_MACHINE, key_path2, 0, winreg.KEY_WRITE) as key:
+                        winreg.SetValueEx(key, "SearchOrderConfig", 0, winreg.REG_DWORD, 1)
+                    L("   OK: winreg beállítva")
+                except Exception as e:
+                    L(f"   HIBA winreg: {e}")
+
+                # 3. reg.exe fallback - SearchOrderConfig
+                L("3. reg.exe fallback: SearchOrderConfig = 1...")
+                res = run_cmd(['reg', 'add', r'HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\DriverSearching', '/v', 'SearchOrderConfig', '/t', 'REG_DWORD', '/d', '1', '/f'])
+                L(f"   rc={res.returncode} | {res.stdout.strip()} {res.stderr.strip()}")
+
+                # 4. reg.exe fallback - Policy törlés
+                L("4. reg.exe fallback: ExcludeWUDrivers policy törlése...")
+                res = run_cmd(['reg', 'delete', r'HKLM\SOFTWARE\Policies\Microsoft\Windows\WindowsUpdate', '/v', 'ExcludeWUDriversInQualityUpdate', '/f'])
+                L(f"   rc={res.returncode} | {res.stdout.strip()} {res.stderr.strip()}")
+
+                # 5. NoAutoUpdate törlés
+                L("5. NoAutoUpdate policy törlése...")
+                try:
+                    with winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, r"SOFTWARE\Policies\Microsoft\Windows\WindowsUpdate\AU", 0, winreg.KEY_WRITE) as key:
+                        winreg.DeleteValue(key, "NoAutoUpdate")
+                    L("   OK: NoAutoUpdate törölve")
+                except FileNotFoundError:
+                    L("   INFO: NoAutoUpdate nem létezett")
+                except Exception as e:
+                    L(f"   HIBA: {e}")
+
+                # 6. Szolgáltatások leállítása (FORCE KILL ha kell!)
+                L("6. WU szolgáltatások leállítása (force kill ha kell)...")
+                for svc in ['wuauserv', 'bits', 'cryptsvc']:
+                    stop_service(svc)
+
+                # Extra várakozás hogy a fájlok felszabaduljanak
+                L("   Extra 3s várakozás fájl-zárolás feloldásra...")
+                _time.sleep(3)
+
+                # 7. SoftwareDistribution törlése (retry-val!)
+                sysroot = os.environ.get('SYSTEMROOT', r'C:\Windows')
+                sw_dist = os.path.join(sysroot, 'SoftwareDistribution')
+                L(f"7. SoftwareDistribution mappa törlése: {sw_dist}")
+                for attempt in range(3):
+                    try:
+                        if os.path.exists(sw_dist):
+                            shutil.rmtree(sw_dist, ignore_errors=False)
+                            L(f"   OK: törölve ({attempt+1}. próbálkozás)")
+                            break
+                        else:
+                            L("   INFO: Mappa nem létezett")
+                            break
+                    except Exception as e:
+                        L(f"   {attempt+1}. próba HIBA: {e}")
+                        if attempt < 2:
+                            L(f"   Újrapróbálás 3s múlva...")
+                            _time.sleep(3)
+                # Ha még mindig ott van, próbáljuk ignore_errors-szal + rd /s /q
+                if os.path.exists(sw_dist):
+                    shutil.rmtree(sw_dist, ignore_errors=True)
+                    res = run_cmd(f'rd /s /q "{sw_dist}"', shell=True)
+                    L(f"   rd /s /q fallback: rc={res.returncode} | létezik még: {os.path.exists(sw_dist)}")
+
+                # 8. catroot2 átnevezése
+                catroot2 = os.path.join(sysroot, 'System32', 'catroot2')
+                bak = catroot2 + '.bak'
+                L(f"8. catroot2 átnevezése: {catroot2} -> {bak}")
+                try:
+                    if os.path.exists(bak):
+                        shutil.rmtree(bak, ignore_errors=True)
+                        L("   Régi .bak törölve")
+                    if os.path.exists(catroot2):
+                        os.rename(catroot2, bak)
+                        L("   OK: átnevezve")
+                    else:
+                        L("   INFO: catroot2 mappa nem létezett")
+                except Exception as e:
+                    L(f"   HIBA: {e}")
+
+                # 9. WU DLL-ek újraregisztrálása (TELJES ÚTVONALLAL!)
+                sys32 = os.path.join(sysroot, 'System32')
+                L(f"9. WU DLL-ek újraregisztrálása ({sys32})...")
+                for dll in ['wuaueng.dll', 'wuapi.dll', 'wups.dll', 'wups2.dll', 'wuwebv.dll', 'wucltux.dll']:
+                    full_path = os.path.join(sys32, dll)
+                    exists = os.path.exists(full_path)
+                    L(f"   {dll}: létezik={exists}")
+                    if exists:
+                        res = run_cmd(f'regsvr32.exe /s "{full_path}"', shell=True)
+                        L(f"   regsvr32 {dll}: rc={res.returncode} | {res.stderr.strip()}")
+                    else:
+                        L(f"   KIHAGYVA (nem létezik): {full_path}")
+
+                # 10. Winsock reset
+                L("10. Winsock reset...")
+                res = run_cmd('netsh winsock reset', shell=True)
+                L(f"    rc={res.returncode} | {res.stdout.strip()} {res.stderr.strip()}")
+
+                # 11. Szolgáltatások indítása (retry-val!)
+                L("11. Szolgáltatások indítása (cryptsvc, bits, wuauserv)...")
+                for svc in ['cryptsvc', 'bits', 'wuauserv']:
+                    for attempt in range(3):
+                        res = run_cmd(f'net start {svc}', shell=True)
+                        L(f"    net start {svc} ({attempt+1}.): rc={res.returncode} | {res.stdout.strip()} {res.stderr.strip()}")
+                        if res.returncode == 0 or 'already been started' in res.stderr.lower() or 'already been started' in res.stdout.lower() or 'm\xe1r elindult' in res.stdout.lower():
+                            break
+                        if 'elindul vagy' in res.stdout or 'being started' in res.stderr.lower():
+                            L(f"    {svc}: Még indul... várunk 5s")
+                            _time.sleep(5)
+                        else:
+                            _time.sleep(2)
+
+                # 12. Kényszerített frissítés-keresés
+                L("12. wuauclt /resetauthorization /detectnow...")
+                res = run_cmd('wuauclt.exe /resetauthorization /detectnow', shell=True)
+                L(f"    rc={res.returncode} | {res.stdout.strip()} {res.stderr.strip()}")
+
+                # Próbáljuk a modernebb UsoClient-et is
+                L("12b. UsoClient StartScan (Win10+)...")
+                res = run_cmd('UsoClient.exe StartScan', shell=True)
+                L(f"    rc={res.returncode} | {res.stdout.strip()} {res.stderr.strip()}")
+
+                # 13. Végső ellenőrzés
+                L("13. Végső ellenőrzés (registry + service visszaolvasás)...")
+                try:
+                    res_chk = run_cmd(['reg', 'query', r'HKLM\SOFTWARE\Policies\Microsoft\Windows\WindowsUpdate', '/v', 'ExcludeWUDriversInQualityUpdate'])
+                    L(f"    ExcludeWUDrivers: rc={res_chk.returncode} | {res_chk.stdout.strip()} {res_chk.stderr.strip()}")
+                except Exception: pass
+                try:
+                    res_chk2 = run_cmd(['reg', 'query', r'HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\DriverSearching', '/v', 'SearchOrderConfig'])
+                    L(f"    SearchOrderConfig: {res_chk2.stdout.strip()}")
+                except Exception: pass
+                try:
+                    res_chk3 = run_cmd(['sc', 'query', 'wuauserv'])
+                    L(f"    wuauserv állapot: {res_chk3.stdout.strip()}")
+                except Exception: pass
+                L(f"    SoftwareDistribution létezik: {os.path.exists(sw_dist)}")
+                L(f"    catroot2 létezik: {os.path.exists(catroot2)}")
+                L(f"    catroot2.bak létezik: {os.path.exists(bak)}")
+
+                L("=== WU ENGEDÉLYEZÉS + RESET BEFEJEZVE ===")
+
+                def show_result():
+                    if prog_win.winfo_exists(): prog_win.destroy()
+                    messagebox.showinfo("Siker", "Windows Update driver telepítés sikeresen VISSZAÁLLÍTVA.\n\n• Házirend policy TÖRÖLVE\n• WU cache törölve (SoftwareDistribution)\n• Catroot2 alaphelyzetbe állítva\n• WU DLL-ek újraregisztrálva\n• Winsock reset\n• WU szolgáltatás újraindítva\n• Frissítés-keresés elindítva\n\nRészletes log: driver_tool_debug.log\n\nAjánlott: Indítsd ÚJRA a gépet, majd menj a\nBeállítások > Frissítések oldalra!")
+                    self.check_wu_status()
+                self.after(0, show_result)
+            except PermissionError:
+                L("PERMISSION ERROR - Nincs admin jog!")
+                def show_perm_err():
+                    if prog_win.winfo_exists(): prog_win.destroy()
+                    messagebox.showerror("Hiba", "Nincs jogosultság a Registry írásához. Futtasd Rendszergazdaként!")
+                self.after(0, show_perm_err)
+            except Exception as e:
+                L(f"VÁRATLAN HIBA: {e}")
+                def show_err(err=e):
+                    if prog_win.winfo_exists(): prog_win.destroy()
+                    messagebox.showerror("Hiba", f"Hiba történt:\n{str(err)}\n\nLog:\n" + "\n".join(log_lines[-10:]))
+                self.after(0, show_err)
+
+        threading.Thread(target=_wu_enable_worker, daemon=True).start()
 
     def create_restore_point(self):
         desc = f"Driver_Cleaner_Backup_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
-        try:
-            startupinfo = subprocess.STARTUPINFO()
-            startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
-            # PowerShell Command to create a restore point
-            cmd = f'powershell.exe -ExecutionPolicy Bypass -NoProfile -Command "Checkpoint-Computer -Description \'{desc}\' -RestorePointType \'MODIFY_SETTINGS\'"'
-            
-            messagebox.showinfo("Folyamatban", "Rendszer-visszaállítási pont létrehozása elindult...\nEz eltarthat egy percig, kérlek várj!")
-            res = subprocess.run(cmd, shell=True, startupinfo=startupinfo, capture_output=True, text=True, errors='replace', creationflags=subprocess.CREATE_NO_WINDOW)
-            
-            if res.returncode == 0:
-                messagebox.showinfo("Siker", f"A '{desc}' nevű visszaállítási pont sikeresen létrejött!")
-            else:
-                messagebox.showerror("Hiba", f"Nem sikerült létrehozni a visszaállítási pontot. Biztosan engedélyezve van a Rendszervédelem a Windowsban?\n\nKimenet: {res.stderr}")
-        except Exception as e:
-            messagebox.showerror("Hiba", f"Kivétel történt:\n{str(e)}")
+
+        prog_win = tk.Toplevel(self)
+        prog_win.title("Visszaállítási Pont")
+        prog_win.geometry("500x120")
+        prog_win.transient(self)
+        prog_win.grab_set()
+        lbl = ttk.Label(prog_win, text="Rendszer-visszaállítási pont létrehozása folyamatban...\nEz eltarthat egy percig, kérlek várj!", justify=tk.CENTER)
+        lbl.pack(pady=10)
+        rp_progress = ttk.Progressbar(prog_win, orient=tk.HORIZONTAL, length=400, mode='indeterminate')
+        rp_progress.pack(pady=10)
+        rp_progress.start(15)
+
+        def _rp_worker():
+            try:
+                startupinfo = subprocess.STARTUPINFO()
+                startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+                cmd = f'powershell.exe -ExecutionPolicy Bypass -NoProfile -Command "Checkpoint-Computer -Description \'{desc}\' -RestorePointType \'MODIFY_SETTINGS\'"'
+                res = subprocess.run(cmd, shell=True, startupinfo=startupinfo, capture_output=True, text=True, errors='replace', creationflags=subprocess.CREATE_NO_WINDOW)
+
+                def show_result():
+                    if prog_win.winfo_exists(): prog_win.destroy()
+                    if res.returncode == 0:
+                        messagebox.showinfo("Siker", f"A '{desc}' nevű visszaállítási pont sikeresen létrejött!")
+                    else:
+                        messagebox.showerror("Hiba", f"Nem sikerült létrehozni a visszaállítási pontot. Biztosan engedélyezve van a Rendszervédelem a Windowsban?\n\nKimenet: {res.stderr}")
+                self.after(0, show_result)
+            except Exception as e:
+                def show_err(err=e):
+                    if prog_win.winfo_exists(): prog_win.destroy()
+                    messagebox.showerror("Hiba", f"Kivétel történt:\n{str(err)}")
+                self.after(0, show_err)
+
+        threading.Thread(target=_rp_worker, daemon=True).start()
 
     def backup_drivers(self):
         dest_dir = filedialog.askdirectory(title="Válassz egy mappát a driverek kimentéséhez")
@@ -1986,7 +2475,7 @@ try {
                 
                 try:
                     shutil.rmtree(mount_dir, ignore_errors=True)
-                except: pass
+                except Exception: pass
 
                 def finish():
                     if prog_win.winfo_exists(): prog_win.destroy()
@@ -1999,7 +2488,7 @@ try {
                 subprocess.run(err_unmount, capture_output=True, text=True, startupinfo=startupinfo, errors='replace', creationflags=subprocess.CREATE_NO_WINDOW)
                 try:
                     shutil.rmtree(mount_dir, ignore_errors=True)
-                except: pass
+                except Exception: pass
                 def show_err(err=e):
                     if prog_win.winfo_exists(): prog_win.destroy()
                     messagebox.showerror("Hiba történt", f"Nem sikerült kibontani a WIM fájlt a következő hiba miatt:\n{str(err)}")
@@ -2085,7 +2574,7 @@ try {
                     try:
                         log_handle.write(msg + '\n')
                         log_handle.flush() # AZONNALI Iras a pendriverra!
-                    except:
+                    except Exception:
                         pass
                 logging.info(f"[RESTORE] {msg}")
                 def gui_up():
@@ -2095,7 +2584,7 @@ try {
                             log_text.see(tk.END)
                         short_txt = msg.strip() if len(msg.strip()) < 100 else msg.strip()[:97] + "..."
                         status_lbl.config(text=short_txt)
-                    except:
+                    except Exception:
                         pass
                 self.after(0, gui_up)
 
@@ -2205,23 +2694,23 @@ try {
                     os.makedirs(programdata_dir, exist_ok=True)
                         
                     bat_path = os.path.join(programdata_dir, "auto_pnputil_scan.bat")
-                    bat_content = "@echo off\r\n" \
-                                  "set LOGFILE=\"%SystemDrive%\\Users\\Public\\driver_startup_log.txt\"\r\n" \
-                                  "echo ---------------------------------------- >> %LOGFILE%\r\n" \
-                                  "echo [%DATE% %TIME%] Boot elotti SYSTEM telepites service (No UAC! Azonnali!) >> %LOGFILE%\r\n" \
-                                  "echo [%DATE% %TIME%] Ideiglenes szerviz torlese a registrybol is... >> %LOGFILE%\r\n" \
-                                  "sc delete DriverRestoreSvc >> %LOGFILE% 2>&1\r\n" \
-                                  "echo [%DATE% %TIME%] Varakozas a Windows PlugAndPlay szolgaltatasara (15 sec max)... >> %LOGFILE%\r\n" \
-                                  "ping 127.0.0.1 -n 15 > nul\r\n" \
-                                  "echo [%DATE% %TIME%] Driverek betoltese (Csendes mod)... kerlek varj! >> %LOGFILE%\r\n" \
-                                  "pnputil /add-driver \"%SystemDrive%\\TempRunDrivers\\*.inf\" /subdirs /install >> %LOGFILE% 2>&1\r\n" \
-                                  "echo [%DATE% %TIME%] pnputil scan-devices inditasa... >> %LOGFILE%\r\n" \
-                                  "pnputil /scan-devices >> %LOGFILE% 2>&1\r\n" \
-                                  "echo [%DATE% %TIME%] Ideiglenes mappak torlese... >> %LOGFILE%\r\n" \
-                                  "rd /s /q \"%SystemDrive%\\TempRunDrivers\" >> %LOGFILE% 2>&1\r\n" \
-                                  "echo [%DATE% %TIME%] Befejezve. Torlom a scriptet. >> %LOGFILE%\r\n" \
-                                  "ping 127.0.0.1 -n 3 > nul\r\n" \
-                                  "(goto) 2>nul & del \"%~f0\"\r\n"
+                    bat_content = "@echo off\n" \
+                                  "set LOGFILE=\"%SystemDrive%\\Users\\Public\\driver_startup_log.txt\"\n" \
+                                  "echo ---------------------------------------- >> %LOGFILE%\n" \
+                                  "echo [%DATE% %TIME%] Boot elotti SYSTEM telepites service (No UAC! Azonnali!) >> %LOGFILE%\n" \
+                                  "echo [%DATE% %TIME%] Ideiglenes szerviz torlese a registrybol is... >> %LOGFILE%\n" \
+                                  "sc delete DriverRestoreSvc >> %LOGFILE% 2>&1\n" \
+                                  "echo [%DATE% %TIME%] Varakozas a Windows PlugAndPlay szolgaltatasara (15 sec max)... >> %LOGFILE%\n" \
+                                  "ping 127.0.0.1 -n 15 > nul\n" \
+                                  "echo [%DATE% %TIME%] Driverek betoltese (Csendes mod)... kerlek varj! >> %LOGFILE%\n" \
+                                  "pnputil /add-driver \"%SystemDrive%\\TempRunDrivers\\*.inf\" /subdirs /install >> %LOGFILE% 2>&1\n" \
+                                  "echo [%DATE% %TIME%] pnputil scan-devices inditasa... >> %LOGFILE%\n" \
+                                  "pnputil /scan-devices >> %LOGFILE% 2>&1\n" \
+                                  "echo [%DATE% %TIME%] Ideiglenes mappak torlese... >> %LOGFILE%\n" \
+                                  "rd /s /q \"%SystemDrive%\\TempRunDrivers\" >> %LOGFILE% 2>&1\n" \
+                                  "echo [%DATE% %TIME%] Befejezve. Torlom a scriptet. >> %LOGFILE%\n" \
+                                  "ping 127.0.0.1 -n 3 > nul\n" \
+                                  "(goto) 2>nul & del \"%~f0\"\n"
                     with open(bat_path, "w", encoding="utf-8") as f:
                         f.write(bat_content)
                     write_log(f"BAT fájl regisztrálva a rendszerbe: {bat_path}")
@@ -2266,7 +2755,7 @@ try {
                         else:
                             log_text.config(fg="#FFFF00")   # yellow/warning
 
-                    except: pass
+                    except Exception: pass
                 self.after(0, finish_state)
 
             except Exception as e:
@@ -2280,13 +2769,13 @@ try {
                         status_lbl.config(text="KRITIKUS HIBA TÖRTÉNT! NÉZD MEG A LOGOT!", foreground="red")
                         log_text.config(fg="red")
                         close_btn.config(state=tk.NORMAL)
-                    except: pass
+                    except Exception: pass
                 self.after(0, crash_gui)
             finally:
                 if log_handle:
                     try:
                         log_handle.close()
-                    except: pass
+                    except Exception: pass
 
         import threading
         threading.Thread(target=worker, daemon=True).start()
