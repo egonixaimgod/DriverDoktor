@@ -1,4 +1,4 @@
-BUILD_NUMBER = 5
+BUILD_NUMBER = 6
 
 import tkinter as tk
 from tkinter import ttk, messagebox, filedialog
@@ -51,6 +51,8 @@ class DriverCleanerApp(tk.Tk):
         style.configure("TLabelframe.Label", font=("Segoe UI", 11), foreground="#003366")
         style.configure("TButton", font=("Segoe UI", 10), padding=6)
         style.configure("Danger.TButton", font=("Segoe UI", 10), foreground="red")
+        # Unified green progress bar style
+        style.configure("Green.Horizontal.TProgressbar", troughcolor='#E0E0E0', background='#22AA22')
         
         # Ablak ikon beállítása (ico + PhotoImage fallback)
         icon_path = resource_path("icon_red.ico")
@@ -225,10 +227,10 @@ class DriverCleanerApp(tk.Tk):
         self.wu_status_lbl = ttk.Label(wu_frame, text="Állapot: Ismeretlen", font=("Segoe UI", 10, "bold"))
         self.wu_status_lbl.grid(row=0, column=0, columnspan=2, pady=5)
 
-        disable_wu_btn = ttk.Button(wu_frame, text="Windows Update-n belüli driverek letöltésének illetve frissítésének letiltása", command=self.disable_wu_drivers)
+        disable_wu_btn = ttk.Button(wu_frame, text="Windows Update driver letiltas", command=self.disable_wu_drivers)
         disable_wu_btn.grid(row=1, column=0, padx=5, pady=5, sticky="ew")
 
-        enable_wu_btn = ttk.Button(wu_frame, text="Windows Update-n belüli driverek letöltésének illetve frissítésének engedélyezése", command=self.enable_wu_drivers)
+        enable_wu_btn = ttk.Button(wu_frame, text="Windows Update driver engedélyezés", command=self.enable_wu_drivers)
         enable_wu_btn.grid(row=1, column=1, padx=5, pady=5, sticky="ew")
 
         restart_wu_btn = ttk.Button(wu_frame, text="⚡ Windows Update Szolgáltatások Újraindítása (Gyors Javítás)", command=self.restart_wu_services)
@@ -268,7 +270,7 @@ class DriverCleanerApp(tk.Tk):
         progress_frame = tk.Frame(hw_frame, bg="#FFFFFF")
         progress_frame.pack(fill=tk.X, pady=(0, 6))
 
-        self.hw_progress = ttk.Progressbar(progress_frame, mode='indeterminate', length=300)
+        self.hw_progress = ttk.Progressbar(progress_frame, mode='indeterminate', length=300, style="Green.Horizontal.TProgressbar")
         self.hw_progress.pack(side=tk.LEFT, padx=(0, 10))
 
         self.hw_status_lbl = tk.Label(progress_frame, text="", font=("Segoe UI", 9), fg="#555555", bg="#FFFFFF", anchor="w")
@@ -543,6 +545,51 @@ try {
         except Exception as e:
             logging.error(f"WU COM API keresés hiba: {e}")
         return []
+
+    def _create_progress_window(self, title, message, width=600, height=350, mode='determinate', maximum=100, has_log=True):
+        """Unified progress window with green bar and X/Y counter label."""
+        prog_win = tk.Toplevel(self)
+        prog_win.title(title)
+        prog_win.geometry(f"{width}x{height}")
+        prog_win.transient(self)
+        prog_win.grab_set()
+
+        lbl = ttk.Label(prog_win, text=message, justify=tk.CENTER, font=("Segoe UI", 10))
+        lbl.pack(pady=(10, 5))
+
+        counter_lbl = ttk.Label(prog_win, text="", font=("Segoe UI", 10, "bold"))
+        counter_lbl.pack(pady=(0, 2))
+
+        progress = ttk.Progressbar(prog_win, orient=tk.HORIZONTAL, length=width - 80, mode=mode, style="Green.Horizontal.TProgressbar")
+        progress.pack(pady=5)
+        if mode == 'determinate':
+            progress.config(maximum=maximum)
+        else:
+            progress.start(15)
+
+        status_lbl = ttk.Label(prog_win, text="Inicializálás...", font=("Segoe UI", 9))
+        status_lbl.pack(pady=(2, 5))
+
+        log_text = None
+        if has_log:
+            text_frame = tk.Frame(prog_win)
+            text_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=(0, 10))
+            log_text = tk.Text(text_frame, height=10, state=tk.DISABLED, bg="#F3F3F3", font=("Consolas", 9))
+            log_scroll = ttk.Scrollbar(text_frame, command=log_text.yview)
+            log_text.configure(yscrollcommand=log_scroll.set)
+            log_scroll.pack(side=tk.RIGHT, fill=tk.Y)
+            log_text.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+
+        def append_log(msg):
+            if log_text is None:
+                return
+            logging.info(msg)
+            log_text.config(state=tk.NORMAL)
+            log_text.insert(tk.END, msg + "\n")
+            log_text.see(tk.END)
+            log_text.config(state=tk.DISABLED)
+
+        return prog_win, progress, status_lbl, counter_lbl, log_text, append_log
 
     def load_hardware_info(self):
         if hasattr(self, '_hw_scanning') and self._hw_scanning:
@@ -1143,36 +1190,11 @@ try {
 
     def _install_via_wu_api(self):
         """Windows Update COM API-n keresztüli letöltés és telepítés."""
-        prog_win = tk.Toplevel(self)
-        prog_win.title("WU Driver Telepítés (Windows Update API)")
-        prog_win.geometry("650x400")
-        prog_win.transient(self)
-        prog_win.grab_set()
-
-        lbl = ttk.Label(prog_win, text=f"{len(self._install_pool)} db driver frissítés letöltése és telepítése\nWindows Update COM API-n keresztül...", justify=tk.CENTER)
-        lbl.pack(pady=5)
-
-        progress = ttk.Progressbar(prog_win, orient=tk.HORIZONTAL, length=550, mode='indeterminate')
-        progress.pack(pady=5)
-        progress.start(15)
-
-        status_lbl = ttk.Label(prog_win, text="Windows Update keresés és letöltés inicializálása...", font=("Segoe UI", 9))
-        status_lbl.pack(pady=5)
-
-        text_frame = tk.Frame(prog_win)
-        text_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=(0,10))
-        log_text = tk.Text(text_frame, height=12, state=tk.DISABLED, bg="#F3F3F3", font=("Consolas", 8))
-        log_scroll = ttk.Scrollbar(text_frame, command=log_text.yview)
-        log_text.configure(yscrollcommand=log_scroll.set)
-        log_scroll.pack(side=tk.RIGHT, fill=tk.Y)
-        log_text.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
-
-        def append_log(msg):
-            logging.info(f"WU_API_INSTALL: {msg}")
-            log_text.config(state=tk.NORMAL)
-            log_text.insert(tk.END, msg + "\n")
-            log_text.see(tk.END)
-            log_text.config(state=tk.DISABLED)
+        prog_win, progress, status_lbl, counter_lbl, log_text, append_log = self._create_progress_window(
+            "WU Driver Telepítés (Windows Update API)",
+            f"{len(self._install_pool)} db driver frissítés letöltése és telepítése\nWindows Update COM API-n keresztül...",
+            width=650, height=420, mode='indeterminate'
+        )
 
         def worker():
             startupinfo = subprocess.STARTUPINFO()
@@ -1282,6 +1304,8 @@ try {
 
             success_count = 0
             fail_count = 0
+            found_count = 0
+            install_total = 0
 
             for line in process.stdout:
                 line = line.strip()
@@ -1292,19 +1316,53 @@ try {
                     self.after(0, lambda m=line.split(":", 1)[1].strip(): status_lbl.config(text=m))
                     self.after(0, lambda m=line: append_log(m))
                 elif line.startswith("FOUND:"):
+                    found_count += 1
                     self.after(0, lambda m=f"  📦 {line[6:].strip()}": append_log(m))
+                    self.after(0, lambda c=found_count: counter_lbl.config(text=f"Talált driverek: {c}"))
+                elif line.startswith("SKIP:"):
+                    self.after(0, lambda m=f"  ⏭ {line[5:].strip()}": append_log(m))
                 elif line.startswith("DOWNLOAD:"):
+                    # Parse count from "DOWNLOAD: N driver..."
+                    import re as _re
+                    _m = _re.search(r'(\d+)', line)
+                    if _m:
+                        install_total = int(_m.group(1))
                     self.after(0, lambda m=line.split(":", 1)[1].strip(): status_lbl.config(text=m))
                     self.after(0, lambda m=line: append_log(m))
+                    self.after(0, lambda t=install_total: counter_lbl.config(text=f"Letöltés: {t} driver..."))
+                elif line.startswith("DL_RESULT:") or line.startswith("DL_FAIL:") or line.startswith("DL_ITEM_FAIL:"):
+                    self.after(0, lambda m=line: append_log(m))
                 elif line.startswith("INSTALL:"):
+                    # Switch to determinate mode for install tracking
+                    _m2 = re.search(r'(\d+)', line)
+                    if _m2:
+                        install_total = int(_m2.group(1))
+                    def _switch_determinate(t=install_total):
+                        try:
+                            progress.stop()
+                        except Exception:
+                            pass
+                        progress.config(mode='determinate', maximum=max(t, 1), value=0)
+                        counter_lbl.config(text=f"Telepítés: 0 / {t}")
+                    self.after(0, _switch_determinate)
                     self.after(0, lambda m=line.split(":", 1)[1].strip(): status_lbl.config(text=m))
                     self.after(0, lambda m=line: append_log(m))
                 elif line.startswith("OK:"):
                     success_count += 1
+                    done = success_count + fail_count
                     self.after(0, lambda m=f"  ✅ {line[3:].strip()}": append_log(m))
+                    self.after(0, lambda d=done, t=install_total, s=success_count, f=fail_count: (
+                        progress.config(value=d),
+                        counter_lbl.config(text=f"Telepítés: {d} / {t}  (✅ {s}  ❌ {f})")
+                    ))
                 elif line.startswith("FAIL:"):
                     fail_count += 1
+                    done = success_count + fail_count
                     self.after(0, lambda m=f"  ❌ {line[5:].strip()}": append_log(m))
+                    self.after(0, lambda d=done, t=install_total, s=success_count, f=fail_count: (
+                        progress.config(value=d),
+                        counter_lbl.config(text=f"Telepítés: {d} / {t}  (✅ {s}  ❌ {f})")
+                    ))
                 elif line.startswith("DONE:"):
                     self.after(0, lambda m=f"\n--- {line[5:].strip()} ---": append_log(m))
                 elif line.startswith("EMPTY:"):
@@ -1329,10 +1387,12 @@ try {
                     progress.stop()
                 except Exception:
                     pass
+                total = success_count + fail_count
                 if success_count > 0:
                     try:
-                        progress.config(mode='determinate', maximum=success_count + fail_count, value=success_count)
+                        progress.config(mode='determinate', maximum=max(total, 1), value=total)
                         status_lbl.config(text=f"Kész! {success_count} sikeres, {fail_count} sikertelen")
+                        counter_lbl.config(text=f"✅ {success_count} / {total} sikeres")
                     except Exception:
                         pass
                     messagebox.showinfo("Befejezve",
@@ -1372,36 +1432,12 @@ try {
 
     def _install_via_catalog(self):
         """MS Update Catalog-ból letöltött CAB fájlok telepítése pnputil-lal (fallback mód)."""
-        prog_win = tk.Toplevel(self)
-        prog_win.title("WU Driver Tömeges Telepítése (Katalógus)")
-        prog_win.geometry("600x350")
-        prog_win.transient(self)
-        prog_win.grab_set()
-
-        lbl = ttk.Label(prog_win, text=f"{len(self._install_pool)} db Windows Update driver letöltése és telepítése...", justify=tk.CENTER)
-        lbl.pack(pady=5)
-
-        progress = ttk.Progressbar(prog_win, orient=tk.HORIZONTAL, length=500, mode='determinate')
-        progress.pack(pady=5)
-        progress.config(maximum=len(self._install_pool))
-        
-        status_lbl = ttk.Label(prog_win, text="Inicializálás...", font=("Arial", 8))
-        status_lbl.pack(pady=5)
-        
-        text_frame = tk.Frame(prog_win)
-        text_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=(0,10))
-        log_text = tk.Text(text_frame, height=10, state=tk.DISABLED, bg="#F3F3F3", font=("Consolas", 8))
-        log_scroll = ttk.Scrollbar(text_frame, command=log_text.yview)
-        log_text.configure(yscrollcommand=log_scroll.set)
-        log_scroll.pack(side=tk.RIGHT, fill=tk.Y)
-        log_text.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
-
-        def append_log(msg):
-            logging.info(f"WU_INSTALL: {msg}")
-            log_text.config(state=tk.NORMAL)
-            log_text.insert(tk.END, msg + "\n")
-            log_text.see(tk.END)
-            log_text.config(state=tk.DISABLED)
+        pool_count = len(self._install_pool)
+        prog_win, progress, status_lbl, counter_lbl, log_text, append_log = self._create_progress_window(
+            "WU Driver Tömeges Telepítése (Katalógus)",
+            f"{pool_count} db Windows Update driver letöltése és telepítése...",
+            width=650, height=400, mode='determinate', maximum=pool_count
+        )
 
         def worker():
             import os, urllib.request, ssl, shutil
@@ -1431,7 +1467,11 @@ try {
                 cab_path = os.path.join(temp_dir, f"drv_{i}.cab")
                 ext_path = os.path.join(temp_dir, f"drv_ext_{i}")
                 
-                self.after(0, lambda val=i, txt=f"[{i+1}/{len(pool_snapshot)}] Letöltés: {name}...": (progress.configure(value=val), status_lbl.config(text=txt)))
+                self.after(0, lambda val=i, idx=i+1, total=len(pool_snapshot), nm=name: (
+                    progress.configure(value=val),
+                    status_lbl.config(text=f"Letöltés: {nm}..."),
+                    counter_lbl.config(text=f"{idx} / {total}")
+                ))
                 self.after(0, lambda m=f"-> {name} letöltése a Microsoft szerveréről...": append_log(m))
                 
                 try:
@@ -1456,7 +1496,10 @@ try {
                     subprocess.run(['expand', inner_cab, '-F:*', inner_ext], capture_output=True, text=True, startupinfo=startupinfo, creationflags=subprocess.CREATE_NO_WINDOW)
                     self.after(0, lambda m=f"   Belső CAB kicsomagolva: {os.path.basename(inner_cab)}": append_log(m))
 
-                self.after(0, lambda txt=f"[{i+1}/{len(pool_snapshot)}] Telepítés: {name}...": status_lbl.config(text=txt))
+                self.after(0, lambda idx=i+1, total=len(pool_snapshot), nm=name: (
+                    status_lbl.config(text=f"Telepítés: {nm}..."),
+                    counter_lbl.config(text=f"{idx} / {total}")
+                ))
                 self.after(0, lambda m=f"   Telepítés pnp/dism futtatása...": append_log(m))
                 
                 is_offline = hasattr(self, 'target_os_path') and self.target_os_path
@@ -1492,16 +1535,19 @@ try {
                         return
                     w = tk.Toplevel(prog_win)
                     w.title("Aktiválás folyamatban")
-                    w.geometry("450x150")
+                    w.geometry("450x170")
                     w.transient(prog_win)
                     w.grab_set()
                     w.update_idletasks()
                     x = prog_win.winfo_x() + (prog_win.winfo_width() // 2) - 225
-                    y = prog_win.winfo_y() + (prog_win.winfo_height() // 2) - 75
+                    y = prog_win.winfo_y() + (prog_win.winfo_height() // 2) - 85
                     w.geometry(f"+{max(0,x)}+{max(0,y)}")
                     msg = "Eszközök újraszkennelése és frissítése a háttérben...\n\nOlykor a képernyő egy pillanatra villanhat!\nKérlek, várj türelemmel amíg befejezzük."
                     lbl = ttk.Label(w, text=msg, justify=tk.CENTER, font=("Segoe UI", 10, "bold"))
-                    lbl.pack(expand=True, fill=tk.BOTH, padx=10, pady=20)
+                    lbl.pack(padx=10, pady=(15, 5))
+                    _act_pb = ttk.Progressbar(w, orient=tk.HORIZONTAL, length=370, mode='indeterminate', style="Green.Horizontal.TProgressbar")
+                    _act_pb.pack(pady=(5, 15))
+                    _act_pb.start(15)
                     self.__scan_win = w
                     w.update()
                     scan_win_ready.set()
@@ -1600,36 +1646,12 @@ try {
         if not messagebox.askyesno("Megerosites", f"Biztosan torolni szeretned a kivalasztott {len(selected)} drivert es az eszkozokrol is eltavolitod?"):
             return
             
-        prog_win = tk.Toplevel(self)
-        prog_win.title("Torles folyamatban...")
-        prog_win.geometry("600x350")
-        prog_win.transient(self)
-        prog_win.grab_set()
-
-        lbl = ttk.Label(prog_win, text=f"{len(selected)} driver vegleges eltavolitasa folyamatban...\nKerlek varj!", justify=tk.CENTER)
-        lbl.pack(pady=5)
-
-        progress = ttk.Progressbar(prog_win, orient=tk.HORIZONTAL, length=500, mode='determinate')
-        progress.pack(pady=5)
-        progress.config(maximum=len(selected))
-        
-        status_lbl = ttk.Label(prog_win, text="Inicializalas...", font=("Arial", 8))
-        status_lbl.pack(pady=5)
-        
-        text_frame = tk.Frame(prog_win)
-        text_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=(0,10))
-        log_text = tk.Text(text_frame, height=10, state=tk.DISABLED, bg="#F3F3F3", font=("Consolas", 8))
-        log_scroll = ttk.Scrollbar(text_frame, command=log_text.yview)
-        log_text.configure(yscrollcommand=log_scroll.set)
-        log_scroll.pack(side=tk.RIGHT, fill=tk.Y)
-        log_text.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
-
-        def append_log(msg):
-            logging.info(msg)
-            log_text.config(state=tk.NORMAL)
-            log_text.insert(tk.END, msg + "\n")
-            log_text.see(tk.END)
-            log_text.config(state=tk.DISABLED)
+        del_count = len(selected)
+        prog_win, progress, status_lbl, counter_lbl, log_text, append_log = self._create_progress_window(
+            "Törlés folyamatban...",
+            f"{del_count} driver végleges eltávolítása folyamatban...\nKérlek várj!",
+            width=650, height=400, mode='determinate', maximum=del_count
+        )
 
         items_to_delete = [self.tree.item(item, "values")[0] for item in selected]
 
@@ -1642,9 +1664,10 @@ try {
             
             self.after(0, lambda: append_log(f"Kijelolt driverek torlese indult ({len(items_to_delete)} db)"))
             for i, published_name in enumerate(items_to_delete):
-                def update_status(txt=f"{published_name} torlese ({i+1}/{len(items_to_delete)})...", val=i):
+                def update_status(txt=f"{published_name} törlése...", val=i, idx=i+1, total=len(items_to_delete)):
                     status_lbl.config(text=txt)
                     progress['value'] = val
+                    counter_lbl.config(text=f"{idx} / {total}")
                 self.after(0, update_status)
                 
                 try:
@@ -1737,18 +1760,18 @@ try {
     def _run_hardware_scan_window(self):
         scan_win = tk.Toplevel(self)
         scan_win.title("Hardverek ellenőrzése...")
-        scan_win.geometry("450x150")
+        scan_win.geometry("500x160")
         scan_win.transient(self)
         scan_win.grab_set()
 
-        lbl = ttk.Label(scan_win, text="Hiányzó Windows alapértelmezett driverek scannelése...\nEzután mennie kell a Touchpadnek alap driverekkel is!", justify=tk.CENTER)
-        lbl.pack(pady=10)
+        lbl = ttk.Label(scan_win, text="Hiányzó Windows alapértelmezett driverek scannelése...\nEzután mennie kell a Touchpadnek alap driverekkel is!", justify=tk.CENTER, font=("Segoe UI", 10))
+        lbl.pack(pady=(10, 5))
 
-        progress = ttk.Progressbar(scan_win, orient=tk.HORIZONTAL, length=350, mode='indeterminate')
-        progress.pack(pady=10)
+        progress = ttk.Progressbar(scan_win, orient=tk.HORIZONTAL, length=420, mode='indeterminate', style="Green.Horizontal.TProgressbar")
+        progress.pack(pady=5)
         progress.start(15)
 
-        status_lbl = ttk.Label(scan_win, text="Kérlek várj...", font=("Arial", 8))
+        status_lbl = ttk.Label(scan_win, text="Kérlek várj...", font=("Segoe UI", 9))
         status_lbl.pack(pady=5)
 
         def scan_worker():
@@ -1816,16 +1839,15 @@ try {
 
     def restart_wu_services(self):
         """Gyors javítás: WU szolgáltatások force-stop + restart, cache nélkül"""
-        # Progress ablak megjelenítése, hogy a felhasználó lássa, történik valami
         prog_win = tk.Toplevel(self)
         prog_win.title("WU Szolgáltatások Újraindítása")
-        prog_win.geometry("500x120")
+        prog_win.geometry("500x140")
         prog_win.transient(self)
         prog_win.grab_set()
-        lbl = ttk.Label(prog_win, text="Windows Update szolgáltatások újraindítása folyamatban...\nKérlek várj!", justify=tk.CENTER)
-        lbl.pack(pady=10)
-        wu_progress = ttk.Progressbar(prog_win, orient=tk.HORIZONTAL, length=400, mode='indeterminate')
-        wu_progress.pack(pady=10)
+        lbl = ttk.Label(prog_win, text="Windows Update szolgáltatások újraindítása folyamatban...\nKérlek várj!", justify=tk.CENTER, font=("Segoe UI", 10))
+        lbl.pack(pady=(10, 5))
+        wu_progress = ttk.Progressbar(prog_win, orient=tk.HORIZONTAL, length=420, mode='indeterminate', style="Green.Horizontal.TProgressbar")
+        wu_progress.pack(pady=5)
         wu_progress.start(15)
 
         def _wu_restart_worker():
@@ -1919,13 +1941,13 @@ try {
     def disable_wu_drivers(self):
         prog_win = tk.Toplevel(self)
         prog_win.title("WU Driver Letiltás")
-        prog_win.geometry("500x120")
+        prog_win.geometry("500x140")
         prog_win.transient(self)
         prog_win.grab_set()
-        lbl = ttk.Label(prog_win, text="Windows Update driver letiltás folyamatban...\nKérlek várj!", justify=tk.CENTER)
-        lbl.pack(pady=10)
-        wu_progress = ttk.Progressbar(prog_win, orient=tk.HORIZONTAL, length=400, mode='indeterminate')
-        wu_progress.pack(pady=10)
+        lbl = ttk.Label(prog_win, text="Windows Update driver letiltás folyamatban...\nKérlek várj!", justify=tk.CENTER, font=("Segoe UI", 10))
+        lbl.pack(pady=(10, 5))
+        wu_progress = ttk.Progressbar(prog_win, orient=tk.HORIZONTAL, length=420, mode='indeterminate', style="Green.Horizontal.TProgressbar")
+        wu_progress.pack(pady=5)
         wu_progress.start(15)
 
         def _wu_disable_worker():
@@ -2011,13 +2033,13 @@ try {
     def enable_wu_drivers(self):
         prog_win = tk.Toplevel(self)
         prog_win.title("WU Driver Engedélyezés + Reset")
-        prog_win.geometry("500x120")
+        prog_win.geometry("500x140")
         prog_win.transient(self)
         prog_win.grab_set()
-        lbl = ttk.Label(prog_win, text="Windows Update driver engedélyezés és teljes reset folyamatban...\nEz akár 1-2 percig is eltarthat, kérlek várj!", justify=tk.CENTER)
-        lbl.pack(pady=10)
-        wu_progress = ttk.Progressbar(prog_win, orient=tk.HORIZONTAL, length=400, mode='indeterminate')
-        wu_progress.pack(pady=10)
+        lbl = ttk.Label(prog_win, text="Windows Update driver engedélyezés és teljes reset folyamatban...\nEz akár 1-2 percig is eltarthat, kérlek várj!", justify=tk.CENTER, font=("Segoe UI", 10))
+        lbl.pack(pady=(10, 5))
+        wu_progress = ttk.Progressbar(prog_win, orient=tk.HORIZONTAL, length=420, mode='indeterminate', style="Green.Horizontal.TProgressbar")
+        wu_progress.pack(pady=5)
         wu_progress.start(15)
 
         def _wu_enable_worker():
@@ -2252,13 +2274,13 @@ try {
 
         prog_win = tk.Toplevel(self)
         prog_win.title("Visszaállítási Pont")
-        prog_win.geometry("500x120")
+        prog_win.geometry("500x140")
         prog_win.transient(self)
         prog_win.grab_set()
-        lbl = ttk.Label(prog_win, text="Rendszer-visszaállítási pont létrehozása folyamatban...\nEz eltarthat egy percig, kérlek várj!", justify=tk.CENTER)
-        lbl.pack(pady=10)
-        rp_progress = ttk.Progressbar(prog_win, orient=tk.HORIZONTAL, length=400, mode='indeterminate')
-        rp_progress.pack(pady=10)
+        lbl = ttk.Label(prog_win, text="Rendszer-visszaállítási pont létrehozása folyamatban...\nEz eltarthat egy percig, kérlek várj!", justify=tk.CENTER, font=("Segoe UI", 10))
+        lbl.pack(pady=(10, 5))
+        rp_progress = ttk.Progressbar(prog_win, orient=tk.HORIZONTAL, length=420, mode='indeterminate', style="Green.Horizontal.TProgressbar")
+        rp_progress.pack(pady=5)
         rp_progress.start(15)
 
         def _rp_worker():
@@ -2291,27 +2313,12 @@ try {
         backup_folder = os.path.join(dest_dir, f"Driver_Backup_{datetime.now().strftime('%Y%m%d_%H%M%S')}")
         os.makedirs(backup_folder, exist_ok=True)
         
-        # Létrehozunk egy felugró ablakot a progress barnak
-        prog_win = tk.Toplevel(self)
-        prog_win.title("Exportálás folyamatban...")
-        prog_win.geometry("500x180")
-        prog_win.transient(self)
-        prog_win.grab_set()  # Letiltja a többi ablak kattintását, amíg ez megy
-
-        lbl = ttk.Label(prog_win, text=f"Driverek kimentése folyamatban ide:\n{backup_folder}\nKérlek várj...", justify=tk.CENTER)
-        lbl.pack(pady=10)
-
-        # Determinate csúszka (0-tól maxig megy)
-        progress = ttk.Progressbar(prog_win, orient=tk.HORIZONTAL, length=400, mode='determinate')
-        progress.pack(pady=10)
-        
-        status_lbl = ttk.Label(prog_win, text="DISM indítása...", font=("Arial", 8))
-        status_lbl.pack(pady=5)
-
-        # Elsődleges tipp a maximumra a listából
         total_guess = len(self.tree.get_children())
-        if total_guess > 0:
-            progress.config(maximum=total_guess)
+        prog_win, progress, status_lbl, counter_lbl, log_text, append_log = self._create_progress_window(
+            "Exportálás folyamatban...",
+            f"Driverek kimentése folyamatban ide:\n{backup_folder}\nKérlek várj...",
+            width=550, height=250, mode='determinate', maximum=max(total_guess, 1), has_log=False
+        )
 
         def worker():
             try:
@@ -2342,6 +2349,7 @@ try {
                             progress['value'] = v
                             short_txt = txt if len(txt) < 65 else txt[:62] + "..."
                             status_lbl.config(text=short_txt)
+                            counter_lbl.config(text=f"{v} / {mg}")
                         self.after(0, update_prog)
                     elif ".inf" in line.lower():
                         current_val += 1
@@ -2350,6 +2358,7 @@ try {
                             progress['value'] = v
                             short_txt = txt if len(txt) < 65 else txt[:62] + "..."
                             status_lbl.config(text=short_txt)
+                            counter_lbl.config(text=f"{v}")
                         self.after(0, step_prog)
                     else:
                         def set_txt(txt=line):
@@ -2425,18 +2434,21 @@ try {
         
         prog_win = tk.Toplevel(self)
         prog_win.title("WIM csatolás folyamatban...")
-        prog_win.geometry("550x180")
+        prog_win.geometry("600x200")
         prog_win.transient(self)
         prog_win.grab_set()
 
-        lbl = ttk.Label(prog_win, text=f"Windows Image csatolása és gyári driverek kinyerése...\nEz több percig is eltarthat, a háttérben folyik a művelet!", justify=tk.CENTER)
-        lbl.pack(pady=10)
-        
-        progress = ttk.Progressbar(prog_win, orient=tk.HORIZONTAL, length=450, mode='indeterminate')
-        progress.pack(pady=10)
+        lbl = ttk.Label(prog_win, text=f"Windows Image csatolása és gyári driverek kinyerése...\nEz több percig is eltarthat, a háttérben folyik a művelet!", justify=tk.CENTER, font=("Segoe UI", 10))
+        lbl.pack(pady=(10, 5))
+
+        counter_lbl = ttk.Label(prog_win, text="", font=("Segoe UI", 10, "bold"))
+        counter_lbl.pack(pady=(0, 2))
+
+        progress = ttk.Progressbar(prog_win, orient=tk.HORIZONTAL, length=520, mode='indeterminate', style="Green.Horizontal.TProgressbar")
+        progress.pack(pady=5)
         progress.start(15)
 
-        status_lbl = ttk.Label(prog_win, text="WIM fájl csatolása (Mount)...", font=("Arial", 8))
+        status_lbl = ttk.Label(prog_win, text="WIM fájl csatolása (Mount)...", font=("Segoe UI", 9))
         status_lbl.pack(pady=5)
         
         def worker():
@@ -2445,7 +2457,7 @@ try {
                 startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
                 
                 # 1. Mount image
-                self.after(0, lambda: status_lbl.config(text="1/3: Képfájl csatolása a Temp mappába (Türelem, 4-5 perc is lehet!)..."))
+                self.after(0, lambda: (status_lbl.config(text="Képfájl csatolása a Temp mappába (Türelem, 4-5 perc is lehet!)..."), counter_lbl.config(text="1 / 3")))
                 logging.info(f"WIM mountolasa: {wim_path}")
                 mount_cmd = [
                     "dism", "/Mount-Image",
@@ -2459,7 +2471,7 @@ try {
                     raise Exception(f"DISM Mount Hiba: {res.stdout.strip()} Hiba_stderr: {res.stderr.strip()}")
                 
                 # 2. Másolás robocopy-val (az XCOPY vagy shutil gyakran hibázik hosszú file nevek miatt)
-                self.after(0, lambda: status_lbl.config(text="2/3: Gyári DriverStore másolása (1-2 GB adat)..."))
+                self.after(0, lambda: (status_lbl.config(text="Gyári DriverStore másolása (1-2 GB adat)..."), counter_lbl.config(text="2 / 3")))
                 driverstore_path = os.path.join(mount_dir, "Windows", "System32", "DriverStore", "FileRepository")
                 logging.info(f"DriverStore masolasa innen: {driverstore_path}")
                 if os.path.exists(driverstore_path):
@@ -2468,7 +2480,7 @@ try {
                     raise Exception("A FileRepository (gyári driver mappa) nem található a csatolt WIM fájlban!")
                 
                 # 3. Biztonságos Unmount
-                self.after(0, lambda: status_lbl.config(text="3/3: WIM leválasztása (Takarítás)..."))
+                self.after(0, lambda: (status_lbl.config(text="WIM leválasztása (Takarítás)..."), counter_lbl.config(text="3 / 3")))
                 logging.info("WIM unmountolasa...")
                 unmount_cmd = ["dism", "/Unmount-Image", f"/MountDir:{mount_dir}", "/Discard"]
                 subprocess.run(unmount_cmd, capture_output=True, text=True, startupinfo=startupinfo, errors='replace', creationflags=subprocess.CREATE_NO_WINDOW)
@@ -2533,7 +2545,7 @@ try {
         lbl = ttk.Label(prog_win, text=lbl_txt, justify=tk.CENTER, font=("Segoe UI", 11, "bold"))
         lbl.pack(pady=5)
 
-        progress = ttk.Progressbar(prog_win, orient=tk.HORIZONTAL, mode='indeterminate')
+        progress = ttk.Progressbar(prog_win, orient=tk.HORIZONTAL, mode='indeterminate', style="Green.Horizontal.TProgressbar")
         progress.pack(pady=5, fill=tk.X, padx=20)
         progress.start(15)
         
