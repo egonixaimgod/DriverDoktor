@@ -31,7 +31,7 @@ def resource_path(relative_path):
 class DriverCleanerApp(tk.Tk):
     def __init__(self):
         super().__init__()
-        self.title("Windows Driver Szerviz & Tisztító Eszköz")
+        self.title("ULTIMATE DRIVER GYILKOLO (es telepito) SZERVIZ TOOL")
         self.geometry("780x560")
         self.minsize(600, 450)
 
@@ -2820,7 +2820,7 @@ if __name__ == "__main__":
     threading.excepthook = thread_exception_handler
 
     logging.info("==================================================")
-    logging.info("DRIVER TOOL ELINDITVA")
+    logging.info("ULTIMATE DRIVER GYILKOLO (es telepito) SZERVIZ TOOL ELINDITVA")
     logging.info(f"Futtatasi konyvtar: {os.getcwd()}")
     logging.info("==================================================")
 
