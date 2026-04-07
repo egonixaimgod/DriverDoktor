@@ -53,7 +53,7 @@ class DriverCleanerApp(tk.Tk):
         style.configure("Danger.TButton", font=("Segoe UI", 10), foreground="red")
         
         # Ablak ikon beállítása (ico + PhotoImage fallback)
-        icon_path = resource_path("icon.ico")
+        icon_path = resource_path("icon_red.ico")
         try:
             self.iconbitmap(icon_path)
         except Exception:
