@@ -1,4 +1,4 @@
-BUILD_NUMBER = 10
+BUILD_NUMBER = 11
 
 import tkinter as tk
 from tkinter import ttk, messagebox, filedialog
@@ -294,7 +294,7 @@ class DriverCleanerApp(tk.Tk):
         self.hw_tree.tag_configure("installed", foreground="#888888")
         self.hw_tree.bind("<ButtonRelease-1>", self._on_hw_tree_click)
 
-        self._hw_selected = {}  # iid -> bool (True = selected)
+        self._hw_selected = {}  # iid -> pool_idx (int index into hw_updates_pool)
 
         hw_scrollbar = ttk.Scrollbar(hw_frame, orient=tk.VERTICAL, command=self.hw_tree.yview)
         self.hw_tree.configure(yscrollcommand=hw_scrollbar.set)
@@ -413,7 +413,7 @@ class DriverCleanerApp(tk.Tk):
             for line in output.splitlines():
                 line = line.strip()
                 if not line:
-                    if current_driver:
+                    if current_driver and "published" in current_driver:
                         drivers.append(current_driver)
                         current_driver = {}
                     continue
@@ -1072,8 +1072,6 @@ try {
 
     def _on_hw_tree_click(self, event):
         """Kattintásra checkbox toggle a treeview-ban."""
-        region = self.hw_tree.identify_region(event.x, event.y)
-        col = self.hw_tree.identify_column(event.x)
         iid = self.hw_tree.identify_row(event.y)
         
         if not iid:
@@ -1247,6 +1245,11 @@ try {
         if (-not $U.EulaAccepted) { $U.AcceptEula() }
         $ToInstall.Add($U) | Out-Null
         Write-Output "FOUND: $($U.Title) [$($U.DriverModel)]"
+    }
+    
+    if ($ToInstall.Count -eq 0) {
+        Write-Output "EMPTY: Nem található egyező driver frissítés a kiválasztott eszközökhöz."
+        exit
     }
     
     Write-Output "DOWNLOAD: $($ToInstall.Count) driver frissítés letöltése..."
@@ -1778,7 +1781,7 @@ try {
                 subprocess.run(['pnputil', '/scan-devices'], startupinfo=startupinfo, capture_output=True, creationflags=subprocess.CREATE_NO_WINDOW)
                 time.sleep(3) # Várjunk, amíg a Windows a háttérben telepíti az eszközöket
             except Exception as ex:
-                print(f"Hiba a PnP hardver scan során: {ex}")
+                logging.error(f"Hiba a PnP hardver scan során: {ex}")
 
             def finish_scan():
                 if scan_win.winfo_exists():
