@@ -1,4 +1,4 @@
-BUILD_NUMBER = 6
+BUILD_NUMBER = 7
 
 import tkinter as tk
 from tkinter import ttk, messagebox, filedialog
@@ -486,7 +486,7 @@ class DriverCleanerApp(tk.Tk):
 
     def _search_wu_api(self):
         """Windows Update COM API-n keresztül keres elérhető driver frissítéseket.
-        Visszaad egy listát dict-ekkel, vagy üres listát hiba esetén."""
+        Visszaad egy listát dict-ekkel, üres listát ha nincs frissítés, vagy None-t hiba esetén."""
         try:
             startupinfo = subprocess.STARTUPINFO()
             startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
@@ -544,7 +544,7 @@ try {
             logging.error("WU COM API keresés timeout (300s)")
         except Exception as e:
             logging.error(f"WU COM API keresés hiba: {e}")
-        return []
+        return None
 
     def _create_progress_window(self, title, message, width=600, height=350, mode='determinate', maximum=100, has_log=True):
         """Unified progress window with green bar and X/Y counter label."""
@@ -814,6 +814,9 @@ try {
                     self._wu_phase = f"🔍 Fázis 1/2: WU szerver lekérdezése ({total_devs} eszköz)..."
                     logging.info("WU COM API driver keresés indítása...")
                     wu_results = self._search_wu_api()
+                    wu_api_success = wu_results is not None  # None = hiba, [] = nincs frissítés (mind telepítve)
+                    if wu_results is None:
+                        wu_results = []
                     
                     self._wu_phase = f"📋 Fázis 2/2: Eredmények feldolgozása..."
                     matched_hwids = set()
@@ -869,8 +872,8 @@ try {
                     # Telepített (nincs WU frissítés) eszközök gyűjtése
                     self._hw_installed_devs = [dev for dev in devices_to_check if dev['id'] not in matched_hwids]
                     
-                    # --- 2. FÁZIS: Katalógus fallback ha WU API üres ---
-                    if not self.hw_updates_pool:
+                    # --- 2. FÁZIS: Katalógus fallback CSAK ha WU API HIBÁT DOBOTT (nem ha 0 találat) ---
+                    if not self.hw_updates_pool and not wu_api_success:
                         self.wu_api_mode = False
                         logging.info("WU COM API nem talált frissítést, fallback: MS Update Catalog webes keresés...")
                         self._wu_phase = f"🌐 Katalógus keresés ({total_devs} eszköz)..."
