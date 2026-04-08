@@ -1,4 +1,4 @@
-BUILD_NUMBER = 27
+BUILD_NUMBER = 28
 
 import os
 import sys
@@ -1439,3 +1439,4 @@ if __name__ == "__main__":
         api.set_window(window)
 
     webview.start(func=on_start, debug=False)
+    os._exit(0)
