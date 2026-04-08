@@ -1,4 +1,4 @@
-BUILD_NUMBER = 15
+BUILD_NUMBER = 16
 
 import tkinter as tk
 from tkinter import ttk, messagebox, filedialog
@@ -587,9 +587,9 @@ try {
             log_text.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
 
         def append_log(msg):
+            logging.info(msg)
             if log_text is None:
                 return
-            logging.info(msg)
             log_text.config(state=tk.NORMAL)
             log_text.insert(tk.END, msg + "\n")
             log_text.see(tk.END)
@@ -774,6 +774,7 @@ try {
             # WU keresés háttérszálon — a treeview-t NEM töltjük fel előre, csak az eredményt mutatjuk
             def start_wu_search():
                 def wu_search_thread():
+                  try:
                     total_devs = len(devices_to_check)
                     
                     # Progress bar indítása
@@ -969,6 +970,17 @@ try {
                             self.sys_info_lbl.config(text=f"{_txt} | ✅ Kész ({_m})! Minden driver naprakész ({_t} eszköz vizsgálva)"))
                         self.after(0, self._populate_hw_results)  # Telepített eszközök mutatása is
                     
+                    self.after(0, lambda: setattr(self, '_hw_scanning', False))
+                  except Exception as _wse:
+                    logging.error(f"wu_search_thread crash: {_wse}")
+                    import traceback
+                    logging.error(traceback.format_exc())
+                    self._wu_search_cancelled = True
+                    self.after(0, lambda: self.hw_progress.stop())
+                    self.after(0, lambda: self.hw_progress.config(mode='determinate', maximum=100, value=0))
+                    self.after(0, lambda: self.hw_status_lbl.config(text="❌ Hiba történt a WU keresésnél!"))
+                    self.after(0, lambda: self.sys_info_lbl.config(text="❌ WU keresés hiba! Próbáld újra."))
+                  finally:
                     self.after(0, lambda: setattr(self, '_hw_scanning', False))
                 
                 threading.Thread(target=wu_search_thread, daemon=True).start()
@@ -2523,8 +2535,7 @@ try {
                 self.after(0, lambda: append_log("\n3. lépés: Windows inbox driverek másolása (DriverStore)..."))
                 self.after(0, lambda: status_lbl.config(text="Windows inbox driverek másolása..."))
                 self.after(0, lambda: progress.config(mode='indeterminate'))
-                try: progress.start(15)
-                except Exception: pass
+                self.after(0, lambda: progress.start(15))
 
                 inbox_folder = os.path.join(backup_folder, '_Windows_Inbox_Drivers')
                 os.makedirs(inbox_folder, exist_ok=True)
