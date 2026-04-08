@@ -53,3 +53,225 @@
 2026-04-08 17:23:03 [DEBUG] Importing XVThumbImagePlugin
 2026-04-08 17:23:03 [DEBUG] STREAM b'IHDR' 13758 13
 2026-04-08 17:23:03 [DEBUG] STREAM b'IDAT' 13783 4023
+2026-04-08 20:49:08 [INFO] ==================================================
+2026-04-08 20:49:08 [INFO] ULTIMATE DRIVER GYILKOLO (es telepito) SZERVIZ TOOL ELINDITVA
+2026-04-08 20:49:08 [INFO] Futtatasi konyvtar: C:\Users\ego\Desktop\Driver_pucolo_szerviztool\dist
+2026-04-08 20:49:08 [INFO] ==================================================
+2026-04-08 20:49:16 [INFO] ==================================================
+2026-04-08 20:49:16 [INFO] ULTIMATE DRIVER GYILKOLO (es telepito) SZERVIZ TOOL ELINDITVA
+2026-04-08 20:49:16 [INFO] Futtatasi konyvtar: C:\Users\ego\Desktop\Driver_pucolo_szerviztool\dist
+2026-04-08 20:49:16 [INFO] ==================================================
+2026-04-08 20:49:18 [INFO] [WU_STATUS] === WU állapot ellenőrzés ===
+2026-04-08 20:49:18 [INFO] [WU_STATUS] ExcludeWUDriversInQualityUpdate = 1
+2026-04-08 20:49:18 [INFO] [WU_STATUS] SearchOrderConfig = 1
+2026-04-08 20:49:18 [INFO] [WU_STATUS] Végeredmény: Házirend által LETILTVA (Képen: bekapcsolva)
+2026-04-08 20:49:20 [INFO] Indul a powershell lekérdezés: Get-WmiObject Win32_PnPEntity
+2026-04-08 20:49:21 [INFO] Powershell lekérdezés vége! ReturnCode: 0
+2026-04-08 20:49:21 [INFO] JSON decodolas sikeres! 129 elem parseolva.
+2026-04-08 20:49:21 [INFO] PnP feldolgozando elemek szama: 129
+2026-04-08 20:49:21 [INFO] PnP MINTA [0]: Name='USB Input Device', PNPClass='HIDClass', PNPDeviceID='USB\\VID_1AF3&PID_0001\\6&25A4B41B&0&2'
+2026-04-08 20:49:21 [INFO] PnP MINTA [1]: Name='Motherboard resources', PNPClass='System', PNPDeviceID='ACPI\\PNP0C02\\0'
+2026-04-08 20:49:21 [INFO] PnP MINTA [2]: Name='PCI Express Upstream Switch Port', PNPClass='System', PNPDeviceID='PCI\\VEN_1022&DEV_43C6&SUBSYS_02011B21&REV_01\\4&2C18E2E3&0&020B'
+2026-04-08 20:49:21 [INFO] PnP MINTA [3]: Name='PCI standard host CPU bridge', PNPClass='System', PNPDeviceID='PCI\\VEN_1022&DEV_1444&SUBSYS_00000000&REV_00\\3&11583659&0&C4'
+2026-04-08 20:49:21 [INFO] PnP MINTA [4]: Name='HID-compliant vendor-defined device', PNPClass='HIDClass', PNPDeviceID='HID\\VID_041E&PID_3274&MI_03&COL04\\8&2B2801A5&0&0003'
+2026-04-08 20:49:21 [INFO] PnP szures eredmenye: 53 eszkoz atment a szuron. Kiszurve: no_pid=0, virtual=3, root=11, class=29, no_hwid=6, dup=27
+2026-04-08 20:49:21 [INFO] no_hwid miatt kiszurt eszkozok mintai (6):
+2026-04-08 20:49:21 [INFO]   SKIP_NO_HWID: System Firmware | PID=UEFI\RES_{00000000-0000-0000-0000-000000000000}\0 | class=Firmware
+2026-04-08 20:49:21 [INFO]   SKIP_NO_HWID: USB Root Hub (USB 3.0) | PID=USB\ROOT_HUB30\5&4087D53&0&0 | class=USB
+2026-04-08 20:49:21 [INFO]   SKIP_NO_HWID: Microsoft ACPI-Compliant System | PID=ACPI_HAL\PNP0C08\0 | class=System
+2026-04-08 20:49:21 [INFO]   SKIP_NO_HWID: Ismeretlen Eszköz | PID=HTREE\ROOT\0 | class=
+2026-04-08 20:49:21 [INFO]   SKIP_NO_HWID: Microsoft UEFI-Compliant System | PID=ACPI_HAL\UEFI\0 | class=System
+2026-04-08 20:49:21 [INFO]   SKIP_NO_HWID: USB Root Hub (USB 3.0) | PID=USB\ROOT_HUB30\5&19AA5C54&0&0 | class=USB
+2026-04-08 20:49:21 [INFO]   PASSED: USB Input Device => HWID=USB\VID_1AF3&PID_0001 cat=🖱️ Periféria
+2026-04-08 20:49:21 [INFO]   PASSED: Motherboard resources => HWID=ACPI\PNP0C02 cat=⚙️ Rendszereszköz
+2026-04-08 20:49:21 [INFO]   PASSED: PCI Express Upstream Switch Port => HWID=VEN_1022&DEV_43C6 cat=⚙️ Rendszereszköz
+2026-04-08 20:49:21 [INFO]   PASSED: PCI standard host CPU bridge => HWID=VEN_1022&DEV_1444 cat=⚙️ Rendszereszköz
+2026-04-08 20:49:21 [INFO]   PASSED: HID-compliant vendor-defined device => HWID=HID\VID_041E&PID_3274 cat=🖱️ Periféria
+2026-04-08 20:49:21 [INFO]   PASSED: Programmable interrupt controller => HWID=ACPI\PNP0000 cat=⚙️ Rendszereszköz
+2026-04-08 20:49:21 [INFO]   PASSED: AMD USB 3.10 eXtensible Host Controller - 1.10 (Microsoft) => HWID=VEN_1022&DEV_149C cat=🔌 USB Vezérlő
+2026-04-08 20:49:21 [INFO]   PASSED: USB Composite Device => HWID=USB\VID_320F&PID_5000 cat=🔌 USB Vezérlő
+2026-04-08 20:49:21 [INFO]   PASSED: AMD SMBUS => HWID=VEN_1022&DEV_790B cat=⚙️ Rendszereszköz
+2026-04-08 20:49:21 [INFO]   PASSED: AMD GPIO Controller => HWID=ACPI\AMDIF030 cat=⚙️ Rendszereszköz
+2026-04-08 20:49:21 [INFO] WU COM API driver keresés indítása...
+2026-04-08 20:49:21 [INFO] WU COM API PowerShell keresés indítása...
+2026-04-08 20:53:50 [INFO] ==================================================
+2026-04-08 20:53:50 [INFO] ULTIMATE DRIVER GYILKOLO (es telepito) SZERVIZ TOOL ELINDITVA
+2026-04-08 20:53:50 [INFO] Futtatasi konyvtar: C:\Users\ego\Desktop\Driver_pucolo_szerviztool\dist
+2026-04-08 20:53:50 [INFO] ==================================================
+2026-04-08 21:04:51 [INFO] ==================================================
+2026-04-08 21:04:51 [INFO] ULTIMATE DRIVER GYILKOLO (es telepito) SZERVIZ TOOL ELINDITVA
+2026-04-08 21:04:51 [INFO] Futtatasi konyvtar: C:\Users\ego\Desktop\Driver_pucolo_szerviztool\dist
+2026-04-08 21:04:51 [INFO] ==================================================
+2026-04-08 21:05:15 [INFO] [AUTOFIX] ==================================================
+2026-04-08 21:05:15 [INFO] [AUTOFIX] FÁZIS 1: Windows Update driver keresés letiltása...
+2026-04-08 21:05:15 [INFO] [AUTOFIX]   1. ExcludeWUDriversInQualityUpdate = 1
+2026-04-08 21:05:15 [INFO] [AUTOFIX]     ✅ Registry beállítva
+2026-04-08 21:05:15 [INFO] [AUTOFIX]   2. SearchOrderConfig = 0
+2026-04-08 21:05:15 [INFO] [AUTOFIX]     ✅ Registry beállítva
+2026-04-08 21:05:15 [INFO] [AUTOFIX]   3. Windows Update szolgáltatás újraindítása...
+2026-04-08 21:05:17 [INFO] [AUTOFIX]     ✅ WU szolgáltatás újraindítva
+2026-04-08 21:05:17 [INFO] [AUTOFIX]   4. Beállítások ellenőrzése...
+2026-04-08 21:05:17 [INFO] [AUTOFIX]     ✅ ExcludeWUDriversInQualityUpdate = 1 (OK)
+2026-04-08 21:05:17 [INFO] [AUTOFIX]     ✅ SearchOrderConfig = 0 (OK)
+2026-04-08 21:05:17 [INFO] [AUTOFIX] 
+✅ WU driver keresés sikeresen letiltva!
+
+2026-04-08 21:05:17 [INFO] [AUTOFIX] ==================================================
+2026-04-08 21:05:17 [INFO] [AUTOFIX] FÁZIS 2: Third-party driverek listázása...
+2026-04-08 21:05:17 [INFO] [AUTOFIX] Talált third-party driverek: 14 db
+2026-04-08 21:05:17 [INFO] [AUTOFIX]   🗑 Törlés: oem2.inf [Advanced Micro Devices, Inc.]
+2026-04-08 21:05:18 [INFO] [AUTOFIX]     ✅ oem2.inf törölve
+2026-04-08 21:05:18 [INFO] [AUTOFIX]   🗑 Törlés: oem1.inf [Advanced Micro Devices, Inc]
+2026-04-08 21:05:18 [INFO] [AUTOFIX]     ✅ oem1.inf törölve
+2026-04-08 21:05:18 [INFO] [AUTOFIX]   🗑 Törlés: oem3.inf [Advanced Micro Devices]
+2026-04-08 21:05:18 [INFO] [AUTOFIX]     ✅ oem3.inf törölve
+2026-04-08 21:05:18 [INFO] [AUTOFIX]   🗑 Törlés: oem11.inf [Apple, Inc.]
+2026-04-08 21:05:18 [INFO] [AUTOFIX]     ✅ oem11.inf törölve
+2026-04-08 21:05:18 [INFO] [AUTOFIX]   🗑 Törlés: oem12.inf [Apple, Inc.]
+2026-04-08 21:05:18 [INFO] [AUTOFIX]     ✅ oem12.inf törölve
+2026-04-08 21:05:18 [INFO] [AUTOFIX]   🗑 Törlés: oem13.inf [Apple, Inc.]
+2026-04-08 21:05:18 [INFO] [AUTOFIX]     ✅ oem13.inf törölve
+2026-04-08 21:05:18 [INFO] [AUTOFIX]   🗑 Törlés: oem0.inf [Intel Corporation]
+2026-04-08 21:05:18 [INFO] [AUTOFIX]     ✅ oem0.inf törölve
+2026-04-08 21:05:18 [INFO] [AUTOFIX]   🗑 Törlés: oem7.inf [Razer Inc]
+2026-04-08 21:05:18 [INFO] [AUTOFIX]     ✅ oem7.inf törölve
+2026-04-08 21:05:18 [INFO] [AUTOFIX]   🗑 Törlés: oem9.inf [Razer Inc]
+2026-04-08 21:05:18 [INFO] [AUTOFIX]     ✅ oem9.inf törölve
+2026-04-08 21:05:18 [INFO] [AUTOFIX]   🗑 Törlés: oem10.inf [Razer Inc]
+2026-04-08 21:05:18 [INFO] [AUTOFIX]     ✅ oem10.inf törölve
+2026-04-08 21:05:18 [INFO] [AUTOFIX]   🗑 Törlés: oem8.inf [Razer Inc]
+2026-04-08 21:05:18 [INFO] [AUTOFIX]     ✅ oem8.inf törölve
+2026-04-08 21:05:18 [INFO] [AUTOFIX]   🗑 Törlés: oem5.inf [Creative Technology Ltd.]
+2026-04-08 21:05:19 [INFO] [AUTOFIX]     ✅ oem5.inf törölve
+2026-04-08 21:05:19 [INFO] [AUTOFIX]   🗑 Törlés: oem4.inf [NVIDIA]
+2026-04-08 21:05:26 [INFO] [AUTOFIX]     ✅ oem4.inf törölve
+2026-04-08 21:05:26 [INFO] [AUTOFIX]   🗑 Törlés: oem6.inf [Razer Inc]
+2026-04-08 21:05:26 [INFO] [AUTOFIX]     ✅ oem6.inf törölve
+2026-04-08 21:05:26 [INFO] [AUTOFIX] 
+--- Törlés kész. Sikeres: 14, Sikertelen: 0 ---
+
+2026-04-08 21:05:26 [INFO] [AUTOFIX] ==================================================
+2026-04-08 21:05:26 [INFO] [AUTOFIX] FÁZIS 3: pnputil /scan-devices futtatása...
+2026-04-08 21:05:31 [INFO] [AUTOFIX] ✅ Hardver újraszkennelés kész!
+2026-04-08 21:05:31 [INFO] [AUTOFIX] ==================================================
+2026-04-08 21:05:31 [INFO] [AUTOFIX] FÁZIS 4: Windows Update driver keresés és telepítés (egyetlen menet)...
+
+2026-04-08 21:05:32 [INFO] [AUTOFIX] SEARCH: Driver frissítések keresése...
+2026-04-08 21:05:37 [INFO] [AUTOFIX]   📦 Advanced Micro Devices, Inc - System - 8/30/2017 12:00:00 AM - 5.12.0.38
+2026-04-08 21:05:37 [INFO] [AUTOFIX]   📦 Advanced Micro Devices, Inc. - System - 8/29/2017 12:00:00 AM - 2.0.1.0
+2026-04-08 21:05:37 [INFO] [AUTOFIX]   📦 Advanced Micro Devices, Inc. - System - 3/14/2016 12:00:00 AM - 2.0.1.0
+2026-04-08 21:05:37 [INFO] [AUTOFIX]   📦 Advanced Micro Devices, Inc driver update for AMD SMBus
+2026-04-08 21:05:37 [INFO] [AUTOFIX]   📦 Advanced Micro Devices, Inc - System - 2.2.0.121
+2026-04-08 21:05:37 [INFO] [AUTOFIX]   📦 Creative Technology Ltd. - MEDIA - 1.16.4.26
+2026-04-08 21:05:37 [INFO] [AUTOFIX]   📦 Advanced Micro Devices - System - 1.0.0.83
+2026-04-08 21:05:37 [INFO] [AUTOFIX]   📦 Advanced Micro Devices Inc. - SecurityDevices - 5.17.0.0
+2026-04-08 21:05:37 [INFO] [AUTOFIX]   📦 Realtek Semiconductor Corp. - Bluetooth - 1.9.1038.3001
+2026-04-08 21:05:37 [INFO] [AUTOFIX]   📦 Razer Inc - HIDClass - 6.2.9200.16547
+2026-04-08 21:05:37 [INFO] [AUTOFIX]   📦 Apple, Inc. - USBDevice - 538.0.0.0
+2026-04-08 21:05:37 [INFO] [AUTOFIX]   📦 NVIDIA - Display - 32.0.15.6094
+2026-04-08 21:05:37 [INFO] [AUTOFIX]   📦 SAMSUNG Electronics Co., Ltd.  - USB - 2.21.0.0
+2026-04-08 21:05:37 [INFO] [AUTOFIX]   📦 NVIDIA Display Driver Update (32.0.15.9186)
+2026-04-08 21:05:37 [INFO] [AUTOFIX] 
+Összesen 14 driver telepítése...
+2026-04-08 21:05:37 [INFO] [AUTOFIX]   ⬇ Letöltés: 1/14 Advanced Micro Devices, Inc - System - 8/30/2017 12:00:00 AM - 5.12.0.38
+2026-04-08 21:05:39 [INFO] [AUTOFIX]   ⚙ Telepítés: 1/14 Advanced Micro Devices, Inc - System - 8/30/2017 12:00:00 AM - 5.12.0.38
+2026-04-08 21:05:39 [INFO] [AUTOFIX]   ✅ [SIKER] Advanced Micro Devices, Inc - System - 8/30/2017 12:00:00 AM - 5.12.0.38
+2026-04-08 21:05:39 [INFO] [AUTOFIX]   ⬇ Letöltés: 2/14 Advanced Micro Devices, Inc. - System - 8/29/2017 12:00:00 AM - 2.0.1.0
+2026-04-08 21:05:40 [INFO] [AUTOFIX]   ⚙ Telepítés: 2/14 Advanced Micro Devices, Inc. - System - 8/29/2017 12:00:00 AM - 2.0.1.0
+2026-04-08 21:05:40 [INFO] [AUTOFIX]   ✅ [SIKER] Advanced Micro Devices, Inc. - System - 8/29/2017 12:00:00 AM - 2.0.1.0
+2026-04-08 21:05:40 [INFO] [AUTOFIX]   ⬇ Letöltés: 3/14 Advanced Micro Devices, Inc. - System - 3/14/2016 12:00:00 AM - 2.0.1.0
+2026-04-08 21:05:41 [INFO] [AUTOFIX]   ⚙ Telepítés: 3/14 Advanced Micro Devices, Inc. - System - 3/14/2016 12:00:00 AM - 2.0.1.0
+2026-04-08 21:05:41 [INFO] [AUTOFIX]   ❌ [HIBA] Advanced Micro Devices, Inc. - System - 3/14/2016 12:00:00 AM - 2.0.1.0
+2026-04-08 21:05:41 [INFO] [AUTOFIX]   ⬇ Letöltés: 4/14 Advanced Micro Devices, Inc driver update for AMD SMBus
+2026-04-08 21:05:43 [INFO] [AUTOFIX]   ⚙ Telepítés: 4/14 Advanced Micro Devices, Inc driver update for AMD SMBus
+2026-04-08 21:05:43 [INFO] [AUTOFIX]   ❌ [HIBA] Advanced Micro Devices, Inc driver update for AMD SMBus
+2026-04-08 21:05:43 [INFO] [AUTOFIX]   ⬇ Letöltés: 5/14 Advanced Micro Devices, Inc - System - 2.2.0.121
+2026-04-08 21:05:44 [INFO] [AUTOFIX]   ⚙ Telepítés: 5/14 Advanced Micro Devices, Inc - System - 2.2.0.121
+2026-04-08 21:05:44 [INFO] [AUTOFIX]   ✅ [SIKER] Advanced Micro Devices, Inc - System - 2.2.0.121
+2026-04-08 21:05:44 [INFO] [AUTOFIX]   ⬇ Letöltés: 6/14 Creative Technology Ltd. - MEDIA - 1.16.4.26
+2026-04-08 21:05:46 [INFO] [AUTOFIX]   ⚙ Telepítés: 6/14 Creative Technology Ltd. - MEDIA - 1.16.4.26
+2026-04-08 21:05:51 [INFO] [AUTOFIX]   ✅ [SIKER] Creative Technology Ltd. - MEDIA - 1.16.4.26
+2026-04-08 21:05:51 [INFO] [AUTOFIX]   ⬇ Letöltés: 7/14 Advanced Micro Devices - System - 1.0.0.83
+2026-04-08 21:05:52 [INFO] [AUTOFIX]   ⚙ Telepítés: 7/14 Advanced Micro Devices - System - 1.0.0.83
+2026-04-08 21:05:52 [INFO] [AUTOFIX]   ❌ [HIBA] Advanced Micro Devices - System - 1.0.0.83
+2026-04-08 21:05:52 [INFO] [AUTOFIX]   ⬇ Letöltés: 8/14 Advanced Micro Devices Inc. - SecurityDevices - 5.17.0.0
+2026-04-08 21:05:53 [INFO] [AUTOFIX]   ⚙ Telepítés: 8/14 Advanced Micro Devices Inc. - SecurityDevices - 5.17.0.0
+2026-04-08 21:05:54 [INFO] [AUTOFIX]   ✅ [SIKER] Advanced Micro Devices Inc. - SecurityDevices - 5.17.0.0
+2026-04-08 21:05:54 [INFO] [AUTOFIX]   ⬇ Letöltés: 9/14 Realtek Semiconductor Corp. - Bluetooth - 1.9.1038.3001
+2026-04-08 21:05:55 [INFO] [AUTOFIX]   ⚙ Telepítés: 9/14 Realtek Semiconductor Corp. - Bluetooth - 1.9.1038.3001
+2026-04-08 21:05:59 [INFO] [AUTOFIX]   ✅ [SIKER] Realtek Semiconductor Corp. - Bluetooth - 1.9.1038.3001
+2026-04-08 21:05:59 [INFO] [AUTOFIX]   ⬇ Letöltés: 10/14 Razer Inc - HIDClass - 6.2.9200.16547
+2026-04-08 21:06:01 [INFO] [AUTOFIX]   ⚙ Telepítés: 10/14 Razer Inc - HIDClass - 6.2.9200.16547
+2026-04-08 21:06:02 [INFO] [AUTOFIX]   ✅ [SIKER] Razer Inc - HIDClass - 6.2.9200.16547
+2026-04-08 21:06:02 [INFO] [AUTOFIX]   ⬇ Letöltés: 11/14 Apple, Inc. - USBDevice - 538.0.0.0
+2026-04-08 21:06:03 [INFO] [AUTOFIX]   ⚙ Telepítés: 11/14 Apple, Inc. - USBDevice - 538.0.0.0
+2026-04-08 21:06:03 [INFO] [AUTOFIX]   ✅ [SIKER] Apple, Inc. - USBDevice - 538.0.0.0
+2026-04-08 21:06:03 [INFO] [AUTOFIX]   ⬇ Letöltés: 12/14 NVIDIA - Display - 32.0.15.6094
+2026-04-08 21:06:23 [INFO] [AUTOFIX]   ⚙ Telepítés: 12/14 NVIDIA - Display - 32.0.15.6094
+2026-04-08 21:06:55 [INFO] [AUTOFIX]   ✅ [SIKER] NVIDIA - Display - 32.0.15.6094
+2026-04-08 21:06:55 [INFO] [AUTOFIX]   ⬇ Letöltés: 13/14 SAMSUNG Electronics Co., Ltd.  - USB - 2.21.0.0
+2026-04-08 21:06:56 [INFO] [AUTOFIX]   ⚙ Telepítés: 13/14 SAMSUNG Electronics Co., Ltd.  - USB - 2.21.0.0
+2026-04-08 21:06:57 [INFO] [AUTOFIX]   ✅ [SIKER] SAMSUNG Electronics Co., Ltd.  - USB - 2.21.0.0
+2026-04-08 21:06:57 [INFO] [AUTOFIX]   ⬇ Letöltés: 14/14 NVIDIA Display Driver Update (32.0.15.9186)
+2026-04-08 21:07:26 [INFO] [AUTOFIX]   ⚙ Telepítés: 14/14 NVIDIA Display Driver Update (32.0.15.9186)
+2026-04-08 21:08:11 [INFO] [AUTOFIX]   ✅ [SIKER] NVIDIA Display Driver Update (32.0.15.9186)
+2026-04-08 21:08:11 [INFO] [AUTOFIX] 
+--- Sikeres=11, Sikertelen=3 ---
+2026-04-08 21:08:11 [INFO] [AUTOFIX] 
+Eszközök újraszkennelése a telepítés után...
+2026-04-08 21:08:12 [INFO] [AUTOFIX] ✅ Eszközök frissítve!
+2026-04-08 21:08:12 [INFO] [AUTOFIX] 
+Telepítés kész. Sikeres: 11, Sikertelen: 3
+2026-04-08 21:08:12 [INFO] [AUTOFIX] 
+==================================================
+2026-04-08 21:08:12 [INFO] [AUTOFIX] FÁZIS 6: A gép 30 másodperc múlva újraindul!
+2026-04-08 21:08:12 [INFO] [AUTOFIX] 
+⚡ Teljes folyamat idő: 02:56
+2026-04-08 21:08:42 [INFO] [AUTOFIX] 🔄 Újraindítás MOST!
+2026-04-08 21:10:36 [INFO] ==================================================
+2026-04-08 21:10:36 [INFO] ULTIMATE DRIVER GYILKOLO (es telepito) SZERVIZ TOOL ELINDITVA
+2026-04-08 21:10:36 [INFO] Futtatasi konyvtar: C:\Users\ego\Desktop\Driver_pucolo_szerviztool\dist
+2026-04-08 21:10:36 [INFO] ==================================================
+2026-04-08 21:10:47 [INFO] Indul a powershell lekérdezés: Get-WmiObject Win32_PnPEntity
+2026-04-08 21:10:48 [INFO] Powershell lekérdezés vége! ReturnCode: 0
+2026-04-08 21:10:48 [INFO] JSON decodolas sikeres! 138 elem parseolva.
+2026-04-08 21:10:48 [INFO] PnP feldolgozando elemek szama: 138
+2026-04-08 21:10:48 [INFO] PnP MINTA [0]: Name='USB Input Device', PNPClass='HIDClass', PNPDeviceID='USB\\VID_1AF3&PID_0001\\6&25A4B41B&0&2'
+2026-04-08 21:10:48 [INFO] PnP MINTA [1]: Name='Motherboard resources', PNPClass='System', PNPDeviceID='ACPI\\PNP0C02\\0'
+2026-04-08 21:10:48 [INFO] PnP MINTA [2]: Name='PCI Express Upstream Switch Port', PNPClass='System', PNPDeviceID='PCI\\VEN_1022&DEV_43C6&SUBSYS_02011B21&REV_01\\4&2C18E2E3&0&020B'
+2026-04-08 21:10:48 [INFO] PnP MINTA [3]: Name='PCI standard host CPU bridge', PNPClass='System', PNPDeviceID='PCI\\VEN_1022&DEV_1444&SUBSYS_00000000&REV_00\\3&11583659&0&C4'
+2026-04-08 21:10:48 [INFO] PnP MINTA [4]: Name='HID-compliant vendor-defined device', PNPClass='HIDClass', PNPDeviceID='HID\\VID_041E&PID_3274&MI_03&COL04\\8&2B2801A5&0&0003'
+2026-04-08 21:10:48 [INFO] PnP szures eredmenye: 53 eszkoz atment a szuron. Kiszurve: no_pid=0, virtual=3, root=11, class=30, no_hwid=14, dup=27
+2026-04-08 21:10:48 [INFO] no_hwid miatt kiszurt eszkozok mintai (14):
+2026-04-08 21:10:48 [INFO]   SKIP_NO_HWID: System Firmware | PID=UEFI\RES_{00000000-0000-0000-0000-000000000000}\0 | class=Firmware
+2026-04-08 21:10:48 [INFO]   SKIP_NO_HWID: WAN Miniport (PPPOE) | PID=SWD\MSRRAS\MS_PPPOEMINIPORT | class=Net
+2026-04-08 21:10:48 [INFO]   SKIP_NO_HWID: WAN Miniport (PPTP) | PID=SWD\MSRRAS\MS_PPTPMINIPORT | class=Net
+2026-04-08 21:10:48 [INFO]   SKIP_NO_HWID: WAN Miniport (IKEv2) | PID=SWD\MSRRAS\MS_AGILEVPNMINIPORT | class=Net
+2026-04-08 21:10:48 [INFO]   SKIP_NO_HWID: USB Root Hub (USB 3.0) | PID=USB\ROOT_HUB30\5&4087D53&0&0 | class=USB
+2026-04-08 21:10:48 [INFO]   SKIP_NO_HWID: WAN Miniport (Network Monitor) | PID=SWD\MSRRAS\MS_NDISWANBH | class=Net
+2026-04-08 21:10:48 [INFO]   SKIP_NO_HWID: WAN Miniport (IP) | PID=SWD\MSRRAS\MS_NDISWANIP | class=Net
+2026-04-08 21:10:48 [INFO]   SKIP_NO_HWID: Microsoft ACPI-Compliant System | PID=ACPI_HAL\PNP0C08\0 | class=System
+2026-04-08 21:10:48 [INFO]   SKIP_NO_HWID: Ismeretlen Eszköz | PID=HTREE\ROOT\0 | class=
+2026-04-08 21:10:48 [INFO]   SKIP_NO_HWID: WAN Miniport (SSTP) | PID=SWD\MSRRAS\MS_SSTPMINIPORT | class=Net
+2026-04-08 21:10:48 [INFO]   SKIP_NO_HWID: Microsoft UEFI-Compliant System | PID=ACPI_HAL\UEFI\0 | class=System
+2026-04-08 21:10:48 [INFO]   SKIP_NO_HWID: USB Root Hub (USB 3.0) | PID=USB\ROOT_HUB30\5&19AA5C54&0&0 | class=USB
+2026-04-08 21:10:48 [INFO]   SKIP_NO_HWID: WAN Miniport (IPv6) | PID=SWD\MSRRAS\MS_NDISWANIPV6 | class=Net
+2026-04-08 21:10:48 [INFO]   SKIP_NO_HWID: WAN Miniport (L2TP) | PID=SWD\MSRRAS\MS_L2TPMINIPORT | class=Net
+2026-04-08 21:10:48 [INFO]   PASSED: USB Input Device => HWID=USB\VID_1AF3&PID_0001 cat=🖱️ Periféria
+2026-04-08 21:10:48 [INFO]   PASSED: Motherboard resources => HWID=ACPI\PNP0C02 cat=⚙️ Rendszereszköz
+2026-04-08 21:10:48 [INFO]   PASSED: PCI Express Upstream Switch Port => HWID=VEN_1022&DEV_43C6 cat=⚙️ Rendszereszköz
+2026-04-08 21:10:48 [INFO]   PASSED: PCI standard host CPU bridge => HWID=VEN_1022&DEV_1444 cat=⚙️ Rendszereszköz
+2026-04-08 21:10:48 [INFO]   PASSED: HID-compliant vendor-defined device => HWID=HID\VID_041E&PID_3274 cat=🖱️ Periféria
+2026-04-08 21:10:48 [INFO]   PASSED: Programmable interrupt controller => HWID=ACPI\PNP0000 cat=⚙️ Rendszereszköz
+2026-04-08 21:10:48 [INFO]   PASSED: AMD USB 3.10 eXtensible Host Controller - 1.10 (Microsoft) => HWID=VEN_1022&DEV_149C cat=🔌 USB Vezérlő
+2026-04-08 21:10:48 [INFO]   PASSED: USB Composite Device => HWID=USB\VID_320F&PID_5000 cat=🔌 USB Vezérlő
+2026-04-08 21:10:48 [INFO]   PASSED: AMD SMBus => HWID=VEN_1022&DEV_790B cat=⚙️ Rendszereszköz
+2026-04-08 21:10:48 [INFO]   PASSED: AMD GPIO Controller => HWID=ACPI\AMDIF030 cat=⚙️ Rendszereszköz
+2026-04-08 21:10:48 [INFO] WU COM API driver keresés indítása...
+2026-04-08 21:10:48 [INFO] WU COM API PowerShell keresés indítása...
+2026-04-08 21:10:55 [INFO] WU COM API PowerShell vége. ReturnCode: 0, stdout len: 3
+2026-04-08 21:10:55 [INFO] WU COM API talált 0 db frissítést
+2026-04-08 21:13:29 [INFO] [WU_STATUS] === WU állapot ellenőrzés ===
+2026-04-08 21:13:29 [INFO] [WU_STATUS] ExcludeWUDriversInQualityUpdate = 1
+2026-04-08 21:13:29 [INFO] [WU_STATUS] SearchOrderConfig = 0
+2026-04-08 21:13:29 [INFO] [WU_STATUS] Végeredmény: Teljesen LETILTVA (Házirend és Eszközbeállítás is)

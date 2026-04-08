@@ -1,4 +1,4 @@
-BUILD_NUMBER = 20
+BUILD_NUMBER = 21
 
 import tkinter as tk
 from tkinter import ttk, messagebox, filedialog
@@ -366,7 +366,8 @@ class DriverCleanerApp(tk.Tk):
             self.check_wu_status()
         elif view_name == "hw":
             self.hw_view.pack(fill=tk.BOTH, expand=True)
-            self.load_hardware_info()
+            if not hasattr(self, '_hw_loaded') or not self._hw_loaded:
+                self.load_hardware_info()
         elif view_name == "autofix":
             self.autofix_view.pack(fill=tk.BOTH, expand=True)
 
@@ -687,21 +688,21 @@ try {
                 # PCI: VEN_XXXX&DEV_YYYY
                 m_pci = re.search(r'(VEN_[0-9A-F]+&DEV_[0-9A-F]+)', pnp_id, re.I)
                 if m_pci: return m_pci.group(1)
-                # USB: VID_XXXX&PID_YYYY
+                # HDAUDIO: HDAUDIO\FUNC_XX&VEN_XXXX&DEV_XXXX (specifikusabb, mint a generikus VID/PID)
+                m_hda = re.search(r'(HDAUDIO\\FUNC_[0-9A-F]+&VEN_[0-9A-F]+&DEV_[0-9A-F]+)', pnp_id, re.I)
+                if m_hda: return m_hda.group(1)
+                # HID eszközök VID/PID-vel: HID\VID_XXXX&PID_XXXX (prefix-szel, specifikusabb)
+                m_hid = re.search(r'(HID\\VID_[0-9A-F]+&PID_[0-9A-F]+)', pnp_id, re.I)
+                if m_hid: return m_hid.group(1)
+                # USB eszköz prefix-szel: USB\VID_XXXX&PID_XXXX (specifikusabb)
+                m_usb2 = re.search(r'(USB\\VID_[0-9A-F]+&PID_[0-9A-F]+)', pnp_id, re.I)
+                if m_usb2: return m_usb2.group(1)
+                # Generikus USB: VID_XXXX&PID_YYYY (prefix nélküli fallback)
                 m_usb = re.search(r'(VID_[0-9A-F]+&PID_[0-9A-F]+)', pnp_id, re.I)
                 if m_usb: return m_usb.group(1)
                 # ACPI: ACPI\XXXXX
                 m_acpi = re.search(r'(ACPI\\[A-Z0-9_]+)', pnp_id, re.I)
                 if m_acpi: return m_acpi.group(1)
-                # HDAUDIO: HDAUDIO\FUNC_XX&VEN_XXXX&DEV_XXXX
-                m_hda = re.search(r'(HDAUDIO\\FUNC_[0-9A-F]+&VEN_[0-9A-F]+&DEV_[0-9A-F]+)', pnp_id, re.I)
-                if m_hda: return m_hda.group(1)
-                # HID eszközök VID/PID-vel: HID\VID_XXXX&PID_XXXX
-                m_hid = re.search(r'HID\\(VID_[0-9A-F]+&PID_[0-9A-F]+)', pnp_id, re.I)
-                if m_hid: return m_hid.group(1)
-                # USB eszköz VID/PID prefix nélkül: USB\VID_XXXX&PID_XXXX
-                m_usb2 = re.search(r'USB\\(VID_[0-9A-F]+&PID_[0-9A-F]+)', pnp_id, re.I)
-                if m_usb2: return m_usb2.group(1)
                 # DISPLAY\XXXX (monitor/GPU)
                 m_disp = re.search(r'(DISPLAY\\[A-Z0-9]+)', pnp_id, re.I)
                 if m_disp: return m_disp.group(1)
@@ -1012,6 +1013,7 @@ try {
                         self.after(0, self._populate_hw_results)  # Telepített eszközök mutatása is
                     
                     self.after(0, lambda: setattr(self, '_hw_scanning', False))
+                    self.after(0, lambda: setattr(self, '_hw_loaded', True))
                   except Exception as _wse:
                     logging.error(f"wu_search_thread crash: {_wse}")
                     import traceback
@@ -2116,47 +2118,17 @@ try {
             self.after(0, lambda: set_time(elapsed()))
 
             # ========================================
-            # PHASE 4: WU COM API keresés
+            # PHASE 4+5: WU COM API keresés ÉS telepítés (egyetlen PS processz)
             # ========================================
-            self.after(0, lambda: set_phase("🟠 4. FÁZIS: Windows Update driver keresés"))
-            self.after(0, lambda: set_status("WU COM API-n keresztüli keresés... (ez eltarthat 1-3 percig)"))
+            self.after(0, lambda: set_phase("🟠 4. FÁZIS: WU driver keresés és telepítés"))
+            self.after(0, lambda: set_status("WU COM API keresés és telepítés... (ez eltarthat 1-5 percig)"))
             self.after(0, lambda: set_counter("Keresés folyamatban..."))
             self.after(0, lambda: set_progress(0, 100))
             self.after(0, lambda: append_log("=" * 50))
-            self.after(0, lambda: append_log("FÁZIS 4: Windows Update COM API driver keresés..."))
+            self.after(0, lambda: append_log("FÁZIS 4: Windows Update driver keresés és telepítés (egyetlen menet)...\n"))
 
-            wu_results = self._search_wu_api()
-
-            if wu_results is None:
-                self.after(0, lambda: append_log("❌ WU API keresés hiba! Nem sikerült lekérdezni."))
-                self.after(0, lambda: set_status("WU API hiba — telepítés kihagyva"))
-                wu_results = []
-            elif len(wu_results) == 0:
-                self.after(0, lambda: append_log("ℹ Nem talált elérhető driver frissítést a Windows Update."))
-                self.after(0, lambda: set_status("Nincs elérhető driver frissítés"))
-            else:
-                self.after(0, lambda c=len(wu_results): append_log(f"✅ Talált {c} db elérhető driver frissítést!"))
-                for drv in wu_results:
-                    title = drv.get('Title', 'ismeretlen')
-                    self.after(0, lambda t=title: append_log(f"  📦 {t}"))
-
-            self.after(0, lambda: set_progress(100, 100))
-            self.after(0, lambda: set_time(elapsed()))
-
-            # ========================================
-            # PHASE 4: WU COM API telepítés
-            # ========================================
-            if wu_results:
-                wu_count = len(wu_results)
-                self.after(0, lambda c=wu_count: set_phase(f"🟢 5. FÁZIS: {c} driver letöltése és telepítése"))
-                self.after(0, lambda: set_status("Windows Update COM API telepítés indítása..."))
-                self.after(0, lambda c=wu_count: set_counter(f"0 / {c}"))
-                self.after(0, lambda c=wu_count: set_progress(0, c))
-                self.after(0, lambda: append_log("=" * 50))
-                self.after(0, lambda c=wu_count: append_log(f"FÁZIS 5: {c} driver letöltése és telepítése WU API-n keresztül...\n"))
-
-                # WU COM API: összes driver telepítése egyszerre (egy PS processz)
-                ps_script = r"""
+            # Egyetlen PS processz: keres + telepít egyben (nincs dupla keresés)
+            ps_script = r"""
 [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
 try {
     $Session = New-Object -ComObject Microsoft.Update.Session
@@ -2180,6 +2152,7 @@ try {
     foreach ($U in $Result.Updates) {
         if (-not $U.EulaAccepted) { $U.AcceptEula() }
         $ToInstall.Add($U) | Out-Null
+        Write-Output "FOUND: $($U.Title)"
     }
     
     $total = $ToInstall.Count
@@ -2240,74 +2213,78 @@ try {
     Write-Output "ERROR: $($_.Exception.Message)"
 }
 """
-                install_success = 0
-                install_fail = 0
-                install_total = 0
+            install_success = 0
+            install_fail = 0
+            install_total = 0
 
-                process = subprocess.Popen(
-                    ["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", ps_script],
-                    stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, encoding='utf-8', errors='replace',
-                    startupinfo=startupinfo, creationflags=subprocess.CREATE_NO_WINDOW
-                )
+            process = subprocess.Popen(
+                ["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", ps_script],
+                stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, encoding='utf-8', errors='replace',
+                startupinfo=startupinfo, creationflags=subprocess.CREATE_NO_WINDOW
+            )
 
-                for line in process.stdout:
-                    line = line.strip()
-                    if not line:
-                        continue
+            for line in process.stdout:
+                line = line.strip()
+                if not line:
+                    continue
 
-                    if line.startswith("SEARCH:"):
-                        self.after(0, lambda m=line.split(":", 1)[1].strip(): set_status(m))
-                        self.after(0, lambda m=line: append_log(m))
-                    elif line.startswith("TOTAL:"):
-                        _m = re.search(r'(\d+)', line)
-                        if _m:
-                            install_total = int(_m.group(1))
-                        self.after(0, lambda t=install_total: set_progress(0, max(t, 1)))
-                        self.after(0, lambda t=install_total: set_counter(f"0 / {t}"))
-                        self.after(0, lambda t=install_total: append_log(f"Összesen {t} driver telepítése..."))
-                    elif line.startswith("DLONE:"):
-                        msg = line[6:].strip()
-                        self.after(0, lambda m=msg: set_status(f"⬇ Letöltés: {m}"))
-                        self.after(0, lambda m=msg: append_log(f"  ⬇ Letöltés: {m}"))
-                    elif line.startswith("INSTONE:"):
-                        msg = line[8:].strip()
-                        self.after(0, lambda m=msg: set_status(f"⚙ Telepítés: {m}"))
-                        self.after(0, lambda m=msg: append_log(f"  ⚙ Telepítés: {m}"))
-                    elif line.startswith("OK:"):
-                        install_success += 1
-                        done = install_success + install_fail
-                        self.after(0, lambda m=line[3:].strip(): append_log(f"  ✅ {m}"))
-                        self.after(0, lambda d=done, t=install_total, s=install_success, f=install_fail:
-                            (set_progress(d, max(t, 1)),
-                             set_counter(f"{d} / {t}  (✅ {s}  ❌ {f})")))
-                    elif line.startswith("FAIL:"):
-                        install_fail += 1
-                        done = install_success + install_fail
-                        self.after(0, lambda m=line[5:].strip(): append_log(f"  ❌ {m}"))
-                        self.after(0, lambda d=done, t=install_total, s=install_success, f=install_fail:
-                            (set_progress(d, max(t, 1)),
-                             set_counter(f"{d} / {t}  (✅ {s}  ❌ {f})")))
-                    elif line.startswith("DONE:"):
-                        self.after(0, lambda m=line[5:].strip(): append_log(f"\n--- {m} ---"))
-                    elif line.startswith("EMPTY:"):
-                        self.after(0, lambda m=line[6:].strip(): append_log(m))
-                    elif line.startswith("ERROR:"):
-                        self.after(0, lambda m=line[6:].strip(): append_log(f"❌ HIBA: {m}"))
-                    else:
-                        self.after(0, lambda m=line: append_log(m))
+                if line.startswith("SEARCH:"):
+                    self.after(0, lambda m=line.split(":", 1)[1].strip(): set_status(m))
+                    self.after(0, lambda m=line: append_log(m))
+                elif line.startswith("FOUND:"):
+                    self.after(0, lambda m=f"  📦 {line[6:].strip()}": append_log(m))
+                elif line.startswith("TOTAL:"):
+                    _m = re.search(r'(\d+)', line)
+                    if _m:
+                        install_total = int(_m.group(1))
+                    self.after(0, lambda t=install_total: set_phase(f"🟢 5. FÁZIS: {t} driver letöltése és telepítése"))
+                    self.after(0, lambda t=install_total: set_progress(0, max(t, 1)))
+                    self.after(0, lambda t=install_total: set_counter(f"0 / {t}"))
+                    self.after(0, lambda t=install_total: append_log(f"\nÖsszesen {t} driver telepítése..."))
+                elif line.startswith("DLONE:"):
+                    msg = line[6:].strip()
+                    self.after(0, lambda m=msg: set_status(f"⬇ Letöltés: {m}"))
+                    self.after(0, lambda m=msg: append_log(f"  ⬇ Letöltés: {m}"))
+                elif line.startswith("INSTONE:"):
+                    msg = line[8:].strip()
+                    self.after(0, lambda m=msg: set_status(f"⚙ Telepítés: {m}"))
+                    self.after(0, lambda m=msg: append_log(f"  ⚙ Telepítés: {m}"))
+                elif line.startswith("OK:"):
+                    install_success += 1
+                    done = install_success + install_fail
+                    self.after(0, lambda m=line[3:].strip(): append_log(f"  ✅ {m}"))
+                    self.after(0, lambda d=done, t=install_total, s=install_success, f=install_fail:
+                        (set_progress(d, max(t, 1)),
+                         set_counter(f"{d} / {t}  (✅ {s}  ❌ {f})")))
+                elif line.startswith("FAIL:"):
+                    install_fail += 1
+                    done = install_success + install_fail
+                    self.after(0, lambda m=line[5:].strip(): append_log(f"  ❌ {m}"))
+                    self.after(0, lambda d=done, t=install_total, s=install_success, f=install_fail:
+                        (set_progress(d, max(t, 1)),
+                         set_counter(f"{d} / {t}  (✅ {s}  ❌ {f})")))
+                elif line.startswith("DONE:"):
+                    self.after(0, lambda m=line[5:].strip(): append_log(f"\n--- {m} ---"))
+                elif line.startswith("EMPTY:"):
+                    self.after(0, lambda m=line[6:].strip(): append_log(m))
+                elif line.startswith("ERROR:"):
+                    self.after(0, lambda m=line[6:].strip(): append_log(f"❌ HIBA: {m}"))
+                else:
+                    self.after(0, lambda m=line: append_log(m))
 
-                    self.after(0, lambda: set_time(elapsed()))
+                self.after(0, lambda: set_time(elapsed()))
 
-                process.wait()
+            process.wait()
 
-                # Post-install scan
-                if install_success > 0:
-                    self.after(0, lambda: append_log("\nEszközök újraszkennelése a telepítés után..."))
-                    self.after(0, lambda: set_status("Telepített driverek aktiválása..."))
-                    subprocess.run(['pnputil', '/scan-devices'], startupinfo=startupinfo,
-                                  capture_output=True, creationflags=subprocess.CREATE_NO_WINDOW)
-                    self.after(0, lambda: append_log("✅ Eszközök frissítve!"))
+            # Post-install scan
+            if install_success > 0:
+                self.after(0, lambda: append_log("\nEszközök újraszkennelése a telepítés után..."))
+                self.after(0, lambda: set_status("Telepített driverek aktiválása..."))
+                subprocess.run(['pnputil', '/scan-devices'], startupinfo=startupinfo,
+                              capture_output=True, creationflags=subprocess.CREATE_NO_WINDOW)
+                self.after(0, lambda: append_log("✅ Eszközök frissítve!"))
 
+            if install_success > 0 or install_fail > 0:
                 self.after(0, lambda s=install_success, f=install_fail:
                     append_log(f"\nTelepítés kész. Sikeres: {s}, Sikertelen: {f}"))
             else:
