@@ -1,0 +1,824 @@
+<!DOCTYPE html>
+<html lang="hu">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Driver Tool</title>
+<style>
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+:root{
+  --bg-primary:#040d0a;--bg-secondary:#081a14;
+  --glass:rgba(255,255,255,0.05);--glass-hover:rgba(255,255,255,0.09);
+  --glass-border:rgba(0,255,136,0.1);--glass-border-hover:rgba(0,255,136,0.22);
+  --blur:24px;
+  --accent:#00ff88;--accent2:#00e5ff;--accent-glow:rgba(0,255,136,0.3);
+  --green:#00ff88;--red:#ff453a;--yellow:#ffd60a;--orange:#ff9f0a;
+  --text:rgba(255,255,255,0.95);--text2:rgba(255,255,255,0.6);--text3:rgba(255,255,255,0.35);
+  --r:14px;--r-sm:8px;--t:0.25s ease;
+  --font:-apple-system,BlinkMacSystemFont,'Segoe UI',system-ui,sans-serif;
+  --mono:'Cascadia Code','Fira Code','Consolas',monospace;
+}
+html,body{height:100%;overflow:hidden;font-family:var(--font);color:var(--text);font-size:13px;line-height:1.5}
+body{
+  background:linear-gradient(145deg,var(--bg-primary) 0%,#051210 25%,#071812 50%,#091a16 75%,var(--bg-secondary) 100%);
+}
+body::before{content:'';position:fixed;width:800px;height:800px;background:radial-gradient(circle,rgba(0,255,136,0.06) 0%,transparent 65%);top:-300px;right:-200px;pointer-events:none}
+body::after{content:'';position:fixed;width:600px;height:600px;background:radial-gradient(circle,rgba(0,229,255,0.04) 0%,transparent 65%);bottom:-200px;left:-100px;pointer-events:none}
+
+.glass{background:var(--glass);backdrop-filter:blur(var(--blur));-webkit-backdrop-filter:blur(var(--blur));border:1px solid var(--glass-border);border-radius:var(--r)}
+.glass-sm{background:var(--glass);backdrop-filter:blur(16px);border:1px solid var(--glass-border);border-radius:var(--r-sm)}
+
+/* Layout */
+.app{display:flex;height:100vh;gap:0}
+.sidebar{width:220px;min-width:220px;display:flex;flex-direction:column;padding:16px 12px;border-radius:0;border-right:1px solid rgba(0,255,136,0.12);border-left:none;border-top:none;border-bottom:none;background:rgba(0,255,136,0.025);backdrop-filter:blur(30px)}
+.sidebar-title{font-size:11px;font-weight:700;letter-spacing:0.8px;text-transform:uppercase;color:var(--text2);padding:8px 12px 16px;text-align:center}
+.sidebar-title span{display:block;font-size:14px;letter-spacing:0;text-transform:none;color:var(--text);margin-top:4px}
+
+.nav-btn{
+  display:flex;align-items:center;gap:10px;width:100%;padding:10px 14px;border:none;border-radius:10px;
+  background:transparent;color:var(--text2);cursor:pointer;font-size:13px;font-family:var(--font);
+  transition:all var(--t);text-align:left;margin-bottom:2px;
+}
+.nav-btn:hover{background:rgba(255,255,255,0.06);color:var(--text)}
+.nav-btn.active{background:linear-gradient(135deg,rgba(0,255,136,0.18),rgba(0,229,255,0.1));color:#fff;box-shadow:0 0 20px rgba(0,255,136,0.1)}
+.nav-btn .icon{font-size:16px;width:22px;text-align:center;flex-shrink:0}
+.sidebar-bottom{margin-top:auto;padding:8px 12px;text-align:center;color:var(--text3);font-size:11px}
+
+.main{flex:1;display:flex;flex-direction:column;overflow:hidden}
+
+/* Target bar */
+.target-bar{display:flex;align-items:center;gap:12px;padding:10px 20px;border-radius:0;border:none;border-bottom:1px solid var(--glass-border);background:rgba(255,255,255,0.02);backdrop-filter:blur(20px)}
+.target-label{font-size:14px;font-weight:600;flex:1}
+.target-label.online{color:var(--green)}.target-label.offline{color:var(--red)}
+
+/* Content area */
+.content{flex:1;overflow-y:auto;overflow-x:hidden;padding:20px;scrollbar-width:thin;scrollbar-color:rgba(255,255,255,0.1) transparent}
+.content::-webkit-scrollbar{width:6px}
+.content::-webkit-scrollbar-thumb{background:rgba(255,255,255,0.1);border-radius:3px}
+
+/* Views */
+.view{display:none;animation:fadeIn 0.3s ease}
+.view.active{display:block}
+@keyframes fadeIn{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:translateY(0)}}
+
+/* Panel */
+.panel{padding:20px;margin-bottom:16px}
+.panel-title{font-size:15px;font-weight:600;margin-bottom:14px;display:flex;align-items:center;gap:8px}
+.panel-title .emoji{font-size:18px}
+
+/* Buttons */
+.btn{
+  padding:7px 14px;border:1px solid var(--glass-border);border-radius:var(--r-sm);
+  background:var(--glass);color:var(--text);cursor:pointer;font:13px var(--font);
+  transition:all var(--t);display:inline-flex;align-items:center;gap:6px;
+}
+.btn:hover{background:var(--glass-hover);border-color:var(--glass-border-hover);box-shadow:0 0 16px rgba(255,255,255,0.03)}
+.btn:active{transform:scale(0.97)}
+.btn:disabled{opacity:0.35;cursor:not-allowed;transform:none!important;box-shadow:none!important}
+.btn-primary{background:linear-gradient(135deg,var(--accent),var(--accent2));border-color:transparent;color:#000;font-weight:700}
+.btn-primary:hover{box-shadow:0 0 24px var(--accent-glow);border-color:transparent}
+.btn-danger{background:rgba(255,69,58,0.15);border-color:rgba(255,69,58,0.25);color:var(--red)}
+.btn-danger:hover{background:rgba(255,69,58,0.25);box-shadow:0 0 16px rgba(255,69,58,0.1)}
+.btn-success{background:rgba(48,209,88,0.15);border-color:rgba(48,209,88,0.25);color:var(--green)}
+.btn-success:hover{background:rgba(48,209,88,0.25);box-shadow:0 0 16px rgba(48,209,88,0.1)}
+.btn-warning{background:rgba(255,159,10,0.15);border-color:rgba(255,159,10,0.25);color:var(--orange)}
+.btn-warning:hover{background:rgba(255,159,10,0.25)}
+.btn-big{padding:16px 32px;font-size:16px;font-weight:700;border-radius:var(--r);gap:10px}
+.btn-sm{padding:5px 10px;font-size:12px}
+
+/* Toolbar */
+.toolbar{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:14px}
+.toolbar-right{margin-left:auto;display:flex;gap:8px;align-items:center}
+
+/* Toggle switch */
+.toggle{display:inline-flex;align-items:center;gap:8px;cursor:pointer;font-size:13px;color:var(--text2);user-select:none}
+.toggle input{display:none}
+.toggle-track{width:36px;height:20px;border-radius:10px;background:rgba(255,255,255,0.1);position:relative;transition:all var(--t)}
+.toggle-track::after{content:'';position:absolute;width:16px;height:16px;border-radius:50%;background:#fff;top:2px;left:2px;transition:all var(--t)}
+.toggle input:checked+.toggle-track{background:var(--accent)}
+.toggle input:checked+.toggle-track::after{left:18px}
+
+/* Table */
+.table-wrap{overflow-y:auto;max-height:calc(100vh - 300px);border-radius:var(--r-sm);border:1px solid var(--glass-border);scrollbar-width:thin;scrollbar-color:rgba(255,255,255,0.1) transparent}
+.table-wrap::-webkit-scrollbar{width:5px}
+.table-wrap::-webkit-scrollbar-thumb{background:rgba(255,255,255,0.1);border-radius:3px}
+table{width:100%;border-collapse:collapse}
+th{position:sticky;top:0;padding:10px 12px;text-align:left;font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:0.5px;color:var(--text2);background:rgba(10,14,23,0.9);backdrop-filter:blur(10px);border-bottom:1px solid var(--glass-border);z-index:1}
+td{padding:8px 12px;border-bottom:1px solid rgba(255,255,255,0.025);font-size:13px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:280px}
+tr{transition:background var(--t)}
+tr:hover td{background:rgba(255,255,255,0.025)}
+tr.selected td{background:rgba(0,255,136,0.08)}
+td input[type="checkbox"]{accent-color:var(--accent)}
+
+/* Status bar */
+.status-bar{display:flex;align-items:center;gap:12px;padding:10px 0 0;color:var(--text2);font-size:12px}
+.status-dot{width:6px;height:6px;border-radius:50%;background:var(--green);flex-shrink:0}
+
+/* Progress bar */
+.progress{height:6px;background:rgba(255,255,255,0.06);border-radius:3px;overflow:hidden;width:100%}
+.progress-fill{height:100%;background:linear-gradient(90deg,var(--accent),var(--green));border-radius:3px;transition:width 0.4s ease;box-shadow:0 0 8px var(--accent-glow);width:0%}
+.progress-indeterminate .progress-fill{width:30%!important;animation:indeterminate 1.5s ease-in-out infinite}
+@keyframes indeterminate{0%{margin-left:-30%}100%{margin-left:100%}}
+
+/* HW Tree */
+.hw-tree{max-height:calc(100vh - 380px);overflow-y:auto;scrollbar-width:thin;scrollbar-color:rgba(255,255,255,0.1) transparent}
+.hw-tree::-webkit-scrollbar{width:5px}
+.hw-tree::-webkit-scrollbar-thumb{background:rgba(255,255,255,0.1);border-radius:3px}
+.hw-cat{margin-bottom:2px}
+.hw-cat-header{display:flex;align-items:center;gap:8px;padding:8px 12px;border-radius:var(--r-sm);cursor:pointer;transition:background var(--t);font-weight:600;font-size:13px}
+.hw-cat-header:hover{background:rgba(255,255,255,0.04)}
+.hw-cat-header .chevron{font-size:10px;transition:transform var(--t);width:14px;color:var(--text3)}
+.hw-cat-header.open .chevron{transform:rotate(90deg)}
+.hw-cat-children{padding-left:28px;overflow:hidden}
+.hw-cat-children.collapsed{display:none}
+.hw-item{display:grid;grid-template-columns:24px 1fr 1.2fr 0.8fr;gap:8px;align-items:center;padding:5px 8px;border-radius:6px;font-size:12px;transition:background var(--t)}
+.hw-item:hover{background:rgba(255,255,255,0.03)}
+.hw-item .name{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.hw-item .wu{color:var(--text2);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.hw-item .hwid{color:var(--text3);font-family:var(--mono);font-size:11px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.hw-separator{padding:12px;text-align:center;color:var(--text3);font-size:12px;font-weight:600;border-top:1px solid var(--glass-border);border-bottom:1px solid var(--glass-border);margin:8px 0}
+.hw-installed .hw-item{opacity:0.5}
+.hw-installed .hw-cat-header{opacity:0.65}
+.sys-info{font-size:14px;font-weight:600;color:#00ff88;margin-bottom:12px}
+
+/* Cards grid */
+.cards{display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:12px}
+.card{padding:18px;display:flex;flex-direction:column;gap:10px;transition:all var(--t)}
+.card:hover{border-color:var(--glass-border-hover);box-shadow:0 4px 24px rgba(0,0,0,0.2)}
+.card-title{font-size:14px;font-weight:600;display:flex;align-items:center;gap:8px}
+.card-desc{font-size:12px;color:var(--text2);line-height:1.6}
+
+/* Autofix */
+.autofix-hero{text-align:center;padding:40px 20px}
+.autofix-hero h2{font-size:22px;margin-bottom:16px;background:linear-gradient(135deg,#00ff88,#00e5ff);-webkit-background-clip:text;-webkit-text-fill-color:transparent}
+.autofix-steps{text-align:left;max-width:500px;margin:0 auto 30px;line-height:2;color:var(--text2);font-size:13px}
+.autofix-steps span{color:var(--text);font-weight:600}
+.autofix-warn{color:var(--yellow);font-size:12px;margin-bottom:20px}
+
+/* WU Status */
+.wu-status{font-size:15px;font-weight:700;text-align:center;padding:16px;border-radius:var(--r-sm);margin-bottom:16px}
+.wu-status.enabled{background:rgba(48,209,88,0.1);color:var(--green);border:1px solid rgba(48,209,88,0.2)}
+.wu-status.disabled{background:rgba(255,69,58,0.1);color:var(--red);border:1px solid rgba(255,69,58,0.2)}
+.wu-status.unknown{background:var(--glass);color:var(--text2);border:1px solid var(--glass-border)}
+.wu-actions{display:flex;gap:10px;flex-wrap:wrap;justify-content:center}
+
+/* Modal overlay */
+.modal-overlay{position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.6);backdrop-filter:blur(8px);z-index:1000;display:none;align-items:center;justify-content:center;animation:modalBgIn 0.2s ease}
+.modal-overlay.active{display:flex}
+@keyframes modalBgIn{from{opacity:0}to{opacity:1}}
+.modal-box{width:90%;max-width:700px;max-height:85vh;display:flex;flex-direction:column;background:rgba(20,24,40,0.92);backdrop-filter:blur(40px);border:1px solid rgba(255,255,255,0.1);border-radius:18px;box-shadow:0 24px 80px rgba(0,0,0,0.5);animation:modalIn 0.3s ease;overflow:hidden}
+@keyframes modalIn{from{opacity:0;transform:scale(0.95) translateY(10px)}to{opacity:1;transform:scale(1) translateY(0)}}
+.modal-header{padding:18px 22px;border-bottom:1px solid var(--glass-border);display:flex;align-items:center;gap:10px}
+.modal-header h3{flex:1;font-size:15px;font-weight:600}
+.modal-phase{color:#00ff88;font-size:13px;font-weight:600}
+.modal-body{padding:16px 22px;flex:1;overflow-y:auto;display:flex;flex-direction:column;gap:12px}
+.modal-counter{text-align:center;font-size:14px;font-weight:600}
+.modal-status{color:var(--text2);font-size:12px;text-align:center}
+.modal-time{color:var(--text3);font-size:11px;text-align:center}
+.modal-log{flex:1;min-height:150px;max-height:300px;overflow-y:auto;background:rgba(0,0,0,0.5);border-radius:var(--r-sm);padding:10px;font-family:var(--mono);font-size:11px;color:#00ff88;line-height:1.6;white-space:pre-wrap;word-break:break-all;scrollbar-width:thin;scrollbar-color:rgba(255,255,255,0.1) transparent}
+.modal-log::-webkit-scrollbar{width:4px}
+.modal-log::-webkit-scrollbar-thumb{background:rgba(255,255,255,0.1);border-radius:2px}
+.modal-footer{padding:14px 22px;border-top:1px solid var(--glass-border);display:flex;gap:10px;justify-content:flex-end}
+
+/* Toast */
+.toast-container{position:fixed;top:16px;right:16px;z-index:2000;display:flex;flex-direction:column;gap:8px;pointer-events:none}
+.toast{padding:12px 18px;border-radius:10px;font-size:13px;pointer-events:auto;animation:toastIn 0.3s ease,toastOut 0.3s ease 3.7s forwards;max-width:400px;box-shadow:0 8px 32px rgba(0,0,0,0.3)}
+.toast.info{background:rgba(0,255,136,0.92);color:#000}
+.toast.success{background:rgba(48,209,88,0.9);color:#fff}
+.toast.warning{background:rgba(255,159,10,0.9);color:#000}
+.toast.error{background:rgba(255,69,58,0.9);color:#fff}
+@keyframes toastIn{from{opacity:0;transform:translateX(40px)}to{opacity:1;transform:translateX(0)}}
+@keyframes toastOut{from{opacity:1}to{opacity:0;transform:translateY(-10px)}}
+
+/* Spinner */
+.spinner{width:20px;height:20px;border:2px solid var(--glass-border);border-top-color:var(--accent);border-radius:50%;animation:spin 0.8s linear infinite;display:inline-block}
+@keyframes spin{to{transform:rotate(360deg)}}
+.loading-overlay{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;background:rgba(8,12,20,0.7);backdrop-filter:blur(4px);border-radius:var(--r);z-index:5;flex-direction:column;gap:12px;color:var(--text2);font-size:13px}
+.panel{position:relative}
+
+/* Scrollbar global */
+::-webkit-scrollbar{width:6px}
+::-webkit-scrollbar-track{background:transparent}
+::-webkit-scrollbar-thumb{background:rgba(255,255,255,0.08);border-radius:3px}
+::-webkit-scrollbar-thumb:hover{background:rgba(255,255,255,0.15)}
+</style>
+</head>
+<body>
+<div class="app">
+  <!-- Sidebar -->
+  <nav class="sidebar">
+    <div class="sidebar-title">DRIVER TOOL<span>⚡ Szerviz Tool</span></div>
+    <button class="nav-btn active" onclick="switchView('drivers')" data-view="drivers"><span class="icon">💿</span>Driverek kezelése</button>
+    <button class="nav-btn" onclick="switchView('backup')" data-view="backup"><span class="icon">💾</span>Mentés és Visszaállítás</button>
+    <button class="nav-btn" onclick="switchView('wu')" data-view="wu"><span class="icon">🔄</span>Windows Update</button>
+    <button class="nav-btn" onclick="switchView('hw')" data-view="hw"><span class="icon">🖥️</span>Hardver Info & Telepítés</button>
+    <button class="nav-btn" onclick="switchView('autofix')" data-view="autofix"><span class="icon">⚡</span>1 Kattintásos Driver Fix</button>
+    <div class="sidebar-bottom" id="build-label">Build ---</div>
+  </nav>
+
+  <div class="main">
+    <!-- Target Bar -->
+    <div class="target-bar">
+      <span class="target-label online" id="target-label">JELENLEGI RENDSZER</span>
+      <button class="btn btn-sm" onclick="changeTarget()">Másik lemez kiválasztása</button>
+      <button class="btn btn-sm" onclick="resetTarget()">Vissza (Jelenlegi lemez)</button>
+    </div>
+
+    <div class="content">
+      <!-- VIEW: Drivers -->
+      <div class="view active" id="view-drivers">
+        <div class="panel glass">
+          <div class="toolbar">
+            <button class="btn" onclick="loadDrivers()">🔄 Frissítés</button>
+            <button class="btn btn-danger" onclick="deleteSelected()" id="btn-delete" disabled>🗑 Kijelöltek Törlése</button>
+            <button class="btn" onclick="selectAllDrivers()">☑ Mind Kijelölése</button>
+            <div class="toolbar-right">
+              <label class="toggle" title="FIGYELEM: Gyári driverek törlése tönkreteheti a rendszert!">
+                <input type="checkbox" id="toggle-all-drivers" onchange="toggleAllDrivers()">
+                <span class="toggle-track"></span>
+                Minden Driver (veszélyes!)
+              </label>
+            </div>
+          </div>
+          <div class="table-wrap" id="driver-table-wrap">
+            <table>
+              <thead><tr><th style="width:30px"></th><th>Published Name</th><th>Original Name</th><th>Provider</th><th>Class</th><th>Version</th></tr></thead>
+              <tbody id="driver-tbody"></tbody>
+            </table>
+          </div>
+          <div class="status-bar" id="driver-status"><span class="status-dot"></span> Kattints a Frissítés gombra a driverek betöltéséhez.</div>
+          <div id="driver-loading" style="display:none"><div class="progress progress-indeterminate" style="margin-top:10px"><div class="progress-fill"></div></div></div>
+        </div>
+      </div>
+
+      <!-- VIEW: Backup -->
+      <div class="view" id="view-backup">
+        <div class="panel-title"><span class="emoji">💾</span> Mentés és Visszaállítás</div>
+        <div class="cards">
+          <div class="card glass">
+            <div class="card-title">📦 Third-Party Driver Mentés</div>
+            <div class="card-desc">Kimenti a rendszer összes harmadik féltől származó (third-party) driverét egy mappába. Ezt később vissza tudod állítani DISM-mel vagy pnputil-lal.</div>
+            <button class="btn btn-primary" onclick="backupThirdParty()">Mentés indítása</button>
+          </div>
+          <div class="card glass">
+            <div class="card-title">📦 ÖSSZES Driver Mentés</div>
+            <div class="card-desc">Kimenti az összes drivert (third-party + Windows gyári inbox driverek is). Nagyobb fájlméret, de teljes biztonsági másolat.</div>
+            <button class="btn btn-primary" onclick="backupAll()">Összes driver mentése</button>
+          </div>
+          <div class="card glass">
+            <div class="card-title">♻️ Lementett Driverek Visszaállítása</div>
+            <div class="card-desc">Egy korábban kimentett driver mappát visszatelepít az élő rendszerre (pnputil) vagy egy offline meghajtóra (DISM).</div>
+            <button class="btn btn-success" onclick="restoreDrivers()">Visszaállítás</button>
+          </div>
+          <div class="card glass">
+            <div class="card-title">📀 ISO / WIM Alap Driver Kinyerés</div>
+            <div class="card-desc">Egy hivatalos Windows ISO install.wim fájljából kibányássza a tiszta gyári drivereket (alap USB, PS/2, Touchpad, stb).</div>
+            <button class="btn btn-warning" onclick="extractWim()">WIM Kinyerés</button>
+          </div>
+          <div class="card glass">
+            <div class="card-title">🛡️ Rendszer-visszaállítási Pont</div>
+            <div class="card-desc">Létrehoz egy Windows rendszer-visszaállítási pontot a jelenlegi állapotról, mielőtt bármit változtatnál.</div>
+            <button class="btn" onclick="createRestorePoint()">Visszaállítási pont létrehozása</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- VIEW: Windows Update -->
+      <div class="view" id="view-wu">
+        <div class="panel glass">
+          <div class="panel-title"><span class="emoji">🔄</span> Windows Update Driver Frissítések Beállításai</div>
+          <div class="wu-status unknown" id="wu-status">Állapot: Ismeretlen</div>
+          <div class="wu-actions">
+            <button class="btn btn-danger" onclick="disableWu()">⛔ WU Driver Letiltás</button>
+            <button class="btn btn-success" onclick="enableWu()">✅ WU Driver Engedélyezés + Reset</button>
+            <button class="btn btn-warning" onclick="restartWu()">⚡ WU Szolgáltatások Újraindítása</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- VIEW: Hardware Info -->
+      <div class="view" id="view-hw">
+        <div class="panel glass">
+          <div class="sys-info" id="sys-info">Rendszer információk betöltése...</div>
+          <div class="toolbar">
+            <button class="btn btn-primary" onclick="startHwScan()">🔍 Hardverek Scannelése</button>
+            <button class="btn btn-success" onclick="installSelectedHw()" id="btn-install-hw" disabled>🚀 Kijelöltek Telepítése</button>
+            <button class="btn btn-sm" onclick="selectAllHw()" id="btn-sel-all-hw" disabled>☑ Összes</button>
+            <button class="btn btn-sm" onclick="deselectAllHw()" id="btn-desel-all-hw" disabled>☐ Törlés</button>
+          </div>
+          <div style="margin-bottom:10px">
+            <div class="progress" id="hw-progress" style="display:none"><div class="progress-fill" id="hw-progress-fill"></div></div>
+            <div id="hw-status" style="color:var(--text2);font-size:12px;margin-top:6px"></div>
+          </div>
+          <div class="hw-tree" id="hw-tree"></div>
+        </div>
+      </div>
+
+      <!-- VIEW: Autofix -->
+      <div class="view" id="view-autofix">
+        <div class="panel glass">
+          <div class="autofix-hero">
+            <h2>⚡ 1 Kattintásos Automatikus Driver Fix</h2>
+            <div class="autofix-steps">
+              <span>1️⃣</span> Windows Update driver keresés LETILTÁSA (registry + policy)<br>
+              <span>2️⃣</span> Összes third-party driver TÖRLÉSE<br>
+              <span>3️⃣</span> Hardver újraszkennelés (Windows alap driverek visszaállása)<br>
+              <span>4️⃣</span> Windows Update-ről az összes elérhető driver LETÖLTÉSE és TELEPÍTÉSE<br>
+              <span>5️⃣</span> Automatikus ÚJRAINDÍTÁS
+            </div>
+            <div class="autofix-warn">⚠️ A folyamat közben NE használd a gépet! A képernyő villoghat!<br>⏱️ Becsült idő: 5-15 perc</div>
+            <button class="btn btn-big btn-primary" onclick="startAutofix()" id="btn-autofix">⚡ INDÍTÁS: Teljes Driver Újratelepítés ⚡</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Progress Modal -->
+<div class="modal-overlay" id="modal-progress">
+  <div class="modal-box">
+    <div class="modal-header">
+      <h3 id="mp-title">Folyamat</h3>
+      <span class="modal-phase" id="mp-phase"></span>
+    </div>
+    <div class="modal-body">
+      <div class="modal-counter" id="mp-counter"></div>
+      <div class="progress" id="mp-progress"><div class="progress-fill" id="mp-progress-fill"></div></div>
+      <div class="modal-status" id="mp-status"></div>
+      <div class="modal-time" id="mp-time"></div>
+      <div class="modal-log" id="mp-log"></div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn" id="mp-close-btn" onclick="closeProgressModal()" style="display:none">Bezárás</button>
+    </div>
+  </div>
+</div>
+
+<!-- Confirm Modal -->
+<div class="modal-overlay" id="modal-confirm">
+  <div class="modal-box" style="max-width:480px">
+    <div class="modal-header"><h3 id="mc-title">Megerősítés</h3></div>
+    <div class="modal-body"><div id="mc-message" style="line-height:1.8;font-size:13px;white-space:pre-line"></div></div>
+    <div class="modal-footer">
+      <button class="btn" id="mc-cancel" onclick="resolveConfirm(null)">Mégse</button>
+      <button class="btn btn-danger" id="mc-no" onclick="resolveConfirm(false)" style="display:none">Nem</button>
+      <button class="btn btn-primary" id="mc-yes" onclick="resolveConfirm(true)">Igen</button>
+    </div>
+  </div>
+</div>
+
+<!-- Alert Modal -->
+<div class="modal-overlay" id="modal-alert">
+  <div class="modal-box" style="max-width:480px">
+    <div class="modal-header"><h3 id="ma-title">Értesítés</h3></div>
+    <div class="modal-body"><div id="ma-message" style="line-height:1.8;font-size:13px;white-space:pre-line"></div></div>
+    <div class="modal-footer"><button class="btn btn-primary" onclick="closeAlert()">OK</button></div>
+  </div>
+</div>
+
+<!-- Toast container -->
+<div class="toast-container" id="toasts"></div>
+
+<script>
+/* ========== STATE ========== */
+let currentView = 'drivers';
+let drivers = [];
+let selectedDrivers = new Set();
+let listAll = false;
+let hwPool = [];
+let hwInstalled = [];
+let hwSelectedIndices = new Set();
+let confirmResolver = null;
+let progressStartTime = 0;
+let progressTimer = null;
+
+/* ========== PYWEBVIEW BRIDGE ========== */
+function api() { return window.pywebview ? window.pywebview.api : null; }
+
+window.addEventListener('pywebviewready', async () => {
+  try {
+    const data = await api().get_init_data();
+    document.getElementById('build-label').textContent = 'Build ' + String(data.build).padStart(3, '0');
+    updateTargetLabel(data.target_os, data.sys_drive);
+    loadDrivers();
+  } catch(e) { console.error('init error', e); }
+});
+
+/* ========== EVENTS FROM PYTHON ========== */
+window.handlePyEvent = function(payload) {
+  const {event, data} = payload;
+  switch(event) {
+    case 'drivers_loading':
+      document.getElementById('driver-loading').style.display = 'block';
+      document.getElementById('driver-status').innerHTML = '<div class="spinner"></div> Driverek betöltése...';
+      break;
+    case 'drivers_loaded':
+      document.getElementById('driver-loading').style.display = 'none';
+      drivers = data.drivers || [];
+      selectedDrivers.clear();
+      renderDriverTable();
+      document.getElementById('driver-status').innerHTML = '<span class="status-dot"></span> ✅ ' + drivers.length + ' driver betöltve (' + data.elapsed + ' mp)';
+      updateDeleteBtn();
+      break;
+    case 'task_start':
+      showProgressModal(data.title || data.task, data.phase || '');
+      break;
+    case 'task_progress':
+      updateProgressModal(data);
+      break;
+    case 'task_complete':
+      onTaskComplete(data);
+      break;
+    case 'task_error':
+      if (progressTimer) { clearInterval(progressTimer); progressTimer = null; }
+      appendLog('❌ HIBA: ' + (data.error || 'Ismeretlen hiba'));
+      document.getElementById('mp-close-btn').style.display = '';
+      break;
+    case 'hw_scan_progress':
+      updateHwScanProgress(data);
+      break;
+    case 'hw_scan_result':
+      onHwScanResult(data);
+      break;
+    case 'wu_status':
+      updateWuStatus(data);
+      break;
+    case 'alert':
+      showAlert(data.title || 'Értesítés', data.message || '', data.type);
+      break;
+    case 'toast':
+      toast(data.message, data.type || 'info');
+      break;
+  }
+};
+
+/* ========== NAVIGATION ========== */
+function switchView(name) {
+  document.querySelectorAll('.view').forEach(v => v.classList.remove('active'));
+  document.querySelectorAll('.nav-btn').forEach(b => b.classList.remove('active'));
+  document.getElementById('view-' + name).classList.add('active');
+  document.querySelector('.nav-btn[data-view="'+name+'"]').classList.add('active');
+  currentView = name;
+  if (name === 'wu') checkWuStatus();
+  if (name === 'hw' && !hwPool.length && !hwInstalled.length) { /* first visit, don't auto-scan */ }
+}
+
+/* ========== TARGET OS ========== */
+function updateTargetLabel(path, sysDrive) {
+  const el = document.getElementById('target-label');
+  if (path) {
+    el.textContent = 'OFFLINE MÓD (' + path + ')';
+    el.className = 'target-label offline';
+  } else {
+    el.textContent = 'JELENLEGI RENDSZER (' + (sysDrive || 'C:\\') + ')';
+    el.className = 'target-label online';
+  }
+}
+async function changeTarget() {
+  const res = await api().change_target_os();
+  if (!res) return;
+  if (!res.has_windows) {
+    const ok = await showConfirm('Nincs Windows mappa', 'Nem találok Windows mappát ezen az útvonalon:\n' + res.path + '\n\nBiztosan ezt választod?');
+    if (!ok) return;
+  }
+  await api().apply_target_os(res.path);
+  updateTargetLabel(res.path);
+  toast('Célpont beállítva: ' + res.path, 'info');
+  loadDrivers();
+}
+async function resetTarget() {
+  await api().reset_target_os();
+  const data = await api().get_init_data();
+  updateTargetLabel(null, data.sys_drive);
+  toast('Visszaállítva: jelenlegi rendszer', 'success');
+  loadDrivers();
+}
+
+/* ========== DRIVER LIST ========== */
+async function loadDrivers() {
+  const all = document.getElementById('toggle-all-drivers').checked;
+  await api().load_drivers(all);
+}
+function renderDriverTable() {
+  const tbody = document.getElementById('driver-tbody');
+  tbody.innerHTML = '';
+  drivers.forEach((d, i) => {
+    const tr = document.createElement('tr');
+    tr.onclick = () => toggleDriverSel(i);
+    tr.innerHTML = '<td><input type="checkbox" '+(selectedDrivers.has(i)?'checked':'')+' onclick="event.stopPropagation();toggleDriverSel('+i+')"></td>'
+      + '<td title="'+esc(d.published||'')+'">'+esc(d.published||'')+'</td>'
+      + '<td title="'+esc(d.original||'')+'">'+esc(d.original||'')+'</td>'
+      + '<td>'+esc(d.provider||'')+'</td>'
+      + '<td>'+esc(d.class||'')+'</td>'
+      + '<td>'+esc(d.version||'')+'</td>';
+    if (selectedDrivers.has(i)) tr.classList.add('selected');
+    tbody.appendChild(tr);
+  });
+}
+function toggleDriverSel(i) {
+  if (selectedDrivers.has(i)) selectedDrivers.delete(i); else selectedDrivers.add(i);
+  renderDriverTable();
+  updateDeleteBtn();
+}
+function selectAllDrivers() {
+  drivers.forEach((_, i) => selectedDrivers.add(i));
+  renderDriverTable();
+  updateDeleteBtn();
+}
+function updateDeleteBtn() {
+  const btn = document.getElementById('btn-delete');
+  btn.disabled = selectedDrivers.size === 0;
+  btn.textContent = selectedDrivers.size > 0 ? '🗑 Törlés (' + selectedDrivers.size + ' db)' : '🗑 Kijelöltek Törlése';
+}
+async function toggleAllDrivers() {
+  const cb = document.getElementById('toggle-all-drivers');
+  if (cb.checked) {
+    const ok = await showConfirm('VESZÉLYES FUNKCIÓ', 'A Windows gyári / alapvető (inbox) drivereinek listázását választottad!\n\nHA EZEKET TÖRÖLGETJÜK, EL LEHET BASZARINTANI A GÉPET!\n(Pl. Kékhalál induláskor, nem működő egér/billentyűzet, USB portok halála)\n\nBiztosan bekapcsolod?');
+    if (!ok) { cb.checked = false; return; }
+  }
+  loadDrivers();
+}
+async function deleteSelected() {
+  if (selectedDrivers.size === 0) return;
+  const names = [...selectedDrivers].map(i => drivers[i]?.published).filter(Boolean);
+  const ok = await showConfirm('Megerősítés', 'Biztosan törlöd a kiválasztott ' + names.length + ' drivert és eltávolítod az eszközökről is?');
+  if (!ok) return;
+  const all = document.getElementById('toggle-all-drivers').checked;
+  await api().delete_drivers(names, all);
+}
+
+/* ========== HARDWARE SCAN ========== */
+async function startHwScan() {
+  hwPool = []; hwInstalled = []; hwSelectedIndices.clear();
+  document.getElementById('hw-tree').innerHTML = '';
+  document.getElementById('hw-progress').style.display = 'block';
+  document.getElementById('hw-progress').classList.add('progress-indeterminate');
+  document.getElementById('hw-progress-fill').style.width = '30%';
+  document.getElementById('hw-status').textContent = '⏳ Scannelés folyamatban...';
+  updateHwButtons();
+  await api().start_hw_scan();
+}
+function updateHwScanProgress(data) {
+  document.getElementById('hw-status').textContent = data.status || '';
+  if (data.sys_info) document.getElementById('sys-info').textContent = data.sys_info;
+  if (data.determinate) {
+    document.getElementById('hw-progress').classList.remove('progress-indeterminate');
+    const pct = data.total > 0 ? (data.current / data.total * 100) : 0;
+    document.getElementById('hw-progress-fill').style.width = pct + '%';
+  }
+}
+function onHwScanResult(data) {
+  hwPool = data.pool || [];
+  hwInstalled = data.installed || [];
+  document.getElementById('hw-progress').classList.remove('progress-indeterminate');
+  document.getElementById('hw-progress-fill').style.width = '100%';
+  document.getElementById('hw-status').textContent = '✅ ' + hwPool.length + ' letölthető + ' + hwInstalled.length + ' telepített driver' + (data.time ? ' (' + data.time + ')' : '');
+  if (data.sys_info) document.getElementById('sys-info').textContent = data.sys_info;
+  // Select all available by default
+  hwSelectedIndices.clear();
+  hwPool.forEach((_, i) => hwSelectedIndices.add(i));
+  renderHwTree();
+  updateHwButtons();
+  setTimeout(() => { document.getElementById('hw-progress').style.display = 'none'; }, 2000);
+}
+function renderHwTree() {
+  const container = document.getElementById('hw-tree');
+  container.innerHTML = '';
+  const catOrder = ['🎮 Videókártya (VGA)','🎵 Hangkártya (Audio)','🌐 Hálózat (LAN/Wi-Fi)','🔵 Bluetooth','📷 Webkamera','🖱️ Periféria','🔒 Ujjlenyomat / Biometria','🔌 USB Vezérlő','⚙️ Rendszereszköz','🔄 WU Driver'];
+  // Group available
+  if (hwPool.length > 0) {
+    const cats = {};
+    hwPool.forEach((d, i) => { const c = d.cat || '🔧 Egyéb'; if(!cats[c]) cats[c]=[]; cats[c].push({idx:i,...d}); });
+    const sortedCats = [...catOrder.filter(c=>cats[c]), ...Object.keys(cats).filter(c=>!catOrder.includes(c))];
+    sortedCats.forEach(cat => {
+      const items = cats[cat];
+      const catDiv = document.createElement('div');
+      catDiv.className = 'hw-cat';
+      const allChecked = items.every(it => hwSelectedIndices.has(it.idx));
+      catDiv.innerHTML = '<div class="hw-cat-header open" onclick="toggleHwCatExpand(this)">'
+        + '<span class="chevron">▸</span>'
+        + '<input type="checkbox" '+(allChecked?'checked':'')+' onclick="event.stopPropagation();toggleHwCatCheck(this,\''+esc(cat)+'\')">'
+        + '<span>⬇️ '+esc(cat)+' ('+items.length+' db)</span></div>'
+        + '<div class="hw-cat-children">' + items.map(it =>
+          '<div class="hw-item">'
+          + '<input type="checkbox" data-idx="'+it.idx+'" '+(hwSelectedIndices.has(it.idx)?'checked':'')+' onchange="toggleHwItem('+it.idx+')">'
+          + '<span class="name" title="'+esc(it.name)+'">'+esc(it.name)+'</span>'
+          + '<span class="wu" title="'+esc(it.wu_title||'')+'">'+esc(it.wu_title||'')+'</span>'
+          + '<span class="hwid">'+esc(it.hwid||'')+'</span></div>'
+        ).join('') + '</div>';
+      container.appendChild(catDiv);
+    });
+  }
+  // Separator + installed
+  if (hwInstalled.length > 0) {
+    const sep = document.createElement('div');
+    sep.className = 'hw-separator';
+    sep.textContent = '━━━━━━━━━ ✅ Telepített / Naprakész driverek ━━━━━━━━━';
+    container.appendChild(sep);
+    const instCats = {};
+    hwInstalled.forEach(d => { const c = d.cat||'🔧 Egyéb'; if(!instCats[c]) instCats[c]=[]; instCats[c].push(d); });
+    const sortedCats = [...catOrder.filter(c=>instCats[c]), ...Object.keys(instCats).filter(c=>!catOrder.includes(c))];
+    sortedCats.forEach(cat => {
+      const items = instCats[cat];
+      const catDiv = document.createElement('div');
+      catDiv.className = 'hw-cat hw-installed';
+      catDiv.innerHTML = '<div class="hw-cat-header" onclick="toggleHwCatExpand(this)">'
+        + '<span class="chevron">▸</span>'
+        + '<span>✅ '+esc(cat)+' ('+items.length+' db)</span></div>'
+        + '<div class="hw-cat-children collapsed">' + items.map(it =>
+          '<div class="hw-item"><span></span><span class="name" title="'+esc(it.name)+'">'+esc(it.name)+'</span><span class="wu" style="color:var(--green)">Naprak\u00e9sz</span><span class="hwid" title="'+esc(it.id||'')+'">'+esc(it.id||'')+'</span></div>'
+        ).join('') + '</div>';
+      container.appendChild(catDiv);
+    });
+  }
+}
+function toggleHwCatExpand(header) {
+  header.classList.toggle('open');
+  const children = header.nextElementSibling;
+  children.classList.toggle('collapsed');
+}
+function toggleHwCatCheck(checkbox, cat) {
+  hwPool.forEach((d, idx) => {
+    if ((d.cat||'🔧 Egyéb') === cat) {
+      if (checkbox.checked) hwSelectedIndices.add(idx); else hwSelectedIndices.delete(idx);
+    }
+  });
+  renderHwTree();
+  updateHwButtons();
+}
+function toggleHwItem(idx) {
+  if (hwSelectedIndices.has(idx)) hwSelectedIndices.delete(idx); else hwSelectedIndices.add(idx);
+  renderHwTree();
+  updateHwButtons();
+}
+function selectAllHw() { hwPool.forEach((_,i)=>hwSelectedIndices.add(i)); renderHwTree(); updateHwButtons(); }
+function deselectAllHw() { hwSelectedIndices.clear(); renderHwTree(); updateHwButtons(); }
+function updateHwButtons() {
+  const hasPool = hwPool.length > 0;
+  const hasSel = hwSelectedIndices.size > 0;
+  document.getElementById('btn-install-hw').disabled = !hasSel;
+  document.getElementById('btn-install-hw').textContent = hasSel ? '🚀 Telepítés ('+hwSelectedIndices.size+' db)' : '🚀 Kijelöltek Telepítése';
+  document.getElementById('btn-sel-all-hw').disabled = !hasPool;
+  document.getElementById('btn-desel-all-hw').disabled = !hasPool;
+}
+async function installSelectedHw() {
+  if (hwSelectedIndices.size === 0) return;
+  await api().install_selected_wu([...hwSelectedIndices]);
+}
+
+/* ========== AUTOFIX ========== */
+async function startAutofix() {
+  const ok = await showConfirm('⚡ 1 Kattintásos Driver Fix',
+    'Ez a művelet:\n\n1. LETILTJA a WU automatikus driver keresést\n2. TÖRLI az összes third-party drivert\n3. Újraszkennel minden hardvert\n4. Windows Update-ről TELEPÍTI az összes elérhető drivert\n5. Automatikusan ÚJRAINDÍTJA a gépet\n\n⚠️ A folyamat közben NE használd a gépet!\n\nBiztosan elindítod?');
+  if (!ok) return;
+  document.getElementById('btn-autofix').disabled = true;
+  document.getElementById('btn-autofix').textContent = '⏳ Folyamatban...';
+  await api().start_autofix();
+}
+
+/* ========== WU MANAGEMENT ========== */
+async function checkWuStatus() { const s = await api().check_wu_status(); updateWuStatus(s); }
+function updateWuStatus(data) {
+  const el = document.getElementById('wu-status');
+  el.textContent = 'Állapot: ' + (data.status || 'Ismeretlen');
+  el.className = 'wu-status ' + (data.color || 'unknown');
+}
+async function disableWu() { await api().disable_wu(); }
+async function enableWu() { await api().enable_wu(); }
+async function restartWu() { await api().restart_wu(); }
+
+/* ========== BACKUP / RESTORE ========== */
+async function backupThirdParty() { await api().backup_third_party(); }
+async function backupAll() { await api().backup_all(); }
+async function createRestorePoint() { await api().create_restore_point(); }
+async function restoreDrivers() {
+  const choice = await showConfirm3('Visszaállítási Mód',
+    'ÉLŐRENDSZERRE (erre a futó Windowsra) akarod visszatenni a drivereket?',
+    'Igen (Élő mód)', 'Nem (Offline WinPE)', 'Mégse');
+  if (choice === true) await api().restore_online();
+  else if (choice === false) await api().restore_offline();
+}
+async function extractWim() {
+  const ok = await showConfirm('ISO / WIM Alap Driver Kinyerés',
+    'Ezzel az opcióval egy hivatalos Windows ISO sources\\install.wim fájljából bányásszuk ki a TISZTA Windows drivereket.\n\nAkarod folytatni?');
+  if (!ok) return;
+  await api().extract_wim();
+}
+
+/* ========== PROGRESS MODAL ========== */
+function showProgressModal(title, phase) {
+  document.getElementById('mp-title').textContent = title || 'Folyamat';
+  document.getElementById('mp-phase').textContent = phase || '';
+  document.getElementById('mp-counter').textContent = '';
+  document.getElementById('mp-status').textContent = 'Inicializálás...';
+  document.getElementById('mp-time').textContent = '';
+  document.getElementById('mp-log').textContent = '';
+  document.getElementById('mp-progress-fill').style.width = '0%';
+  document.getElementById('mp-progress').classList.remove('progress-indeterminate');
+  document.getElementById('mp-close-btn').style.display = 'none';
+  document.getElementById('modal-progress').classList.add('active');
+  progressStartTime = Date.now();
+  if (progressTimer) clearInterval(progressTimer);
+  progressTimer = setInterval(() => {
+    const s = Math.floor((Date.now() - progressStartTime) / 1000);
+    const m = Math.floor(s / 60);
+    document.getElementById('mp-time').textContent = '⏱ ' + (m > 0 ? m + ':' + String(s%60).padStart(2,'0') : s + ' mp');
+  }, 1000);
+}
+function updateProgressModal(data) {
+  if (data.phase) document.getElementById('mp-phase').textContent = data.phase;
+  if (data.title) document.getElementById('mp-title').textContent = data.title;
+  if (data.status) document.getElementById('mp-status').textContent = data.status;
+  if (data.counter) document.getElementById('mp-counter').textContent = data.counter;
+  if (data.log) appendLog(data.log);
+  if (data.indeterminate) {
+    document.getElementById('mp-progress').classList.add('progress-indeterminate');
+    document.getElementById('mp-progress-fill').style.width = '30%';
+  } else if (data.total && data.total > 0) {
+    document.getElementById('mp-progress').classList.remove('progress-indeterminate');
+    const pct = Math.min(100, (data.current || 0) / data.total * 100);
+    document.getElementById('mp-progress-fill').style.width = pct + '%';
+  }
+}
+function appendLog(line) {
+  const el = document.getElementById('mp-log');
+  el.textContent += line + '\n';
+  el.scrollTop = el.scrollHeight;
+}
+function onTaskComplete(data) {
+  if (progressTimer) { clearInterval(progressTimer); progressTimer = null; }
+  const s = Math.floor((Date.now() - progressStartTime) / 1000);
+  const m = Math.floor(s / 60);
+  document.getElementById('mp-time').textContent = 'Teljes idő: ' + (m > 0 ? m + ' perc ' + (s%60) + ' mp' : s + ' mp');
+  document.getElementById('mp-progress').classList.remove('progress-indeterminate');
+  document.getElementById('mp-progress-fill').style.width = '100%';
+  document.getElementById('mp-close-btn').style.display = '';
+  if (data.log) appendLog(data.log);
+  if (data.status) document.getElementById('mp-status').textContent = data.status;
+  if (data.counter) document.getElementById('mp-counter').textContent = data.counter;
+  // Refresh relevant views
+  if (data.task === 'delete' || data.task === 'restore') setTimeout(loadDrivers, 500);
+  if (data.task === 'disable_wu' || data.task === 'enable_wu' || data.task === 'restart_wu') setTimeout(checkWuStatus, 500);
+  // Re-enable autofix button
+  if (data.task === 'autofix') {
+    document.getElementById('btn-autofix').disabled = false;
+    document.getElementById('btn-autofix').textContent = '⚡ INDÍTÁS: Teljes Driver Újratelepítés ⚡';
+  }
+}
+function closeProgressModal() {
+  document.getElementById('modal-progress').classList.remove('active');
+  if (progressTimer) { clearInterval(progressTimer); progressTimer = null; }
+}
+
+/* ========== CONFIRM MODAL ========== */
+function showConfirm(title, message) {
+  return new Promise(resolve => {
+    confirmResolver = resolve;
+    document.getElementById('mc-title').textContent = title;
+    document.getElementById('mc-message').textContent = message;
+    document.getElementById('mc-no').style.display = 'none';
+    document.getElementById('mc-cancel').textContent = 'Mégse';
+    document.getElementById('mc-yes').textContent = 'Igen';
+    document.getElementById('modal-confirm').classList.add('active');
+  });
+}
+function showConfirm3(title, message, yesText, noText, cancelText) {
+  return new Promise(resolve => {
+    confirmResolver = resolve;
+    document.getElementById('mc-title').textContent = title;
+    document.getElementById('mc-message').textContent = message;
+    document.getElementById('mc-no').style.display = '';
+    document.getElementById('mc-no').textContent = noText;
+    document.getElementById('mc-cancel').textContent = cancelText;
+    document.getElementById('mc-yes').textContent = yesText;
+    document.getElementById('modal-confirm').classList.add('active');
+  });
+}
+function resolveConfirm(val) {
+  document.getElementById('modal-confirm').classList.remove('active');
+  if (confirmResolver) { confirmResolver(val); confirmResolver = null; }
+}
+
+/* ========== ALERT MODAL ========== */
+function showAlert(title, message) {
+  document.getElementById('ma-title').textContent = title;
+  document.getElementById('ma-message').textContent = message;
+  document.getElementById('modal-alert').classList.add('active');
+}
+function closeAlert() { document.getElementById('modal-alert').classList.remove('active'); }
+
+/* ========== TOAST ========== */
+function toast(message, type) {
+  const t = document.createElement('div');
+  t.className = 'toast ' + (type || 'info');
+  t.textContent = message;
+  document.getElementById('toasts').appendChild(t);
+  setTimeout(() => t.remove(), 4200);
+}
+
+/* ========== UTILS ========== */
+function esc(s) { const d=document.createElement('div'); d.textContent=s; return d.innerHTML.replace(/"/g,'&quot;').replace(/'/g,'&#39;'); }
+</script>
+</body>
+</html>
