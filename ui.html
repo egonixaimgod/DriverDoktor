@@ -323,7 +323,7 @@ td input[type="checkbox"]{accent-color:var(--accent)}
               <span>1️⃣</span> Windows Update driver keresés LETILTÁSA (registry + policy)<br>
               <span>2️⃣</span> Összes third-party driver TÖRLÉSE<br>
               <span>3️⃣</span> Hardver újraszkennelés (Windows alap driverek visszaállása)<br>
-              <span>4️⃣</span> Windows Update-ről az összes elérhető driver LETÖLTÉSE és TELEPÍTÉSE<br>
+              <span>4️⃣</span> Windows Update szervereiről az összes elérhető driver LETÖLTÉSE és TELEPÍTÉSE<br>
               <span>5️⃣</span> Automatikus ÚJRAINDÍTÁS
             </div>
             <div class="autofix-warn">⚠️ A folyamat közben NE használd a gépet! A képernyő villoghat!<br>⏱️ Becsült idő: 5-15 perc</div>
@@ -670,7 +670,7 @@ async function installSelectedHw() {
 /* ========== AUTOFIX ========== */
 async function startAutofix() {
   const ok = await showConfirm('⚡ 1 Kattintásos Driver Fix',
-    'Ez a művelet:\n\n1. LETILTJA a WU automatikus driver keresést\n2. TÖRLI az összes third-party drivert\n3. Újraszkennel minden hardvert\n4. Windows Update-ről TELEPÍTI az összes elérhető drivert\n5. Automatikusan ÚJRAINDÍTJA a gépet\n\n⚠️ A folyamat közben NE használd a gépet!\n\nBiztosan elindítod?');
+    'Ez a művelet:\n\n1. LETILTJA a WU automatikus driver keresést\n2. TÖRLI az összes third-party drivert\n3. Újraszkennel minden hardvert\n4. Windows Update szervereiről TELEPÍTI az összes elérhető drivert\n5. Automatikusan ÚJRAINDÍTJA a gépet\n\n⚠️ A folyamat közben NE használd a gépet!\n\nBiztosan elindítod?');
   if (!ok) return;
   document.getElementById('btn-autofix').disabled = true;
   document.getElementById('btn-autofix').textContent = '⏳ Folyamatban...';
