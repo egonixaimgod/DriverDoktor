@@ -1220,26 +1220,42 @@ try {
             self.emit('task_start', {'task': 'rp', 'title': 'Visszaállítási Pont'})
             self.emit('task_progress', {'task': 'rp', 'log': 'Rendszervédelem engedélyezése...', 'indeterminate': True})
 
-            enable_cmd = f'powershell.exe -ExecutionPolicy Bypass -NoProfile -Command "Enable-ComputerRestore -Drive \\"C:\\\\" -ErrorAction Stop"'
-            enable_res = self._run(enable_cmd, shell=True)
-            if enable_res.returncode != 0:
-                self.emit('task_complete', {'task': 'rp', 'status': f'❌ Rendszervédelem hiba: {enable_res.stderr or enable_res.stdout}'})
-                return
+            # 1) Enable System Restore on C: (force enable even if disabled)
+            enable_ps = '[Console]::OutputEncoding = [System.Text.Encoding]::UTF8; try { Enable-ComputerRestore -Drive "C:\\" -ErrorAction Stop; Write-Output "OK" } catch { Write-Output "FAIL: $($_.Exception.Message)" }'
+            enable_res = self._run(["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", enable_ps], encoding='utf-8')
+            enable_out = (enable_res.stdout or '').strip()
+            if 'FAIL' in enable_out:
+                # Try via registry + vssadmin as fallback
+                self.emit('task_progress', {'task': 'rp', 'log': f'⚠ Enable-ComputerRestore hiba: {enable_out}\nRegistry + vssadmin fallback...'})
+                self._run(['reg', 'add', r'HKLM\SOFTWARE\Microsoft\Windows NT\CurrentVersion\SystemRestore', '/v', 'DisableSR', '/t', 'REG_DWORD', '/d', '0', '/f'])
+                self._run(['vssadmin', 'resize', 'shadowstorage', '/for=C:', '/on=C:', '/maxsize=5%'])
+                # Retry enable
+                enable_res2 = self._run(["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", enable_ps], encoding='utf-8')
+                enable_out2 = (enable_res2.stdout or '').strip()
+                if 'FAIL' in enable_out2:
+                    self.emit('task_complete', {'task': 'rp', 'status': f'❌ Rendszervédelem nem kapcsolható be: {enable_out2}'})
+                    return
+                self.emit('task_progress', {'task': 'rp', 'log': '✅ Rendszervédelem bekapcsolva (fallback)'})
+            else:
+                self.emit('task_progress', {'task': 'rp', 'log': '✅ Rendszervédelem bekapcsolva'})
 
+            # 2) Create restore point
             self.emit('task_progress', {'task': 'rp', 'log': f'Visszaállítási pont: {desc}', 'status': 'Pont létrehozása...'})
-            create_cmd = f"powershell.exe -ExecutionPolicy Bypass -NoProfile -Command \"Checkpoint-Computer -Description '{desc}' -RestorePointType 'MODIFY_SETTINGS' -ErrorAction Stop\""
-            res = self._run(create_cmd, shell=True)
+            create_ps = f'[Console]::OutputEncoding = [System.Text.Encoding]::UTF8; try {{ Checkpoint-Computer -Description "{desc}" -RestorePointType "MODIFY_SETTINGS" -ErrorAction Stop; Write-Output "OK" }} catch {{ Write-Output "FAIL: $($_.Exception.Message)" }}'
+            res = self._run(["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", create_ps], encoding='utf-8')
+            create_out = (res.stdout or '').strip()
 
-            verify_cmd = f"powershell.exe -ExecutionPolicy Bypass -NoProfile -Command \"(Get-ComputerRestorePoint | Where-Object {{ $_.Description -eq '{desc}' }}).Description\""
-            verify_res = self._run(verify_cmd, shell=True)
+            # 3) Verify
+            verify_ps = f'[Console]::OutputEncoding = [System.Text.Encoding]::UTF8; (Get-ComputerRestorePoint | Where-Object {{ $_.Description -eq "{desc}" }}).Description'
+            verify_res = self._run(["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", verify_ps], encoding='utf-8')
             verified = desc in (verify_res.stdout or '')
 
-            if res.returncode == 0 and verified:
+            if 'OK' in create_out and verified:
                 self.emit('task_complete', {'task': 'rp', 'status': f'✅ Visszaállítási pont létrehozva: {desc}'})
-            elif res.returncode == 0:
+            elif 'OK' in create_out:
                 self.emit('task_complete', {'task': 'rp', 'status': '⚠ Lefutott de nem ellenőrizhető (24 órás limit?)'})
             else:
-                self.emit('task_complete', {'task': 'rp', 'status': f'❌ Hiba: {res.stderr or res.stdout}'})
+                self.emit('task_complete', {'task': 'rp', 'status': f'❌ Hiba: {create_out}'})
         self._safe_thread('rp', worker)
 
     def restore_online(self):
