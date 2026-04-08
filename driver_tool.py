@@ -1,4 +1,4 @@
-BUILD_NUMBER = 19
+BUILD_NUMBER = 20
 
 import tkinter as tk
 from tkinter import ttk, messagebox, filedialog
@@ -170,6 +170,16 @@ class DriverCleanerApp(tk.Tk):
         self.tree.bind("<F5>", lambda e: self.refresh_drivers())
         self.tree.bind("<Control-a>", lambda e: self.select_all_drivers())
         self.tree.bind("<Control-A>", lambda e: self.select_all_drivers())
+
+        # Status bar a driver lista felett / alatt
+        drv_status_frame = tk.Frame(self.driver_view, bg="#FFFFFF")
+        drv_status_frame.pack(fill=tk.X, padx=5, pady=(2, 0))
+        self.drv_status_lbl = ttk.Label(drv_status_frame, text="", font=("Segoe UI", 9))
+        self.drv_status_lbl.pack(side=tk.LEFT, padx=5)
+        self.drv_progress = ttk.Progressbar(drv_status_frame, orient=tk.HORIZONTAL, length=200,
+                                             mode='indeterminate', style="Green.Horizontal.TProgressbar")
+        self.drv_progress.pack(side=tk.RIGHT, padx=5)
+        self.drv_progress.pack_forget()  # Alapból rejtett
 
         # Button frame for the grid
         btn_frame = tk.Frame(self.driver_view, bg="#FFFFFF")
@@ -1659,6 +1669,15 @@ try {
 
         is_all = hasattr(self, 'list_all_var') and self.list_all_var.get()
 
+        # Progress megjelenítése
+        mode_text = "MINDEN driver" if is_all else "third-party driverek"
+        self.drv_status_lbl.config(text=f"⏳ {mode_text} betöltése... (ez eltarthat {"30-60 mp" if is_all else "pár mp"})")
+        self.drv_progress.pack(side=tk.RIGHT, padx=5)
+        self.drv_progress.start(15)
+
+        import time as _time
+        load_start = _time.time()
+
         def _refresh_worker():
             if hasattr(self, 'target_os_path') and self.target_os_path:
                 drivers = self.get_offline_drivers(all_drivers=is_all)
@@ -1668,7 +1687,9 @@ try {
                 else:
                     drivers = self.get_third_party_drivers()
 
-            def populate(d_list=drivers):
+            elapsed = _time.time() - load_start
+
+            def populate(d_list=drivers, secs=elapsed):
                 for d in d_list:
                     if "published" in d:
                         self.tree.insert("", tk.END, values=(
@@ -1678,6 +1699,10 @@ try {
                             d.get("class", ""),
                             d.get("version", "")
                         ))
+                # Progress elrejtése, összesítés kiírása
+                self.drv_progress.stop()
+                self.drv_progress.pack_forget()
+                self.drv_status_lbl.config(text=f"✅ {len(d_list)} driver betöltve ({secs:.1f} mp)")
             self.after(0, populate)
 
         threading.Thread(target=_refresh_worker, daemon=True).start()

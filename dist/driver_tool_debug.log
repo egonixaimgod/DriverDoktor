@@ -1,0 +1,55 @@
+2026-04-08 17:23:03 [INFO] ==================================================
+2026-04-08 17:23:03 [INFO] ULTIMATE DRIVER GYILKOLO (es telepito) SZERVIZ TOOL ELINDITVA
+2026-04-08 17:23:03 [INFO] Futtatasi konyvtar: C:\Users\user\Desktop\driver_oles_uj\dist
+2026-04-08 17:23:03 [INFO] ==================================================
+2026-04-08 17:23:03 [DEBUG] Importing AvifImagePlugin
+2026-04-08 17:23:03 [DEBUG] Importing BlpImagePlugin
+2026-04-08 17:23:03 [DEBUG] Importing BmpImagePlugin
+2026-04-08 17:23:03 [DEBUG] Importing BufrStubImagePlugin
+2026-04-08 17:23:03 [DEBUG] Importing CurImagePlugin
+2026-04-08 17:23:03 [DEBUG] Importing DcxImagePlugin
+2026-04-08 17:23:03 [DEBUG] Importing DdsImagePlugin
+2026-04-08 17:23:03 [DEBUG] Importing EpsImagePlugin
+2026-04-08 17:23:03 [DEBUG] Importing FitsImagePlugin
+2026-04-08 17:23:03 [DEBUG] Importing FliImagePlugin
+2026-04-08 17:23:03 [DEBUG] Importing FpxImagePlugin
+2026-04-08 17:23:03 [DEBUG] Image: failed to import FpxImagePlugin: No module named 'olefile'
+2026-04-08 17:23:03 [DEBUG] Importing FtexImagePlugin
+2026-04-08 17:23:03 [DEBUG] Importing GbrImagePlugin
+2026-04-08 17:23:03 [DEBUG] Importing GifImagePlugin
+2026-04-08 17:23:03 [DEBUG] Importing GribStubImagePlugin
+2026-04-08 17:23:03 [DEBUG] Importing Hdf5StubImagePlugin
+2026-04-08 17:23:03 [DEBUG] Importing IcnsImagePlugin
+2026-04-08 17:23:03 [DEBUG] Importing IcoImagePlugin
+2026-04-08 17:23:03 [DEBUG] Importing ImImagePlugin
+2026-04-08 17:23:03 [DEBUG] Importing ImtImagePlugin
+2026-04-08 17:23:03 [DEBUG] Importing IptcImagePlugin
+2026-04-08 17:23:03 [DEBUG] Importing JpegImagePlugin
+2026-04-08 17:23:03 [DEBUG] Importing Jpeg2KImagePlugin
+2026-04-08 17:23:03 [DEBUG] Importing McIdasImagePlugin
+2026-04-08 17:23:03 [DEBUG] Importing MicImagePlugin
+2026-04-08 17:23:03 [DEBUG] Image: failed to import MicImagePlugin: No module named 'olefile'
+2026-04-08 17:23:03 [DEBUG] Importing MpegImagePlugin
+2026-04-08 17:23:03 [DEBUG] Importing MpoImagePlugin
+2026-04-08 17:23:03 [DEBUG] Importing MspImagePlugin
+2026-04-08 17:23:03 [DEBUG] Importing PalmImagePlugin
+2026-04-08 17:23:03 [DEBUG] Importing PcdImagePlugin
+2026-04-08 17:23:03 [DEBUG] Importing PcxImagePlugin
+2026-04-08 17:23:03 [DEBUG] Importing PdfImagePlugin
+2026-04-08 17:23:03 [DEBUG] Importing PixarImagePlugin
+2026-04-08 17:23:03 [DEBUG] Importing PngImagePlugin
+2026-04-08 17:23:03 [DEBUG] Importing PpmImagePlugin
+2026-04-08 17:23:03 [DEBUG] Importing PsdImagePlugin
+2026-04-08 17:23:03 [DEBUG] Importing QoiImagePlugin
+2026-04-08 17:23:03 [DEBUG] Importing SgiImagePlugin
+2026-04-08 17:23:03 [DEBUG] Importing SpiderImagePlugin
+2026-04-08 17:23:03 [DEBUG] Importing SunImagePlugin
+2026-04-08 17:23:03 [DEBUG] Importing TgaImagePlugin
+2026-04-08 17:23:03 [DEBUG] Importing TiffImagePlugin
+2026-04-08 17:23:03 [DEBUG] Importing WebPImagePlugin
+2026-04-08 17:23:03 [DEBUG] Importing WmfImagePlugin
+2026-04-08 17:23:03 [DEBUG] Importing XbmImagePlugin
+2026-04-08 17:23:03 [DEBUG] Importing XpmImagePlugin
+2026-04-08 17:23:03 [DEBUG] Importing XVThumbImagePlugin
+2026-04-08 17:23:03 [DEBUG] STREAM b'IHDR' 13758 13
+2026-04-08 17:23:03 [DEBUG] STREAM b'IDAT' 13783 4023
