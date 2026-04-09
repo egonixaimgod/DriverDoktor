@@ -1,4 +1,4 @@
-BUILD_NUMBER = 32
+BUILD_NUMBER = 33
 
 import os
 import sys
@@ -1332,53 +1332,26 @@ try {
                     time.sleep(3.5)
                     self.emit('task_progress', {'task': 'restore', 'log': '✅ Scan kész!'})
             elif not is_inbox:
-                # Offline boot service setup
-                self.emit('task_progress', {'task': 'restore', 'log': 'Boot-idejű telepítő beállítása...'})
-                temp_drv = os.path.join(target, "TempRunDrivers")
-                if os.path.exists(temp_drv):
-                    shutil.rmtree(temp_drv, ignore_errors=True)
-                try:
-                    shutil.copytree(source, temp_drv, dirs_exist_ok=True)
-                except Exception as e:
-                    self.emit('task_progress', {'task': 'restore', 'log': f'⚠ Temp másolás hiba: {e}'})
-
-                pdata = os.path.join(target, "ProgramData")
-                os.makedirs(pdata, exist_ok=True)
-                bat_path = os.path.join(pdata, "auto_pnputil_scan.bat")
+                # Automata PnP rescan beállítása az asztal betöltésére
+                self.emit('task_progress', {'task': 'restore', 'log': 'Első bejelentkezési rescan script beállítása...'})
+                startup_dir = os.path.join(target, "ProgramData", "Microsoft", "Windows", "Start Menu", "Programs", "Startup")
+                os.makedirs(startup_dir, exist_ok=True)
+                bat_path = os.path.join(startup_dir, "auto_pnputil_scan.bat")
                 bat_content = (
                     '@echo off\n'
                     'set LOGFILE="%SystemDrive%\\Users\\Public\\driver_startup_log.txt"\n'
-                    'echo [%DATE% %TIME%] Boot telepites >> %LOGFILE%\n'
-                    'sc delete DriverRestoreSvc >> %LOGFILE% 2>&1\n'
-                    'ping 127.0.0.1 -n 15 > nul\n'
-                    'pnputil /add-driver "%SystemDrive%\\TempRunDrivers\\*.inf" /subdirs /install >> %LOGFILE% 2>&1\n'
+                    'echo [%DATE% %TIME%] Boot rescan indult... >> %LOGFILE%\n'
                     'pnputil /scan-devices >> %LOGFILE% 2>&1\n'
-                    'rd /s /q "%SystemDrive%\\TempRunDrivers" >> %LOGFILE% 2>&1\n'
+                    'echo [%DATE% %TIME%] Kesz! >> %LOGFILE%\n'
                     'ping 127.0.0.1 -n 3 > nul\n'
                     '(goto) 2>nul & del "%~f0"\n'
                 )
-                with open(bat_path, 'w', encoding='utf-8') as f:
-                    f.write(bat_content)
-
-                hive_path = os.path.join(target, "Windows", "System32", "config", "SYSTEM")
-                if os.path.exists(hive_path):
-                    try:
-                        subprocess.run(['reg', 'load', 'HKLM\\OFFLINE_SYSTEM', hive_path], check=True,
-                                       capture_output=True, text=True, creationflags=self._nw)
-                        try:
-                            key = winreg.CreateKey(winreg.HKEY_LOCAL_MACHINE, r'OFFLINE_SYSTEM\ControlSet001\Services\DriverRestoreSvc')
-                            winreg.SetValueEx(key, 'Type', 0, winreg.REG_DWORD, 16)
-                            winreg.SetValueEx(key, 'Start', 0, winreg.REG_DWORD, 2)
-                            winreg.SetValueEx(key, 'ErrorControl', 0, winreg.REG_DWORD, 1)
-                            winreg.SetValueEx(key, 'ImagePath', 0, winreg.REG_EXPAND_SZ, r'cmd.exe /c "%SystemDrive%\ProgramData\auto_pnputil_scan.bat"')
-                            winreg.SetValueEx(key, 'ObjectName', 0, winreg.REG_SZ, 'LocalSystem')
-                            winreg.CloseKey(key)
-                            self.emit('task_progress', {'task': 'restore', 'log': '✅ Boot service regisztrálva'})
-                        finally:
-                            subprocess.run(['reg', 'unload', 'HKLM\\OFFLINE_SYSTEM'], check=False,
-                                           capture_output=True, text=True, creationflags=self._nw)
-                    except Exception as e:
-                        self.emit('task_progress', {'task': 'restore', 'log': f'⚠ Registry hiba: {e}'})
+                try:
+                    with open(bat_path, 'w', encoding='utf-8') as f:
+                        f.write(bat_content)
+                    self.emit('task_progress', {'task': 'restore', 'log': '✅ Startup script elhelyezve.'})
+                except Exception as e:
+                    self.emit('task_progress', {'task': 'restore', 'log': f'⚠ Script írási hiba: {e}'})
 
             self.emit('task_progress', {'task': 'restore', 'log': '\n==== BEFEJEZVE ===='})
             self.emit('task_complete', {'task': 'restore', 'status': '✅ Visszaállítás befejezve!'})
