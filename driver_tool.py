@@ -1,4 +1,4 @@
-BUILD_NUMBER = 35
+BUILD_NUMBER = 36
 
 import os
 import sys
@@ -198,9 +198,24 @@ class DriverToolApi:
         data = json.loads(out)
         if isinstance(data, dict):
             data = [data]
-        return [{"published": d.get("Driver", ""), "original": d.get("OriginalFileName", ""),
+        parsed_drivers = [{"published": d.get("Driver", ""), "original": d.get("OriginalFileName", ""),
                  "provider": d.get("ProviderName", ""), "class": d.get("ClassName", ""),
                  "version": d.get("Version", "")} for d in data]
+
+        # Filter ghosts (force-deleted inbox drivers)
+        valid_drivers = []
+        rep = os.path.join(os.environ.get('SYSTEMROOT', r'C:\Windows'), "System32", "DriverStore", "FileRepository")
+        for d in parsed_drivers:
+            pub = d.get("published", "")
+            if not pub:
+                continue
+            if pub.lower().startswith("oem"):
+                valid_drivers.append(d)
+                continue
+            if glob.glob(os.path.join(rep, f"{pub}_*")):
+                valid_drivers.append(d)
+
+        return valid_drivers
 
     def _get_offline_drivers(self, all_drivers=False):
         cmd = ['dism', f'/Image:{self.target_os_path}', '/Get-Drivers']
@@ -231,7 +246,21 @@ class DriverToolApi:
                     current["version"] = val
         if current and "published" in current:
             drivers.append(current)
-        return drivers
+
+        # Filter ghosts (force-deleted inbox drivers)
+        valid_drivers = []
+        rep = os.path.join(self.target_os_path, "Windows", "System32", "DriverStore", "FileRepository")
+        for d in drivers:
+            pub = d.get("published", "")
+            if not pub:
+                continue
+            if pub.lower().startswith("oem"):
+                valid_drivers.append(d)
+                continue
+            if glob.glob(os.path.join(rep, f"{pub}_*")):
+                valid_drivers.append(d)
+
+        return valid_drivers
 
     # ================================================================
     # DRIVER DELETION
