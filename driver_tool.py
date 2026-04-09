@@ -1,4 +1,4 @@
-BUILD_NUMBER = 40
+BUILD_NUMBER = 41
 
 import os
 import sys
@@ -1493,7 +1493,9 @@ try {
         def worker():
             self.emit('task_start', {'task': 'wim', 'title': 'WIM Driver Kinyerés'})
             wim = os.path.abspath(wim_path).replace("/", "\\")
-            mount_dir = os.path.join(dest, "WIM_Mount_Temp")
+            # A WIM csatolási mappának a C: meghajtón kell lennie (NTFS), mert a cserélhető meghajtókat (USB) a DISM visszautasítja
+            sys_temp = os.environ.get('TEMP', 'C:\\Temp')
+            mount_dir = os.path.join(sys_temp, f"WIM_Mount_Temp_{int(time.time())}")
             target_folder = os.path.join(dest, f"Windows_Gyari_Alap_Driverek_{datetime.now().strftime('%Y%m%d_%H%M')}")
 
             if os.path.exists(mount_dir):
