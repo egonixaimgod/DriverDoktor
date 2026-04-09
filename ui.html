@@ -699,8 +699,20 @@ async function restoreDrivers() {
   const choice = await showConfirm3('Visszaállítási Mód',
     'ÉLŐRENDSZERRE (erre a futó Windowsra) akarod visszatenni a drivereket?',
     'Igen (Élő mód)', 'Nem (Offline WinPE)', 'Mégse');
-  if (choice === true) await api().restore_online();
-  else if (choice === false) await api().restore_offline();
+  if (choice === true) {
+    await api().restore_online();
+  } else if (choice === false) {
+    const ok = await showConfirm('Offline Visszaállítás Lépései', 
+      'OFFLINE módot választottál.\n\nA folyamat a következőképpen fog lezajlani:\n\n' +
+      '1. VÁLASZ TÁRHELYET (CÉLPONT / DESTINATION):\n' +
+      '   Először ki kell választanod azt a meghajtót/Windows mappát, ahová a drivereket telepíteni szeretnéd (pl. a halott rendszered meghajtója).\n\n' +
+      '2. VÁLASZ FORRÁST (SOURCE):\n' +
+      '   Ezután ki kell választanod azt a mappát, ahol a lementett drivereid vannak (pl. a WIM-ből kinyert driverek mappája).\n\n' +
+      'Készen állsz a varázsló indítására?');
+    if (ok) {
+      await api().restore_offline();
+    }
+  }
 }
 async function extractWim() {
   const ok = await showConfirm('ISO / WIM Alap Driver Kinyerés',
