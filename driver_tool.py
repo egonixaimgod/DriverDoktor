@@ -1,4 +1,4 @@
-BUILD_NUMBER = 33
+BUILD_NUMBER = 34
 
 import os
 import sys
@@ -271,20 +271,40 @@ class DriverToolApi:
                         if list_all and not is_oem:
                             if is_offline:
                                 rep = os.path.join(self.target_os_path, "Windows", "System32", "DriverStore", "FileRepository")
+                                inf_dir = os.path.join(self.target_os_path, "Windows", "INF")
                             else:
                                 rep = os.path.join(os.environ.get('SYSTEMROOT', r'C:\Windows'), "System32", "DriverStore", "FileRepository")
+                                inf_dir = os.path.join(os.environ.get('SYSTEMROOT', r'C:\Windows'), "INF")
                             dirs = glob.glob(os.path.join(rep, f"{pub}_*"))
+                            
+                            found_any = False
                             if dirs:
                                 for d in dirs:
                                     self._run(f'takeown /f "{d}" /r /d y', shell=True)
                                     self._run(f'icacls "{d}" /grant administrators:F /t', shell=True)
                                     shutil.rmtree(d, ignore_errors=True)
                                     self._run(f'rmdir /s /q "{d}"', shell=True)
+                                found_any = True
+
+                            bname = os.path.splitext(pub)[0]
+                            for ext in ['.inf', '.pnf', '.INF', '.PNF']:
+                                fpath = os.path.join(inf_dir, bname + ext)
+                                if os.path.exists(fpath):
+                                    self._run(f'takeown /f "{fpath}" /A', shell=True)
+                                    self._run(f'icacls "{fpath}" /grant administrators:F', shell=True)
+                                    try:
+                                        os.remove(fpath)
+                                        found_any = True
+                                    except:
+                                        self._run(f'del /f /q "{fpath}"', shell=True)
+                                        found_any = True
+
+                            if found_any:
                                 success += 1
                                 self.emit('task_progress', {'task': 'delete', 'log': f'  ✅ {pub} törölve (force)'})
                             else:
                                 fail += 1
-                                self.emit('task_progress', {'task': 'delete', 'log': f'  ❌ {pub} sikertelen'})
+                                self.emit('task_progress', {'task': 'delete', 'log': f'  ❌ {pub} sikertelen (nem található)'})
                         else:
                             fail += 1
                             self.emit('task_progress', {'task': 'delete', 'log': f'  ❌ {pub} sikertelen'})
