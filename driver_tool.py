@@ -1,4 +1,4 @@
-BUILD_NUMBER = 36
+BUILD_NUMBER = 37
 
 import os
 import sys
@@ -1359,17 +1359,36 @@ try {
                 self.emit('task_progress', {'task': 'restore', 'log': f'\nReturn code: {process.returncode}'})
             else:
                 if is_inbox:
-                    self.emit('task_progress', {'task': 'restore', 'log': 'Gyári inbox driverek injektálása (DISM) - Ez eltarthat 10-20 percig!'})
-                scratch = os.path.join(norm_target, "Scratch")
-                os.makedirs(scratch, exist_ok=True)
-                cmd = ['dism', f'/Image:{norm_target}', '/Add-Driver', f'/Driver:{norm_source}', '/Recurse', '/ForceUnsigned', f'/ScratchDir:{scratch}']
-                self.emit('task_progress', {'task': 'restore', 'log': f'Parancs: {" ".join(cmd)}'})
-                process = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
-                                           startupinfo=self._si, creationflags=self._nw, errors='replace')
-                for line in process.stdout:
-                    self.emit('task_progress', {'task': 'restore', 'log': line.strip()})
-                process.wait()
-                self.emit('task_progress', {'task': 'restore', 'log': f'\nReturn code: {process.returncode}'})
+                    self.emit('task_progress', {'task': 'restore', 'log': 'Gyári beépített driverek natív visszafűzése (Másolás az eredeti helyre)...'})
+                    new_format_repo = os.path.join(norm_source, "FileRepository")
+                    new_format_inf = os.path.join(norm_source, "INF")
+                    target_repo = os.path.join(norm_target, "Windows", "System32", "DriverStore", "FileRepository")
+                    target_inf = os.path.join(norm_target, "Windows", "INF")
+                    
+                    try:
+                        if os.path.exists(new_format_repo):
+                            self.emit('task_progress', {'task': 'restore', 'log': 'FileRepository és INF mappák fizikai másolásának megkezdése (Új formátum)...'})
+                            shutil.copytree(new_format_repo, target_repo, dirs_exist_ok=True)
+                            if os.path.exists(new_format_inf):
+                                shutil.copytree(new_format_inf, target_inf, dirs_exist_ok=True)
+                        else:
+                            self.emit('task_progress', {'task': 'restore', 'log': 'DriverStore fizikai másolása (Régi formátum)...'})
+                            shutil.copytree(norm_source, target_repo, dirs_exist_ok=True)
+                        
+                        self.emit('task_progress', {'task': 'restore', 'log': '✅ Fizikai másolás kész, eredeti gyári állapot helyreállítva!'})
+                    except Exception as e:
+                        self.emit('task_progress', {'task': 'restore', 'log': f'⚠ Másolási hiba: {e}'})
+                else:
+                    scratch = os.path.join(norm_target, "Scratch")
+                    os.makedirs(scratch, exist_ok=True)
+                    cmd = ['dism', f'/Image:{norm_target}', '/Add-Driver', f'/Driver:{norm_source}', '/Recurse', '/ForceUnsigned', f'/ScratchDir:{scratch}']
+                    self.emit('task_progress', {'task': 'restore', 'log': f'Parancs: {" ".join(cmd)}'})
+                    process = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
+                                               startupinfo=self._si, creationflags=self._nw, errors='replace')
+                    for line in process.stdout:
+                        self.emit('task_progress', {'task': 'restore', 'log': line.strip()})
+                    process.wait()
+                    self.emit('task_progress', {'task': 'restore', 'log': f'\nReturn code: {process.returncode}'})
 
             # Post-install
             if online:
@@ -1436,12 +1455,19 @@ try {
                 if res.returncode != 0:
                     raise Exception(f"DISM Mount hiba: {res.stdout} {res.stderr}")
 
-                self.emit('task_progress', {'task': 'wim', 'log': 'DriverStore másolása...', 'counter': '2/3', 'status': 'Gyári driverek másolása...'})
+                self.emit('task_progress', {'task': 'wim', 'log': 'Fájlok másolása...', 'counter': '2/3', 'status': 'Gyári driverek másolása...'})
+                
                 driverstore = os.path.join(mount_dir, "Windows", "System32", "DriverStore", "FileRepository")
+                target_repo = os.path.join(target_folder, "FileRepository")
                 if os.path.exists(driverstore):
-                    shutil.copytree(driverstore, target_folder, dirs_exist_ok=True)
+                    shutil.copytree(driverstore, target_repo, dirs_exist_ok=True)
                 else:
                     raise Exception("FileRepository nem található a WIM-ben!")
+
+                inf_dir = os.path.join(mount_dir, "Windows", "INF")
+                target_inf = os.path.join(target_folder, "INF")
+                if os.path.exists(inf_dir):
+                    shutil.copytree(inf_dir, target_inf, dirs_exist_ok=True)
 
                 self.emit('task_progress', {'task': 'wim', 'log': 'WIM leválasztása...', 'counter': '3/3', 'status': 'Takarítás...'})
                 self._run(["dism", "/Unmount-Image", f"/MountDir:{mount_dir}", "/Discard"])
