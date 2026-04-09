@@ -1,4 +1,4 @@
-BUILD_NUMBER = 34
+BUILD_NUMBER = 35
 
 import os
 import sys
@@ -281,7 +281,7 @@ class DriverToolApi:
                             if dirs:
                                 for d in dirs:
                                     self._run(f'takeown /f "{d}" /r /d y', shell=True)
-                                    self._run(f'icacls "{d}" /grant administrators:F /t', shell=True)
+                                    self._run(f'icacls "{d}" /grant *S-1-5-32-544:F /t', shell=True)
                                     shutil.rmtree(d, ignore_errors=True)
                                     self._run(f'rmdir /s /q "{d}"', shell=True)
                                 found_any = True
@@ -291,7 +291,7 @@ class DriverToolApi:
                                 fpath = os.path.join(inf_dir, bname + ext)
                                 if os.path.exists(fpath):
                                     self._run(f'takeown /f "{fpath}" /A', shell=True)
-                                    self._run(f'icacls "{fpath}" /grant administrators:F', shell=True)
+                                    self._run(f'icacls "{fpath}" /grant *S-1-5-32-544:F', shell=True)
                                     try:
                                         os.remove(fpath)
                                         found_any = True
