@@ -1,4 +1,4 @@
-BUILD_NUMBER = 45
+BUILD_NUMBER = 46
 
 import os
 import sys
@@ -681,9 +681,6 @@ try {
         catalog_hwids = {drv['hwid'] for drv in self.hw_updates_pool}
         self._hw_installed_devs = [dev for dev in devices_to_check if dev['id'] not in catalog_hwids]
 
-    def get_hw_pool(self):
-        return {'pool': self.hw_updates_pool, 'installed': self._hw_installed_devs}
-
     # ================================================================
     # WU DRIVER INSTALL
     # ================================================================
@@ -1027,6 +1024,11 @@ try {
                 startupinfo=self._si, creationflags=self._nw)
 
             for line in process.stdout:
+                if self._check_cancel():
+                    process.terminate()
+                    self.emit('task_progress', {'task': 'autofix', 'log': '\n❗ Megszakítva!'})
+                    self.emit('task_complete', {'task': 'autofix', 'status': '❗ Megszakítva!', 'counter': 'Megszakítva'})
+                    return
                 line = line.strip()
                 if not line:
                     continue
