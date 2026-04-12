@@ -1,4 +1,4 @@
-BUILD_NUMBER = 46
+BUILD_NUMBER = 47
 
 import os
 import sys
@@ -52,6 +52,7 @@ def resource_path(relative_path):
 
 class DriverToolApi:
     def __init__(self):
+        logging.info("[INIT] DriverToolApi inicializálás...")
         self._window = None
         self.target_os_path = None
         self.sys_drive = os.environ.get('SystemDrive', 'C:') + '\\'
@@ -64,26 +65,37 @@ class DriverToolApi:
         self._si = subprocess.STARTUPINFO()
         self._si.dwFlags |= subprocess.STARTF_USESHOWWINDOW
         self._nw = subprocess.CREATE_NO_WINDOW
+        logging.info(f"[INIT] sys_drive={self.sys_drive}")
+        logging.info("[INIT] DriverToolApi kész.")
 
     def set_window(self, window):
+        logging.info("[WINDOW] WebView ablak beállítása...")
         self._window = window
         # Wait for WebView2 DOM to be ready
-        for _ in range(50):
+        for i in range(50):
             try:
                 if self._window and self._window.evaluate_js('1+1') == 2:
+                    logging.info(f"[WINDOW] WebView2 DOM kész ({i+1} próba után)")
                     break
-            except Exception:
-                pass
+            except Exception as e:
+                if i == 49:
+                    logging.warning(f"[WINDOW] WebView2 DOM nem reagál: {e}")
             time.sleep(0.1)
 
     def emit(self, event, data=None):
+        # Log minden emit event-et
         try:
             if isinstance(data, dict):
-                log_msg = data.get('log') or data.get('status') or data.get('error')
+                log_msg = data.get('log') or data.get('status') or data.get('error') or data.get('phase')
                 if log_msg:
-                    logging.info(f"[{event}] {str(log_msg).strip()}")
-        except:
-            pass
+                    logging.info(f"[EMIT:{event}] {str(log_msg).strip()}")
+                else:
+                    # Log egyéb data mezőket is
+                    logging.debug(f"[EMIT:{event}] data={json.dumps(data, ensure_ascii=False, default=str)[:200]}")
+            else:
+                logging.debug(f"[EMIT:{event}] data={data}")
+        except Exception as e:
+            logging.warning(f"[EMIT] Logging hiba: {e}")
 
         if self._window:
             try:
@@ -91,25 +103,51 @@ class DriverToolApi:
                 self._window.evaluate_js(f'window.handlePyEvent({payload})')
             except Exception as e:
                 if 'NoneType' in str(e):
+                    logging.warning(f"[EMIT:{event}] Window None, újrapróbálás...")
                     time.sleep(0.5)
                     try:
                         self._window.evaluate_js(f'window.handlePyEvent({payload})')
-                    except Exception:
-                        pass
+                    except Exception as e2:
+                        logging.error(f"[EMIT:{event}] Újrapróbálás sikertelen: {e2}")
                 else:
-                    logging.error(f"emit error ({event}): {e}")
+                    logging.error(f"[EMIT:{event}] Hiba: {e}")
 
     def _run(self, cmd, **kwargs):
-        return subprocess.run(cmd, capture_output=True, text=True, errors='replace',
-                              startupinfo=self._si, creationflags=self._nw, **kwargs)
+        # Log minden parancs futtatását
+        cmd_str = cmd if isinstance(cmd, str) else ' '.join(str(c) for c in cmd)
+        logging.debug(f"[CMD] Futtatás: {cmd_str[:300]}")
+        start = time.time()
+        try:
+            result = subprocess.run(cmd, capture_output=True, text=True, errors='replace',
+                                  startupinfo=self._si, creationflags=self._nw, **kwargs)
+            elapsed = time.time() - start
+            # Log eredmény
+            if result.returncode != 0:
+                logging.warning(f"[CMD] Visszatérési kód: {result.returncode} ({elapsed:.1f}s)")
+                if result.stderr:
+                    logging.warning(f"[CMD] stderr: {result.stderr[:500]}")
+            else:
+                logging.debug(f"[CMD] OK ({elapsed:.1f}s)")
+            # Log stdout ha van és rövid
+            if result.stdout and len(result.stdout) < 500:
+                logging.debug(f"[CMD] stdout: {result.stdout.strip()[:300]}")
+            return result
+        except Exception as e:
+            logging.error(f"[CMD] Kivétel: {e}")
+            raise
 
     def _safe_thread(self, task, target):
         def wrapper():
+            logging.info(f"[THREAD:{task}] Háttérszál indul...")
+            start_time = time.time()
             try:
                 target()
+                elapsed = time.time() - start_time
+                logging.info(f"[THREAD:{task}] Befejezve ({elapsed:.1f}s)")
             except Exception as e:
-                logging.error(f"{task} worker error: {e}")
-                logging.error(traceback.format_exc())
+                elapsed = time.time() - start_time
+                logging.error(f"[THREAD:{task}] HIBA ({elapsed:.1f}s): {e}")
+                logging.error(f"[THREAD:{task}] Traceback:\n{traceback.format_exc()}")
                 self.emit('task_error', {'task': task, 'error': str(e)})
                 self.emit('task_complete', {'task': task, 'status': f'❌ Hiba: {e}'})
         threading.Thread(target=wrapper, daemon=True).start()
@@ -118,68 +156,92 @@ class DriverToolApi:
     # GENERAL
     # ================================================================
     def get_init_data(self):
+        logging.info(f"[API] get_init_data() hívás - build={BUILD_NUMBER}, target={self.target_os_path}")
         return {'build': BUILD_NUMBER, 'sys_drive': self.sys_drive, 'target_os': self.target_os_path}
 
     def cancel_task(self):
         """API hívás a hosszan tartó műveletek (pl. törlés) megszakítására."""
+        logging.warning("[API] cancel_task() — Felhasználó megszakítást kért!")
         self._cancel_flag = True
         self.emit('toast', {'message': '⚠️ Megszakítás kérve...', 'type': 'warning'})
         return True
 
     def _check_cancel(self):
         """Ellenőrzi, hogy a felhasználó megszakította-e a műveletet."""
-        return getattr(self, '_cancel_flag', False)
+        cancelled = getattr(self, '_cancel_flag', False)
+        if cancelled:
+            logging.info("[CANCEL] Megszakítás flag aktiv!")
+        return cancelled
 
     def change_target_os(self):
+        logging.info("[API] change_target_os() hívás")
         result = self._window.create_file_dialog(_FOLDER_DIALOG, allow_multiple=False)
         if result and len(result) > 0:
             d = os.path.abspath(result[0]).replace("/", "\\")
-            return {'path': d, 'has_windows': os.path.exists(os.path.join(d, "Windows"))}
+            has_win = os.path.exists(os.path.join(d, "Windows"))
+            logging.info(f"[API] change_target_os: kiválasztva={d}, has_windows={has_win}")
+            return {'path': d, 'has_windows': has_win}
+        logging.info("[API] change_target_os: mégse")
         return None
 
     def apply_target_os(self, path):
+        logging.info(f"[API] apply_target_os({path})")
         self.target_os_path = path
         return True
 
     def reset_target_os(self):
+        logging.info("[API] reset_target_os() - visszatérés jelenlegi rendszerre")
         self.target_os_path = None
         return True
 
     def select_directory(self, title='Válassz mappát'):
+        logging.info(f"[API] select_directory(title={title})")
         result = self._window.create_file_dialog(_FOLDER_DIALOG, allow_multiple=False)
         if result and len(result) > 0:
+            logging.info(f"[API] select_directory: kiválasztva={result[0]}")
             return result[0]
+        logging.info("[API] select_directory: mégse")
         return None
 
     def select_file(self, title='Válassz fájlt', file_types=''):
+        logging.info(f"[API] select_file(title={title}, types={file_types})")
         ft = (file_types.split('|')[0],) if file_types else ()
         result = self._window.create_file_dialog(_OPEN_DIALOG, allow_multiple=False, file_types=ft)
         if result and len(result) > 0:
+            logging.info(f"[API] select_file: kiválasztva={result[0]}")
             return result[0]
+        logging.info("[API] select_file: mégse")
         return None
 
     # ================================================================
     # DRIVER LISTING
     # ================================================================
     def load_drivers(self, all_drivers=False):
+        logging.info(f"[API] load_drivers(all_drivers={all_drivers})")
         def worker():
             self.emit('drivers_loading')
             start = time.time()
             try:
                 if self.target_os_path:
+                    logging.info(f"[DRIVERS] Offline mód: {self.target_os_path}")
                     drivers = self._get_offline_drivers(all_drivers)
                 elif all_drivers:
+                    logging.info("[DRIVERS] Összes driver lekérdezés (élő rendszer)")
                     drivers = self._get_all_drivers()
                 else:
+                    logging.info("[DRIVERS] Third-party driverek lekérdezés")
                     drivers = self._get_third_party_drivers()
                 elapsed = time.time() - start
+                logging.info(f"[DRIVERS] Betöltve: {len(drivers)} driver ({elapsed:.1f}s)")
                 self.emit('drivers_loaded', {'drivers': drivers, 'elapsed': round(elapsed, 1)})
             except Exception as e:
-                logging.error(f"load_drivers error: {e}")
+                logging.error(f"[DRIVERS] Betöltési hiba: {e}")
+                logging.error(traceback.format_exc())
                 self.emit('drivers_loaded', {'drivers': [], 'elapsed': 0, 'error': str(e)})
         threading.Thread(target=worker, daemon=True).start()
 
     def _get_third_party_drivers(self):
+        logging.debug("[DRIVERS] pnputil /enum-drivers futtatása...")
         res = self._run(['pnputil', '/enum-drivers'])
         drivers = []
         current = {}
@@ -208,11 +270,13 @@ class DriverToolApi:
         return drivers
 
     def _get_all_drivers(self):
+        logging.debug("[DRIVERS] _get_all_drivers() indult")
         cmd = ['powershell', '-NoProfile', '-Command',
                '[Console]::OutputEncoding = [System.Text.Encoding]::UTF8; Get-WindowsDriver -Online -All | Select-Object ProviderName, ClassName, Version, Driver, OriginalFileName | ConvertTo-Json -Depth 2 -WarningAction SilentlyContinue']
         res = self._run(cmd, encoding='utf-8')
         out = res.stdout.strip()
         if not out:
+            logging.debug("[DRIVERS] _get_all_drivers: üres kimenet")
             return []
         data = json.loads(out)
         if isinstance(data, dict):
@@ -234,9 +298,11 @@ class DriverToolApi:
             if glob.glob(os.path.join(rep, f"{pub}_*")):
                 valid_drivers.append(d)
 
+        logging.debug(f"[DRIVERS] _get_all_drivers: {len(valid_drivers)} valid driver")
         return valid_drivers
 
     def _get_offline_drivers(self, all_drivers=False):
+        logging.debug(f"[DRIVERS] _get_offline_drivers(all_drivers={all_drivers})")
         cmd = ['dism', f'/Image:{self.target_os_path}', '/Get-Drivers']
         if all_drivers:
             cmd.append('/all')
@@ -279,17 +345,21 @@ class DriverToolApi:
             if glob.glob(os.path.join(rep, f"{pub}_*")):
                 valid_drivers.append(d)
 
+        logging.debug(f"[DRIVERS] _get_offline_drivers: {len(valid_drivers)} valid driver")
         return valid_drivers
 
     # ================================================================
     # DRIVER DELETION
     # ================================================================
     def delete_drivers(self, published_names, list_all=False):
+        logging.info(f"[API] delete_drivers() - {len(published_names)} driver, list_all={list_all}")
+        logging.info(f"[DELETE] Törlendő driverek: {published_names}")
         self._cancel_flag = False
         def worker():
             total = len(published_names)
             success = 0
             fail = 0
+            logging.info(f"[DELETE] Törlés indulása: {total} db driver")
             self.emit('task_start', {'task': 'delete', 'title': f'Törlés folyamatban... ({total} driver)'})
             self.emit('task_progress', {'task': 'delete', 'log': f'Kijelölt driverek törlése indult ({total} db)'})
 
@@ -386,15 +456,18 @@ class DriverToolApi:
     # HARDWARE SCAN
     # ================================================================
     def start_hw_scan(self):
+        logging.info("[API] start_hw_scan() hívás")
         if self._hw_scanning:
+            logging.warning("[HW_SCAN] Már fut egy scan!")
             return
         self._hw_scanning = True
+        logging.info("[HW_SCAN] Hardver scan indítása...")
 
         def worker():
             try:
                 _start = time.time()
                 sys_info_text = "Ismeretlen PC / Laptop"
-
+                logging.info("[HW_SCAN] Rendszer info lekérdezése...")
                 self.emit('hw_scan_progress', {'status': '⏳ Rendszer információk lekérdezése...'})
 
                 # System info
@@ -573,22 +646,38 @@ class DriverToolApi:
         if not pnp_id:
             return None
         m = re.search(r'(HDAUDIO\\FUNC_[0-9A-F]+&VEN_[0-9A-F]+&DEV_[0-9A-F]+)', pnp_id, re.I)
-        if m: return m.group(1)
+        if m:
+            logging.debug(f"[HWID] {pnp_id} -> {m.group(1)}")
+            return m.group(1)
         m = re.search(r'(VEN_[0-9A-F]+&DEV_[0-9A-F]+)', pnp_id, re.I)
-        if m: return m.group(1)
+        if m:
+            logging.debug(f"[HWID] {pnp_id} -> {m.group(1)}")
+            return m.group(1)
         m = re.search(r'(HID\\VID_[0-9A-F]+&PID_[0-9A-F]+)', pnp_id, re.I)
-        if m: return m.group(1)
+        if m:
+            logging.debug(f"[HWID] {pnp_id} -> {m.group(1)}")
+            return m.group(1)
         m = re.search(r'(USB\\VID_[0-9A-F]+&PID_[0-9A-F]+)', pnp_id, re.I)
-        if m: return m.group(1)
+        if m:
+            logging.debug(f"[HWID] {pnp_id} -> {m.group(1)}")
+            return m.group(1)
         m = re.search(r'(VID_[0-9A-F]+&PID_[0-9A-F]+)', pnp_id, re.I)
-        if m: return m.group(1)
+        if m:
+            logging.debug(f"[HWID] {pnp_id} -> {m.group(1)}")
+            return m.group(1)
         m = re.search(r'(ACPI\\[A-Z0-9_]+)', pnp_id, re.I)
-        if m: return m.group(1)
+        if m:
+            logging.debug(f"[HWID] {pnp_id} -> {m.group(1)}")
+            return m.group(1)
         m = re.search(r'(DISPLAY\\[A-Z0-9]+)', pnp_id, re.I)
-        if m: return m.group(1)
+        if m:
+            logging.debug(f"[HWID] {pnp_id} -> {m.group(1)}")
+            return m.group(1)
+        logging.debug(f"[HWID] {pnp_id} -> None (no match)")
         return None
 
     def _search_wu_api(self):
+        logging.info("[WU_API] _search_wu_api() indult...")
         try:
             ps_cmd = r"""
 [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
@@ -617,19 +706,22 @@ try {
             res = self._run(["powershell", "-NoProfile", "-Command", ps_cmd], timeout=300, encoding='utf-8')
             out = res.stdout.strip()
             if not out and res.stderr:
+                logging.warning(f"[WU_API] Stderr: {res.stderr[:200]}")
                 return None
             if out:
                 data = json.loads(out)
                 if isinstance(data, dict):
                     data = [data]
+                logging.info(f"[WU_API] Talált frissítések: {len(data) if isinstance(data, list) else 0}")
                 return data if isinstance(data, list) else None
         except subprocess.TimeoutExpired:
-            logging.error("WU API timeout (300s)")
+            logging.error("[WU_API] WU API timeout (300s)")
         except Exception as e:
-            logging.error(f"WU API error: {e}")
+            logging.error(f"[WU_API] WU API error: {e}")
         return None
 
     def _catalog_search(self, devices_to_check):
+        logging.info(f"[CATALOG] _catalog_search() - {len(devices_to_check)} eszköz ellenőrzése...")
         import urllib.request, urllib.parse, ssl
         ssl_ctx = ssl.create_default_context()
         lock = threading.Lock()
@@ -637,6 +729,7 @@ try {
         def check_one(item):
             try:
                 url = 'https://www.catalog.update.microsoft.com/Search.aspx?q=' + urllib.parse.quote(item['id'])
+                logging.debug(f"[CATALOG] Keresés: {item['name']} ({item['id']})")
                 req = urllib.request.Request(url, headers={'User-Agent': 'Mozilla/5.0'})
                 html = urllib.request.urlopen(req, context=ssl_ctx, timeout=30).read().decode('utf-8')
                 match_ids = re.findall(r"id=['\"]([a-fA-F0-9\-]+)_link['\"]", html)
@@ -650,13 +743,15 @@ try {
                     dl_html = urllib.request.urlopen(dl_req, context=ssl_ctx, timeout=30).read().decode('utf-8')
                     cab_link = re.search(r'downloadInformation\[0\]\.files\[0\]\.url\s*=\s*[\"\']([^\"\']+)[\"\']', dl_html)
                     if cab_link:
+                        logging.debug(f"[CATALOG] Találat: {item['name']} - {cab_link.group(1)[:50]}...")
                         with lock:
                             self.hw_updates_pool.append({
                                 "name": item['name'], "cat": item['cat'], "hwid": item['id'],
                                 "url": cab_link.group(1), "pnp_id": item.get('pnp_id', ''),
                                 "wu_title": f"MS Katalógus: {item['name']}"
                             })
-            except Exception:
+            except Exception as e:
+                logging.debug(f"[CATALOG] Hiba: {item['name']} - {e}")
                 pass
 
         q = queue.Queue()
@@ -680,15 +775,20 @@ try {
 
         catalog_hwids = {drv['hwid'] for drv in self.hw_updates_pool}
         self._hw_installed_devs = [dev for dev in devices_to_check if dev['id'] not in catalog_hwids]
+        logging.info(f"[CATALOG] Kész - {len(self.hw_updates_pool)} találat, {len(self._hw_installed_devs)} nem elérhető")
 
     # ================================================================
     # WU DRIVER INSTALL
     # ================================================================
     def install_selected_wu(self, selected_indices):
+        logging.info(f"[API] install_selected_wu() - {len(selected_indices)} index kiválasztva")
+        logging.debug(f"[WU_INSTALL] Indexek: {selected_indices}")
         self._cancel_flag = False  # Reset cancel flag
         selected_pool = [self.hw_updates_pool[i] for i in selected_indices if 0 <= i < len(self.hw_updates_pool)]
         if not selected_pool:
+            logging.warning("[WU_INSTALL] Nincs érvényes driver kiválasztva!")
             return
+        logging.info(f"[WU_INSTALL] {len(selected_pool)} driver telepítése, mód={'WU API' if self.wu_api_mode else 'Katalógus'}")
 
         if self.wu_api_mode:
             self._install_wu_api(selected_pool)
@@ -696,6 +796,7 @@ try {
             self._install_catalog(selected_pool)
 
     def _install_wu_api(self, selected_pool):
+        logging.info(f"[WU_API] WU API telepítés indítása: {len(selected_pool)} driver")
         def worker():
             self.emit('task_start', {'task': 'wu_install', 'title': f'Driver Telepítés WU Szerverekről ({len(selected_pool)} db)'})
             self.emit('task_progress', {'task': 'wu_install', 'log': 'Windows Update szervereiről történő telepítés indítása...', 'indeterminate': True})
@@ -815,7 +916,9 @@ try {
         self._safe_thread('wu_install', worker)
 
     def _install_catalog(self, selected_pool):
+        logging.info(f"[CATALOG_INSTALL] _install_catalog() - {len(selected_pool)} driver")
         def worker():
+            logging.info("[CATALOG_INSTALL] Worker indult...")
             import urllib.request, ssl
             ssl_ctx = ssl.create_default_context()
             total = len(selected_pool)
@@ -823,17 +926,21 @@ try {
 
             temp_dir = os.path.join(os.environ.get('TEMP', 'C:\\Temp'), 'driver_tool_wu')
             os.makedirs(temp_dir, exist_ok=True)
+            logging.debug(f"[CATALOG_INSTALL] Temp dir: {temp_dir}")
             success = 0
 
             try:
                 for i, drv in enumerate(selected_pool):
                     if self._check_cancel():
+                        logging.warning("[CATALOG_INSTALL] Megszakítva!")
                         self.emit('task_progress', {'task': 'wu_install', 'log': '\n❗ Megszakítva!'})
                         self.emit('task_complete', {'task': 'wu_install', 'status': '❗ Megszakítva!', 'success': success, 'fail': i - success})
                         return
                     name = drv['name']
                     url = drv.get('url', '')
+                    logging.info(f"[CATALOG_INSTALL] [{i+1}/{total}] {name}")
                     if not url:
+                        logging.warning(f"[CATALOG_INSTALL] Kihagyás - nincs URL: {name}")
                         self.emit('task_progress', {'task': 'wu_install', 'log': f'  [KIHAGYÁS] {name} - nincs link'})
                         continue
 
@@ -843,10 +950,13 @@ try {
                                                 'status': f'Letöltés: {name}', 'counter': f'{i+1}/{total}',
                                                 'log': f'-> {name} letöltése...'})
                     try:
+                        logging.debug(f"[CATALOG_INSTALL] Letöltés: {url[:80]}...")
                         req = urllib.request.Request(url, headers={'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)'})
                         with urllib.request.urlopen(req, context=ssl_ctx) as resp, open(cab_path, 'wb') as f:
                             shutil.copyfileobj(resp, f)
+                        logging.debug(f"[CATALOG_INSTALL] Letöltve: {cab_path}")
                     except Exception as e:
+                        logging.error(f"[CATALOG_INSTALL] Letöltési hiba: {e}")
                         self.emit('task_progress', {'task': 'wu_install', 'log': f'  [HIBA] Letöltés: {e}'})
                         continue
 
@@ -866,16 +976,20 @@ try {
                     res = self._run(cmd)
                     if res.returncode == 0 or any(k in res.stdout for k in ["Added", "sikeres", "successfully"]):
                         success += 1
+                        logging.info(f"[CATALOG_INSTALL] ✅ {name} telepítve!")
                         self.emit('task_progress', {'task': 'wu_install', 'log': f'  ✅ {name} telepítve!'})
                     else:
+                        logging.error(f"[CATALOG_INSTALL] ❌ {name} hiba: {res.stdout[:100]}")
                         self.emit('task_progress', {'task': 'wu_install', 'log': f'  ❌ {name} hiba: {res.stdout[:100]}'})
 
                 if success > 0 and not self.target_os_path:
                     self.emit('task_progress', {'task': 'wu_install', 'log': 'Eszközök újraszkennelése...'})
                     self._run(['pnputil', '/scan-devices'])
             finally:
+                logging.debug(f"[CATALOG_INSTALL] Temp dir törlése: {temp_dir}")
                 shutil.rmtree(temp_dir, ignore_errors=True)
 
+            logging.info(f"[CATALOG_INSTALL] Kész - Sikeres: {success}/{total}")
             self.emit('task_progress', {'task': 'wu_install', 'current': total, 'total': total,
                                         'log': f'\n--- Sikeres: {success}/{total} ---'})
             self.emit('task_complete', {'task': 'wu_install', 'success': success, 'fail': total - success,
@@ -887,6 +1001,10 @@ try {
     # AUTOFIX
     # ================================================================
     def start_autofix(self):
+        logging.info("[API] start_autofix() - 1 KATTINTÁSOS DRIVER FIX INDÍTVA!")
+        logging.info("=" * 60)
+        logging.info("[AUTOFIX] TELJES DRIVER ÚJRATELEPÍTÉS INDÍTÁSA")
+        logging.info("=" * 60)
         self._cancel_flag = False  # Reset cancel flag
         def worker():
             overall_start = time.time()
@@ -898,6 +1016,7 @@ try {
 
             def check_cancel():
                 if self._check_cancel():
+                    logging.warning("[AUTOFIX] Felhasználó megszakította!")
                     self.emit('task_progress', {'task': 'autofix', 'log': '\n❗ Megszakítva a felhasználó által!'})
                     self.emit('task_complete', {'task': 'autofix', 'status': '❗ Megszakítva!', 'counter': 'Megszakítva'})
                     return True
@@ -906,30 +1025,38 @@ try {
             self.emit('task_start', {'task': 'autofix', 'title': '⚡ 1 Kattintásos Driver Fix'})
 
             # PHASE 1: Disable WU drivers
+            logging.info("[AUTOFIX] FÁZIS 1: WU driver letiltása...")
             self.emit('task_progress', {'task': 'autofix', 'phase': '⛔ 1. FÁZIS: WU letiltás',
                                         'log': '=' * 50 + '\nFÁZIS 1: WU driver keresés letiltása...',
                                         'current': 0, 'total': 4})
             try:
                 key_path = r"SOFTWARE\Policies\Microsoft\Windows\WindowsUpdate"
+                logging.debug(f"[AUTOFIX] Registry írás: {key_path}")
                 with winreg.CreateKeyEx(winreg.HKEY_LOCAL_MACHINE, key_path, 0, winreg.KEY_WRITE) as key:
                     winreg.SetValueEx(key, "ExcludeWUDriversInQualityUpdate", 0, winreg.REG_DWORD, 1)
+                logging.info("[AUTOFIX] ExcludeWUDriversInQualityUpdate = 1")
                 self.emit('task_progress', {'task': 'autofix', 'log': '  ✅ ExcludeWUDriversInQualityUpdate = 1'})
             except Exception as e:
+                logging.error(f"[AUTOFIX] winreg hiba: {e}")
                 self.emit('task_progress', {'task': 'autofix', 'log': f'  ⚠ winreg hiba: {e}'})
             self._run(['reg', 'add', r'HKLM\SOFTWARE\Policies\Microsoft\Windows\WindowsUpdate',
                        '/v', 'ExcludeWUDriversInQualityUpdate', '/t', 'REG_DWORD', '/d', '1', '/f'])
 
             try:
                 key_path2 = r"SOFTWARE\Microsoft\Windows\CurrentVersion\DriverSearching"
+                logging.debug(f"[AUTOFIX] Registry írás: {key_path2}")
                 with winreg.CreateKeyEx(winreg.HKEY_LOCAL_MACHINE, key_path2, 0, winreg.KEY_WRITE) as key:
                     winreg.SetValueEx(key, "SearchOrderConfig", 0, winreg.REG_DWORD, 0)
+                logging.info("[AUTOFIX] SearchOrderConfig = 0")
                 self.emit('task_progress', {'task': 'autofix', 'log': '  ✅ SearchOrderConfig = 0'})
             except Exception as e:
+                logging.error(f"[AUTOFIX] winreg hiba: {e}")
                 self.emit('task_progress', {'task': 'autofix', 'log': f'  ⚠ winreg hiba: {e}'})
             self._run(['reg', 'add', r'HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\DriverSearching',
                        '/v', 'SearchOrderConfig', '/t', 'REG_DWORD', '/d', '0', '/f'])
 
             self._run('net stop wuauserv & net start wuauserv', shell=True)
+            logging.info("[AUTOFIX] WU szolgáltatás újraindítva")
             self.emit('task_progress', {'task': 'autofix', 'log': '  ✅ WU szolgáltatás újraindítva\n\n✅ WU letiltás kész!\n',
                                         'current': 4, 'total': 4})
             
@@ -1089,6 +1216,7 @@ try {
     # WU MANAGEMENT
     # ================================================================
     def check_wu_status(self):
+        logging.info("[API] check_wu_status()")
         try:
             policy_disabled = False
             search_disabled = False
@@ -1096,28 +1224,35 @@ try {
                 with winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, r"SOFTWARE\Policies\Microsoft\Windows\WindowsUpdate", 0, winreg.KEY_READ) as key:
                     val, _ = winreg.QueryValueEx(key, "ExcludeWUDriversInQualityUpdate")
                     if val == 1: policy_disabled = True
+                    logging.debug(f"[WU_STATUS] ExcludeWUDriversInQualityUpdate = {val}")
             except FileNotFoundError:
-                pass
+                logging.debug("[WU_STATUS] ExcludeWUDriversInQualityUpdate kulcs nem létezik")
             try:
                 with winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, r"SOFTWARE\Microsoft\Windows\CurrentVersion\DriverSearching", 0, winreg.KEY_READ) as key:
                     val, _ = winreg.QueryValueEx(key, "SearchOrderConfig")
                     if val == 0: search_disabled = True
+                    logging.debug(f"[WU_STATUS] SearchOrderConfig = {val}")
             except FileNotFoundError:
-                pass
+                logging.debug("[WU_STATUS] SearchOrderConfig kulcs nem létezik")
 
             if policy_disabled and search_disabled:
-                return {'status': 'Teljesen LETILTVA', 'color': 'disabled'}
+                result = {'status': 'Teljesen LETILTVA', 'color': 'disabled'}
             elif policy_disabled:
-                return {'status': 'Házirend által LETILTVA', 'color': 'disabled'}
+                result = {'status': 'Házirend által LETILTVA', 'color': 'disabled'}
             elif search_disabled:
-                return {'status': 'Eszközbeállításokban LETILTVA', 'color': 'disabled'}
+                result = {'status': 'Eszközbeállításokban LETILTVA', 'color': 'disabled'}
             else:
-                return {'status': 'Driver frissítés ENGEDÉLYEZVE', 'color': 'enabled'}
-        except Exception:
+                result = {'status': 'Driver frissítés ENGEDÉLYEZVE', 'color': 'enabled'}
+            logging.info(f"[WU_STATUS] Eredmény: {result['status']}")
+            return result
+        except Exception as e:
+            logging.error(f"[WU_STATUS] Hiba: {e}")
             return {'status': 'Ismeretlen', 'color': 'unknown'}
 
     def disable_wu(self):
+        logging.info("[API] disable_wu()")
         def worker():
+            logging.info("[WU] WU driver letiltás indítása...")
             self.emit('task_start', {'task': 'disable_wu', 'title': 'WU Driver Letiltás'})
             self.emit('task_progress', {'task': 'disable_wu', 'log': 'WU driver letiltás...', 'indeterminate': True})
             try:
@@ -1142,7 +1277,9 @@ try {
         self._safe_thread('disable_wu', worker)
 
     def enable_wu(self):
+        logging.info("[API] enable_wu()")
         def worker():
+            logging.info("[WU_ENABLE] Worker indult - WU engedélyezés és reset...")
             self.emit('task_start', {'task': 'enable_wu', 'title': 'WU Driver Engedélyezés + Reset'})
             self.emit('task_progress', {'task': 'enable_wu', 'log': 'WU driver engedélyezés + teljes reset...', 'indeterminate': True})
 
@@ -1150,10 +1287,13 @@ try {
             try:
                 with winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, r"SOFTWARE\Policies\Microsoft\Windows\WindowsUpdate", 0, winreg.KEY_WRITE) as key:
                     winreg.DeleteValue(key, "ExcludeWUDriversInQualityUpdate")
+                logging.info("[WU_ENABLE] ExcludeWUDrivers policy törölve")
                 self.emit('task_progress', {'task': 'enable_wu', 'log': '✅ ExcludeWUDrivers policy törölve'})
             except FileNotFoundError:
+                logging.debug("[WU_ENABLE] Policy nem létezett")
                 self.emit('task_progress', {'task': 'enable_wu', 'log': '  Policy nem létezett'})
             except Exception as e:
+                logging.warning(f"[WU_ENABLE] Policy törlés hiba: {e}")
                 self.emit('task_progress', {'task': 'enable_wu', 'log': f'⚠ {e}'})
                 try:
                     with winreg.CreateKeyEx(winreg.HKEY_LOCAL_MACHINE, r"SOFTWARE\Policies\Microsoft\Windows\WindowsUpdate", 0, winreg.KEY_WRITE) as key:
@@ -1165,8 +1305,10 @@ try {
             try:
                 with winreg.CreateKeyEx(winreg.HKEY_LOCAL_MACHINE, r"SOFTWARE\Microsoft\Windows\CurrentVersion\DriverSearching", 0, winreg.KEY_WRITE) as key:
                     winreg.SetValueEx(key, "SearchOrderConfig", 0, winreg.REG_DWORD, 1)
+                logging.info("[WU_ENABLE] SearchOrderConfig = 1")
                 self.emit('task_progress', {'task': 'enable_wu', 'log': '✅ SearchOrderConfig = 1'})
             except Exception as e:
+                logging.warning(f"[WU_ENABLE] SearchOrderConfig hiba: {e}")
                 self.emit('task_progress', {'task': 'enable_wu', 'log': f'⚠ {e}'})
 
             self._run(['reg', 'add', r'HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\DriverSearching',
@@ -1175,6 +1317,7 @@ try {
                        '/v', 'ExcludeWUDriversInQualityUpdate', '/f'])
 
             # Stop services
+            logging.info("[WU_ENABLE] Szolgáltatások leállítása...")
             for svc in ['wuauserv', 'bits', 'cryptsvc']:
                 self._run(f'net stop {svc} /y', shell=True)
             time.sleep(2)
@@ -1182,14 +1325,17 @@ try {
             # Delete SoftwareDistribution
             sysroot = os.environ.get('SYSTEMROOT', r'C:\Windows')
             sw_dist = os.path.join(sysroot, 'SoftwareDistribution')
+            logging.info(f"[WU_ENABLE] SoftwareDistribution törlése: {sw_dist}")
             self.emit('task_progress', {'task': 'enable_wu', 'log': f'SoftwareDistribution törlése...'})
             for _ in range(3):
                 try:
                     if os.path.exists(sw_dist):
                         shutil.rmtree(sw_dist, ignore_errors=False)
+                        logging.info("[WU_ENABLE] SoftwareDistribution törölve")
                         self.emit('task_progress', {'task': 'enable_wu', 'log': '  ✅ Törölve'})
                         break
                 except Exception as e:
+                    logging.warning(f"[WU_ENABLE] SoftwareDistribution törlés újrapróbálás: {e}")
                     self.emit('task_progress', {'task': 'enable_wu', 'log': f'  ⚠ Újrapróbálás: {e}'})
                     time.sleep(3)
 
@@ -1201,11 +1347,14 @@ try {
                     shutil.rmtree(bak, ignore_errors=True)
                 if os.path.exists(catroot2):
                     os.rename(catroot2, bak)
+                    logging.info("[WU_ENABLE] catroot2 átnevezve")
                     self.emit('task_progress', {'task': 'enable_wu', 'log': '✅ catroot2 átnevezve'})
             except Exception as e:
+                logging.warning(f"[WU_ENABLE] catroot2 hiba: {e}")
                 self.emit('task_progress', {'task': 'enable_wu', 'log': f'⚠ catroot2: {e}'})
 
             # Re-register DLLs
+            logging.info("[WU_ENABLE] WU DLL-ek újraregisztrálása...")
             sys32 = os.path.join(sysroot, 'System32')
             for dll in ['wuaueng.dll', 'wuapi.dll', 'wups.dll', 'wups2.dll', 'wuwebv.dll', 'wucltux.dll']:
                 fp = os.path.join(sys32, dll)
@@ -1214,9 +1363,11 @@ try {
             self.emit('task_progress', {'task': 'enable_wu', 'log': '✅ WU DLL-ek újraregisztrálva'})
 
             # Winsock reset
+            logging.info("[WU_ENABLE] Winsock reset...")
             self._run('netsh winsock reset', shell=True)
 
             # Start services
+            logging.info("[WU_ENABLE] Szolgáltatások indítása...")
             for svc in ['cryptsvc', 'bits', 'wuauserv']:
                 for _ in range(3):
                     res = self._run(f'net start {svc}', shell=True)
@@ -1226,20 +1377,25 @@ try {
 
             self._run('wuauclt.exe /resetauthorization /detectnow', shell=True)
             self._run('UsoClient.exe StartScan', shell=True)
+            logging.info("[WU_ENABLE] Kész!")
             self.emit('task_progress', {'task': 'enable_wu', 'log': '✅ Frissítés-keresés elindítva'})
             self.emit('task_complete', {'task': 'enable_wu', 'status': '✅ WU engedélyezés + reset kész!'})
 
         self._safe_thread('enable_wu', worker)
 
     def restart_wu(self):
+        logging.info("[API] restart_wu()")
         def worker():
+            logging.info("[WU_RESTART] Worker indult - szolgáltatások újraindítása...")
             self.emit('task_start', {'task': 'restart_wu', 'title': 'WU Szolgáltatások Újraindítása'})
             self.emit('task_progress', {'task': 'restart_wu', 'log': 'WU szolgáltatások újraindítása...', 'indeterminate': True})
 
+            logging.info("[WU_RESTART] Szolgáltatások leállítása...")
             for svc in ['wuauserv', 'bits', 'cryptsvc', 'msiserver']:
                 self._run(f'net stop {svc} /y', shell=True)
                 self.emit('task_progress', {'task': 'restart_wu', 'log': f'  stop {svc}'})
             time.sleep(2)
+            logging.info("[WU_RESTART] Szolgáltatások indítása...")
             for svc in ['rpcss', 'cryptsvc', 'bits', 'msiserver', 'wuauserv']:
                 for _ in range(3):
                     res = self._run(f'net start {svc}', shell=True)
@@ -1249,6 +1405,7 @@ try {
                 self.emit('task_progress', {'task': 'restart_wu', 'log': f'  start {svc}'})
             self._run('wuauclt.exe /resetauthorization /detectnow', shell=True)
             self._run('UsoClient.exe StartScan', shell=True)
+            logging.info("[WU_RESTART] Kész!")
             self.emit('task_progress', {'task': 'restart_wu', 'log': '✅ Frissítés-keresés elindítva'})
             self.emit('task_complete', {'task': 'restart_wu', 'status': '✅ WU szolgáltatások újraindítva!'})
 
@@ -1258,16 +1415,21 @@ try {
     # BACKUP / RESTORE
     # ================================================================
     def backup_third_party(self):
+        logging.info("[API] backup_third_party()")
         dest = self.select_directory('Válassz mappát a driverek kimentéséhez')
         if not dest:
+            logging.info("[BACKUP] Mégse - nincs mappa kiválasztva")
             return
+        logging.info(f"[BACKUP] Third-party backup indítása -> {dest}")
 
         def worker():
             folder = os.path.join(dest, f"Driver_Backup_{datetime.now().strftime('%Y%m%d_%H%M%S')}")
+            logging.info(f"[BACKUP] Célmappa létrehozása: {folder}")
             os.makedirs(folder, exist_ok=True)
             self.emit('task_start', {'task': 'backup', 'title': 'Driver Exportálás'})
             self.emit('task_progress', {'task': 'backup', 'log': f'Célmappa: {folder}\nExportálás indítása...', 'indeterminate': True})
 
+            logging.info("[BACKUP] DISM export-driver futtatása...")
             process = subprocess.Popen(
                 ['dism', '/online', '/export-driver', f'/destination:{folder}'],
                 stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
@@ -1277,6 +1439,7 @@ try {
                 line = line.strip()
                 if not line:
                     continue
+                logging.debug(f"[BACKUP] DISM: {line[:100]}")
                 m = re.search(r'(\d+)\s*(?:/|of)\s*(\d+)', line, re.I)
                 if m:
                     self.emit('task_progress', {'task': 'backup', 'current': int(m.group(1)), 'total': int(m.group(2)),
@@ -1285,15 +1448,19 @@ try {
             process.wait()
 
             success = process.returncode == 0
+            logging.info(f"[BACKUP] DISM befejezve, returncode={process.returncode}")
             self.emit('task_complete', {'task': 'backup',
                                         'status': f'{"✅ Sikeres export!" if success else "❌ Hiba!"} Mappa: {folder}',
                                         'log': f'\n--- {"Sikeres" if success else "Hibás"} export: {folder} ---'})
         self._safe_thread('backup', worker)
 
     def backup_all(self):
+        logging.info("[API] backup_all()")
         dest = self.select_directory('Válassz mappát az ÖSSZES driver kimentéséhez')
         if not dest:
+            logging.info("[BACKUP_ALL] Mégse - nincs mappa kiválasztva")
             return
+        logging.info(f"[BACKUP_ALL] Összes driver backup indítása -> {dest}")
 
         def worker():
             folder = os.path.join(dest, f"ALL_Driver_Backup_{datetime.now().strftime('%Y%m%d_%H%M%S')}")
@@ -1340,16 +1507,21 @@ try {
         self._safe_thread('backup', worker)
 
     def create_restore_point(self):
+        logging.info("[API] create_restore_point()")
         def worker():
+            logging.info("[RESTORE_POINT] Worker indult - visszaállítási pont létrehozása...")
             desc = f"Driver_Cleaner_Backup_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+            logging.info(f"[RESTORE_POINT] Név: {desc}")
             self.emit('task_start', {'task': 'rp', 'title': 'Visszaállítási Pont'})
             self.emit('task_progress', {'task': 'rp', 'log': 'Rendszervédelem engedélyezése...', 'indeterminate': True})
 
             # 1) Enable System Restore on C: (force enable even if disabled)
+            logging.info("[RESTORE_POINT] Rendszervédelem engedélyezése...")
             enable_ps = '[Console]::OutputEncoding = [System.Text.Encoding]::UTF8; try { Enable-ComputerRestore -Drive "C:\\" -ErrorAction Stop; Write-Output "OK" } catch { Write-Output "FAIL: $($_.Exception.Message)" }'
             enable_res = self._run(["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", enable_ps], encoding='utf-8')
             enable_out = (enable_res.stdout or '').strip()
             if 'FAIL' in enable_out:
+                logging.warning(f"[RESTORE_POINT] Enable-ComputerRestore hiba: {enable_out}")
                 # Try via registry + vssadmin as fallback
                 self.emit('task_progress', {'task': 'rp', 'log': f'⚠ Enable-ComputerRestore hiba: {enable_out}\nRegistry + vssadmin fallback...'})
                 self._run(['reg', 'add', r'HKLM\SOFTWARE\Microsoft\Windows NT\CurrentVersion\SystemRestore', '/v', 'DisableSR', '/t', 'REG_DWORD', '/d', '0', '/f'])
@@ -1358,64 +1530,88 @@ try {
                 enable_res2 = self._run(["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", enable_ps], encoding='utf-8')
                 enable_out2 = (enable_res2.stdout or '').strip()
                 if 'FAIL' in enable_out2:
+                    logging.error(f"[RESTORE_POINT] Rendszervédelem nem kapcsolható be: {enable_out2}")
                     self.emit('task_complete', {'task': 'rp', 'status': f'❌ Rendszervédelem nem kapcsolható be: {enable_out2}'})
                     return
+                logging.info("[RESTORE_POINT] Rendszervédelem bekapcsolva (fallback)")
                 self.emit('task_progress', {'task': 'rp', 'log': '✅ Rendszervédelem bekapcsolva (fallback)'})
             else:
+                logging.info("[RESTORE_POINT] Rendszervédelem bekapcsolva")
                 self.emit('task_progress', {'task': 'rp', 'log': '✅ Rendszervédelem bekapcsolva'})
 
             # 2) Create restore point
+            logging.info("[RESTORE_POINT] Checkpoint-Computer futtatása...")
             self.emit('task_progress', {'task': 'rp', 'log': f'Visszaállítási pont: {desc}', 'status': 'Pont létrehozása...'})
             create_ps = f'[Console]::OutputEncoding = [System.Text.Encoding]::UTF8; try {{ Checkpoint-Computer -Description "{desc}" -RestorePointType "MODIFY_SETTINGS" -ErrorAction Stop; Write-Output "OK" }} catch {{ Write-Output "FAIL: $($_.Exception.Message)" }}'
             res = self._run(["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", create_ps], encoding='utf-8')
             create_out = (res.stdout or '').strip()
+            logging.debug(f"[RESTORE_POINT] Checkpoint result: {create_out}")
 
             # 3) Verify
+            logging.info("[RESTORE_POINT] Ellenőrzés...")
             verify_ps = f'[Console]::OutputEncoding = [System.Text.Encoding]::UTF8; (Get-ComputerRestorePoint | Where-Object {{ $_.Description -eq "{desc}" }}).Description'
             verify_res = self._run(["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", verify_ps], encoding='utf-8')
             verified = desc in (verify_res.stdout or '')
+            logging.debug(f"[RESTORE_POINT] Verified: {verified}")
 
             if 'OK' in create_out and verified:
+                logging.info(f"[RESTORE_POINT] Sikeresen létrehozva: {desc}")
                 self.emit('task_complete', {'task': 'rp', 'status': f'✅ Visszaállítási pont létrehozva: {desc}'})
             elif 'OK' in create_out:
+                logging.warning("[RESTORE_POINT] Lefutott de nem ellenőrizhető (24 órás limit?)")
                 self.emit('task_complete', {'task': 'rp', 'status': '⚠ Lefutott de nem ellenőrizhető (24 órás limit?)'})
             else:
+                logging.error(f"[RESTORE_POINT] Hiba: {create_out}")
                 self.emit('task_complete', {'task': 'rp', 'status': f'❌ Hiba: {create_out}'})
         self._safe_thread('rp', worker)
 
     def restore_online(self):
+        logging.info("[API] restore_online()")
         source = self.select_directory('ÉLŐ MÓD: Válassz kimentett driver mappát')
         if not source:
+            logging.info("[RESTORE] Mégse - nincs forrás kiválasztva")
             return
+        logging.info(f"[RESTORE] Online restore indítása: source={source}")
         self._run_restore(online=True, source=source, target=None)
 
     def restore_offline(self):
+        logging.info("[API] restore_offline()")
         target = self.select_directory('OFFLINE MÓD: 1. Válaszd ki a HALOTT WINDOWS meghajtóját')
         if not target:
+            logging.info("[RESTORE] Mégse - nincs cél kiválasztva")
             return
         target = os.path.splitdrive(os.path.abspath(target))[0] + "\\"
+        logging.info(f"[RESTORE] Offline target: {target}")
         source = self.select_directory('OFFLINE MÓD: 2. Válassz kimentett driver mappát')
         if not source:
+            logging.info("[RESTORE] Mégse - nincs forrás kiválasztva")
             return
+        logging.info(f"[RESTORE] Offline restore indítása: source={source}, target={target}")
         self._run_restore(online=False, source=source, target=target)
 
     def _run_restore(self, online, source, target):
+        logging.info(f"[RESTORE] _run_restore: online={online}, source={source}, target={target}")
         def worker():
             mode = 'Élő' if online else 'Offline'
+            logging.info(f"[RESTORE] Worker indult - {mode} mód")
             self.emit('task_start', {'task': 'restore', 'title': f'Driver Visszaállítás ({mode})'})
             self.emit('task_progress', {'task': 'restore', 'log': f'=== {mode.upper()} RESTORE ===\nForrás: {source}\nCél: {target or "jelenlegi rendszer"}\n', 'indeterminate': True})
 
             norm_source = os.path.normpath(source)
             norm_target = os.path.normpath(target) if target else None
+            logging.debug(f"[RESTORE] norm_source={norm_source}, norm_target={norm_target}")
 
             # Detect source type
             is_wim_extract = not online and "Windows_Gyari_Alap_Driverek" in norm_source
             inbox_subfolder = os.path.join(norm_source, "_Windows_Inbox_Drivers") if not online else None
             has_inbox_subfolder = inbox_subfolder and os.path.isdir(inbox_subfolder)
+            logging.info(f"[RESTORE] Típus detektálás: is_wim_extract={is_wim_extract}, has_inbox_subfolder={has_inbox_subfolder}")
 
             def force_copy(src, dst):
                 """Robocopy-based forced copy with fallback for inbox/system drivers."""
+                logging.debug(f"[RESTORE] force_copy: {src} -> {dst}")
                 if not os.path.exists(src):
+                    logging.warning(f"[RESTORE] Forrás nem létezik: {src}")
                     return
                 os.makedirs(dst, exist_ok=True)
                 self.emit('task_progress', {'task': 'restore', 'log': f'\n  Robocopy indul: {os.path.basename(src)} -> {os.path.basename(dst)}\n  (Backup mód - Windows jogosultságok megkerülése)'})
@@ -1423,6 +1619,7 @@ try {
                 res = self._run(cmd)
 
                 if res.returncode < 8:
+                    logging.info(f"[RESTORE] Robocopy sikeres, returncode={res.returncode}")
                     self.emit('task_progress', {'task': 'restore', 'log': f'  ✅ Sikeres robocopy kényszerítés ({res.returncode})'})
                 else:
                     self.emit('task_progress', {'task': 'restore', 'log': f'  ⚠️ Robocopy hiba ({res.returncode}), végső tartalék: mappánkénti jogszerzés (lassabb)...'})
@@ -1604,57 +1801,77 @@ try {
         self._safe_thread('restore', worker)
 
     def extract_wim(self):
+        logging.info("[API] extract_wim()")
         wim_path = self.select_file('Válaszd ki az install.wim fájlt', 'WIM fájlok (*.wim)|*.wim')
         if not wim_path:
+            logging.info("[WIM] Mégse - nincs WIM kiválasztva")
             return
+        logging.info(f"[WIM] WIM fájl: {wim_path}")
         if wim_path.lower().endswith(".esd"):
+            logging.error("[WIM] ESD fájl nem támogatott!")
             self.emit('alert', {'title': 'Hiba', 'message': 'ESD fájl nem támogatott. Kérlek, használj install.wim fájlt!'})
             return
         dest = self.select_directory('Válassz ideiglenes mappát a kicsomagoláshoz')
         if not dest:
+            logging.info("[WIM] Mégse - nincs célmappa kiválasztva")
             return
+        logging.info(f"[WIM] Célmappa: {dest}")
 
         def worker():
+            logging.info("[WIM] Worker indult - WIM kinyerés...")
             self.emit('task_start', {'task': 'wim', 'title': 'WIM Driver Kinyerés'})
             wim = os.path.abspath(wim_path).replace("/", "\\")
             # A WIM csatolási mappának a C: meghajtón kell lennie (NTFS), mert a cserélhető meghajtókat (USB) a DISM visszautasítja
             sys_temp = os.environ.get('TEMP', 'C:\\Temp')
             mount_dir = os.path.join(sys_temp, f"WIM_Mount_Temp_{int(time.time())}")
             target_folder = os.path.join(dest, f"Windows_Gyari_Alap_Driverek_{datetime.now().strftime('%Y%m%d_%H%M')}")
+            logging.info(f"[WIM] Mount dir: {mount_dir}")
+            logging.info(f"[WIM] Target folder: {target_folder}")
 
             if os.path.exists(mount_dir):
+                logging.debug("[WIM] Régi mount dir törlése...")
                 shutil.rmtree(mount_dir, ignore_errors=True)
             os.makedirs(mount_dir, exist_ok=True)
             os.makedirs(target_folder, exist_ok=True)
 
             try:
+                logging.info("[WIM] DISM Mount-Image futtatása...")
                 self.emit('task_progress', {'task': 'wim', 'log': 'WIM csatolás (ez 4-5 perc)...', 'indeterminate': True,
                                             'counter': '1/3', 'status': 'Képfájl csatolása...'})
                 res = self._run(["dism", "/Mount-Image", f"/ImageFile:{wim}", "/Index:1", f"/MountDir:{mount_dir}", "/ReadOnly"])
                 if res.returncode != 0:
+                    logging.error(f"[WIM] DISM Mount hiba: {res.stdout} {res.stderr}")
                     raise Exception(f"DISM Mount hiba: {res.stdout} {res.stderr}")
+                logging.info("[WIM] WIM csatolva, fájlok másolása...")
 
                 self.emit('task_progress', {'task': 'wim', 'log': 'Fájlok másolása...', 'counter': '2/3', 'status': 'Gyári driverek másolása...'})
                 
                 driverstore = os.path.join(mount_dir, "Windows", "System32", "DriverStore", "FileRepository")
                 target_repo = os.path.join(target_folder, "FileRepository")
                 if os.path.exists(driverstore):
+                    logging.info(f"[WIM] FileRepository másolása: {driverstore} -> {target_repo}")
                     shutil.copytree(driverstore, target_repo, dirs_exist_ok=True)
                 else:
+                    logging.error("[WIM] FileRepository nem található!")
                     raise Exception("FileRepository nem található a WIM-ben!")
 
                 inf_dir = os.path.join(mount_dir, "Windows", "INF")
                 target_inf = os.path.join(target_folder, "INF")
                 if os.path.exists(inf_dir):
+                    logging.info(f"[WIM] INF mappa másolása: {inf_dir} -> {target_inf}")
                     shutil.copytree(inf_dir, target_inf, dirs_exist_ok=True)
 
+                logging.info("[WIM] WIM leválasztása...")
                 self.emit('task_progress', {'task': 'wim', 'log': 'WIM leválasztása...', 'counter': '3/3', 'status': 'Takarítás...'})
                 self._run(["dism", "/Unmount-Image", f"/MountDir:{mount_dir}", "/Discard"])
                 shutil.rmtree(mount_dir, ignore_errors=True)
 
+                logging.info(f"[WIM] Kész! Kimenet: {target_folder}")
                 self.emit('task_complete', {'task': 'wim', 'status': f'✅ Gyári driverek kimentve: {target_folder}',
                                             'log': f'\n✅ Kész! Mappa: {target_folder}'})
             except Exception as e:
+                logging.error(f"[WIM] Hiba: {e}")
+                logging.error(traceback.format_exc())
                 self._run(["dism", "/Unmount-Image", f"/MountDir:{mount_dir}", "/Discard"])
                 shutil.rmtree(mount_dir, ignore_errors=True)
                 self.emit('task_error', {'task': 'wim', 'error': str(e)})
