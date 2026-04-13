@@ -1,4 +1,4 @@
-BUILD_NUMBER = 52
+BUILD_NUMBER = 53
 
 import os
 import sys
@@ -1089,16 +1089,22 @@ try {
             self.emit('task_progress', {'task': 'autofix', 'log': f'Talált: {del_total} db', 'total': max(del_total, 1), 'current': 0})
             del_success = 0
             del_fail = 0
+            display_driver_deleted = False
             for i, drv in enumerate(drivers):
                 if check_cancel(): return
                 pub = drv.get("published", "?")
                 prov = drv.get("provider", "")
+                drv_class = drv.get("class", "").lower()
                 self.emit('task_progress', {'task': 'autofix', 'status': f'Törlés: {pub}', 'log': f'  🗑 {pub} [{prov}]'})
                 try:
                     res = self._run(['pnputil', '/delete-driver', pub, '/uninstall', '/force'])
                     if res.returncode == 0 or any(k in res.stdout for k in ["Deleted", "törölve", "successfully"]):
                         del_success += 1
                         self.emit('task_progress', {'task': 'autofix', 'log': f'    ✅ törölve'})
+                        # Track display driver deletion for window recovery
+                        if 'display' in drv_class or 'video' in drv_class or 'nvidia' in prov.lower() or 'amd' in prov.lower() or 'intel' in prov.lower():
+                            display_driver_deleted = True
+                            logging.info(f"[AUTOFIX] Display driver törölve: {pub} ({prov})")
                     else:
                         del_fail += 1
                         self.emit('task_progress', {'task': 'autofix', 'log': f'    ❌ sikertelen'})
@@ -1109,6 +1115,25 @@ try {
                                             'counter': f'{i+1}/{del_total} (✅{del_success} ❌{del_fail})'})
 
             self.emit('task_progress', {'task': 'autofix', 'log': f'\n--- Törlés kész. Sikeres: {del_success}, Sikertelen: {del_fail} ---\n'})
+            
+            # Display driver recovery: if GPU driver was deleted, try to recover the window
+            if display_driver_deleted:
+                logging.info("[AUTOFIX] Display driver törölve - ablak helyreállítás...")
+                self.emit('task_progress', {'task': 'autofix', 'log': '🖥️ Videókártya driver törölve - ablak helyreállítás...'})
+                time.sleep(3)  # Wait for Basic Display Adapter to initialize
+                try:
+                    if self._window:
+                        # Try to recover WebView2 rendering by reloading
+                        html_path = resource_path('ui.html')
+                        self._window.load_url(f'file:///{html_path}')
+                        time.sleep(2)
+                        # Re-send current state to UI
+                        self.emit('task_progress', {'task': 'autofix', 'phase': '🔴 2. FÁZIS: Driver törlés',
+                                                    'log': '✅ Ablak helyreállítva! Folytatás...',
+                                                    'current': del_total, 'total': del_total})
+                        logging.info("[AUTOFIX] Ablak helyreállítás sikeres!")
+                except Exception as e:
+                    logging.warning(f"[AUTOFIX] Ablak helyreállítás sikertelen: {e}")
 
             if check_cancel(): return
 
