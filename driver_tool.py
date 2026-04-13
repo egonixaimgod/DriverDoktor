@@ -1,4 +1,4 @@
-BUILD_NUMBER = 47
+BUILD_NUMBER = 52
 
 import os
 import sys
@@ -363,10 +363,12 @@ class DriverToolApi:
             self.emit('task_start', {'task': 'delete', 'title': f'Törlés folyamatban... ({total} driver)'})
             self.emit('task_progress', {'task': 'delete', 'log': f'Kijelölt driverek törlése indult ({total} db)'})
 
+            cancelled = False
             for i, pub in enumerate(published_names):
                 if getattr(self, '_cancel_flag', False):
                     self.emit('task_progress', {'task': 'delete', 'log': '❗ Törlés megszakítva a felhasználó által!'})
                     self.emit('task_progress', {'status': '❗ Megszakítva!', 'counter': f'{i} / {total}'})
+                    cancelled = True
                     break
                 
                 self.emit('task_progress', {
@@ -445,10 +447,16 @@ class DriverToolApi:
                 time.sleep(3)
                 self.emit('task_progress', {'task': 'delete', 'log': '✅ Hardverek frissítve!'})
 
-            self.emit('task_progress', {'task': 'delete', 'log': f'\n--- Sikeres: {success}, Sikertelen: {fail} ---', 'current': total, 'total': total})
-            self.emit('task_complete', {'task': 'delete', 'success': success, 'fail': fail,
-                                        'counter': f'✅ {success} / ❌ {fail}',
-                                        'status': f'Kész! Sikeres: {success}, Sikertelen: {fail}'})
+            if cancelled:
+                self.emit('task_progress', {'task': 'delete', 'log': f'\n--- MEGSZAKÍTVA! Sikeres: {success}, Sikertelen: {fail} ---', 'current': i, 'total': total})
+                self.emit('task_complete', {'task': 'delete', 'success': success, 'fail': fail,
+                                            'counter': f'❗ Megszakítva',
+                                            'status': f'❗ Megszakítva! Sikeres: {success}, Sikertelen: {fail}'})
+            else:
+                self.emit('task_progress', {'task': 'delete', 'log': f'\n--- Sikeres: {success}, Sikertelen: {fail} ---', 'current': total, 'total': total})
+                self.emit('task_complete', {'task': 'delete', 'success': success, 'fail': fail,
+                                            'counter': f'✅ {success} / ❌ {fail}',
+                                            'status': f'Kész! Sikeres: {success}, Sikertelen: {fail}'})
 
         self._safe_thread('delete', worker)
 
@@ -640,7 +648,12 @@ class DriverToolApi:
             finally:
                 self._hw_scanning = False
 
-        threading.Thread(target=worker, daemon=True).start()
+        try:
+            threading.Thread(target=worker, daemon=True).start()
+        except Exception as e:
+            logging.error(f"[HW_SCAN] Thread indítási hiba: {e}")
+            self._hw_scanning = False
+            self.emit('hw_scan_result', {'pool': [], 'installed': [], 'sys_info': '❌ Thread hiba', 'time': ''})
 
     def _extract_hwid(self, pnp_id):
         if not pnp_id:
@@ -787,6 +800,7 @@ try {
         selected_pool = [self.hw_updates_pool[i] for i in selected_indices if 0 <= i < len(self.hw_updates_pool)]
         if not selected_pool:
             logging.warning("[WU_INSTALL] Nincs érvényes driver kiválasztva!")
+            self.emit('toast', {'message': '⚠️ Nincs érvényes driver kiválasztva!', 'type': 'warning'})
             return
         logging.info(f"[WU_INSTALL] {len(selected_pool)} driver telepítése, mód={'WU API' if self.wu_api_mode else 'Katalógus'}")
 
@@ -928,13 +942,15 @@ try {
             os.makedirs(temp_dir, exist_ok=True)
             logging.debug(f"[CATALOG_INSTALL] Temp dir: {temp_dir}")
             success = 0
+            fail = 0
+            skipped = 0
 
             try:
                 for i, drv in enumerate(selected_pool):
                     if self._check_cancel():
                         logging.warning("[CATALOG_INSTALL] Megszakítva!")
                         self.emit('task_progress', {'task': 'wu_install', 'log': '\n❗ Megszakítva!'})
-                        self.emit('task_complete', {'task': 'wu_install', 'status': '❗ Megszakítva!', 'success': success, 'fail': i - success})
+                        self.emit('task_complete', {'task': 'wu_install', 'status': '❗ Megszakítva!', 'success': success, 'fail': fail})
                         return
                     name = drv['name']
                     url = drv.get('url', '')
@@ -942,6 +958,7 @@ try {
                     if not url:
                         logging.warning(f"[CATALOG_INSTALL] Kihagyás - nincs URL: {name}")
                         self.emit('task_progress', {'task': 'wu_install', 'log': f'  [KIHAGYÁS] {name} - nincs link'})
+                        skipped += 1
                         continue
 
                     cab_path = os.path.join(temp_dir, f"drv_{i}.cab")
@@ -958,6 +975,7 @@ try {
                     except Exception as e:
                         logging.error(f"[CATALOG_INSTALL] Letöltési hiba: {e}")
                         self.emit('task_progress', {'task': 'wu_install', 'log': f'  [HIBA] Letöltés: {e}'})
+                        fail += 1
                         continue
 
                     os.makedirs(ext_path, exist_ok=True)
@@ -979,6 +997,7 @@ try {
                         logging.info(f"[CATALOG_INSTALL] ✅ {name} telepítve!")
                         self.emit('task_progress', {'task': 'wu_install', 'log': f'  ✅ {name} telepítve!'})
                     else:
+                        fail += 1
                         logging.error(f"[CATALOG_INSTALL] ❌ {name} hiba: {res.stdout[:100]}")
                         self.emit('task_progress', {'task': 'wu_install', 'log': f'  ❌ {name} hiba: {res.stdout[:100]}'})
 
@@ -989,11 +1008,11 @@ try {
                 logging.debug(f"[CATALOG_INSTALL] Temp dir törlése: {temp_dir}")
                 shutil.rmtree(temp_dir, ignore_errors=True)
 
-            logging.info(f"[CATALOG_INSTALL] Kész - Sikeres: {success}/{total}")
+            logging.info(f"[CATALOG_INSTALL] Kész - Sikeres: {success}/{total}, Sikertelen: {fail}, Kihagyott: {skipped}")
             self.emit('task_progress', {'task': 'wu_install', 'current': total, 'total': total,
-                                        'log': f'\n--- Sikeres: {success}/{total} ---'})
-            self.emit('task_complete', {'task': 'wu_install', 'success': success, 'fail': total - success,
-                                        'status': f'Kész! Sikeres: {success}/{total}'})
+                                        'log': f'\n--- Sikeres: {success}, Sikertelen: {fail}, Kihagyott: {skipped} ---'})
+            self.emit('task_complete', {'task': 'wu_install', 'success': success, 'fail': fail,
+                                        'status': f'Kész! Sikeres: {success}, Sikertelen: {fail}' + (f', Kihagyott: {skipped}' if skipped else '')})
 
         self._safe_thread('wu_install', worker)
 
@@ -1199,16 +1218,23 @@ try {
 
             if check_cancel(): return
 
-            # PHASE 6: Reboot
-            self.emit('task_progress', {'task': 'autofix', 'phase': '🔵 6. FÁZIS: Újraindítás',
-                                        'log': f'\n{"=" * 50}\nFÁZIS 6: Újraindítás 30 másodperc múlva!\n\n⚡ Teljes idő: {elapsed()}'})
-            for c in range(30, 0, -1):
-                if check_cancel(): return
-                self.emit('task_progress', {'task': 'autofix', 'counter': f'Újraindítás {c} mp múlva...', 'current': 30 - c, 'total': 30})
-                time.sleep(1)
+            # PHASE 6: Reboot (only if changes were made)
+            changes_made = (del_success > 0) or (install_success > 0)
+            if changes_made:
+                self.emit('task_progress', {'task': 'autofix', 'phase': '🔵 6. FÁZIS: Újraindítás',
+                                            'log': f'\n{"=" * 50}\nFÁZIS 6: Újraindítás 30 másodperc múlva!\n\n⚡ Teljes idő: {elapsed()}'})
+                for c in range(30, 0, -1):
+                    if check_cancel(): return
+                    self.emit('task_progress', {'task': 'autofix', 'counter': f'Újraindítás {c} mp múlva...', 'current': 30 - c, 'total': 30})
+                    time.sleep(1)
 
-            self.emit('task_progress', {'task': 'autofix', 'log': '🔄 Újraindítás MOST!'})
-            self._run(['shutdown', '/r', '/t', '0', '/f'])
+                self.emit('task_progress', {'task': 'autofix', 'log': '🔄 Újraindítás MOST!'})
+                self.emit('task_complete', {'task': 'autofix', 'status': '🔄 Újraindítás...', 'counter': 'Reboot'})
+                self._run(['shutdown', '/r', '/t', '0', '/f'])
+            else:
+                self.emit('task_progress', {'task': 'autofix', 'phase': '✅ KÉSZ',
+                                            'log': f'\n{"=" * 50}\nNem történt változás - újraindítás nem szükséges.\n\n⚡ Teljes idő: {elapsed()}'})
+                self.emit('task_complete', {'task': 'autofix', 'status': '✅ Kész (nincs változás)', 'counter': 'Kész'})
 
         self._safe_thread('autofix', worker)
 
@@ -1421,6 +1447,7 @@ try {
             logging.info("[BACKUP] Mégse - nincs mappa kiválasztva")
             return
         logging.info(f"[BACKUP] Third-party backup indítása -> {dest}")
+        self._cancel_flag = False
 
         def worker():
             folder = os.path.join(dest, f"Driver_Backup_{datetime.now().strftime('%Y%m%d_%H%M%S')}")
@@ -1435,7 +1462,12 @@ try {
                 stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
                 startupinfo=self._si, creationflags=self._nw, errors='replace')
 
+            cancelled = False
             for line in process.stdout:
+                if self._check_cancel():
+                    process.terminate()
+                    cancelled = True
+                    break
                 line = line.strip()
                 if not line:
                     continue
@@ -1446,6 +1478,10 @@ try {
                                                 'counter': f'{m.group(1)}/{m.group(2)}', 'status': line[:60]})
                 self.emit('task_progress', {'task': 'backup', 'log': line})
             process.wait()
+
+            if cancelled:
+                self.emit('task_complete', {'task': 'backup', 'status': '❗ Megszakítva!', 'log': '\n--- MEGSZAKÍTVA! ---'})
+                return
 
             success = process.returncode == 0
             logging.info(f"[BACKUP] DISM befejezve, returncode={process.returncode}")
@@ -1461,6 +1497,7 @@ try {
             logging.info("[BACKUP_ALL] Mégse - nincs mappa kiválasztva")
             return
         logging.info(f"[BACKUP_ALL] Összes driver backup indítása -> {dest}")
+        self._cancel_flag = False
 
         def worker():
             folder = os.path.join(dest, f"ALL_Driver_Backup_{datetime.now().strftime('%Y%m%d_%H%M%S')}")
@@ -1474,7 +1511,11 @@ try {
 
             success = 0
             fail = 0
+            cancelled = False
             for i, inf in enumerate(all_infs):
+                if self._check_cancel():
+                    cancelled = True
+                    break
                 inf_folder = os.path.join(folder, inf.replace('.inf', ''))
                 os.makedirs(inf_folder, exist_ok=True)
                 res = self._run(['pnputil', '/export-driver', inf, inf_folder])
@@ -1485,13 +1526,24 @@ try {
                 self.emit('task_progress', {'task': 'backup', 'current': i + 1, 'total': len(all_infs),
                                             'counter': f'{i+1}/{len(all_infs)}', 'status': f'Export: {inf}'})
 
+            if cancelled:
+                self.emit('task_complete', {'task': 'backup', 'status': f'❗ Megszakítva! OEM: {success} db exportálva',
+                                            'log': f'\n--- MEGSZAKÍTVA! Sikeres: {success}, Sikertelen: {fail} ---'})
+                return
+
             # Copy inbox drivers (FileRepository + INF)
+            if self._check_cancel():
+                self.emit('task_complete', {'task': 'backup', 'status': f'❗ Megszakítva!', 'log': '\n--- MEGSZAKÍTVA! ---'})
+                return
             self.emit('task_progress', {'task': 'backup', 'log': 'Windows inbox driverek másolása (FileRepository)...', 'indeterminate': True})
             driverstore = os.path.join(os.environ.get('SYSTEMROOT', r'C:\Windows'), 'System32', 'DriverStore', 'FileRepository')
             inbox_folder = os.path.join(folder, '_Windows_Inbox_Drivers')
             os.makedirs(inbox_folder, exist_ok=True)
             self._run(['robocopy', driverstore, inbox_folder, '/E', '/R:0', '/W:0', '/NFL', '/NDL', '/NJH', '/NJS', '/NC', '/NS', '/NP'])
 
+            if self._check_cancel():
+                self.emit('task_complete', {'task': 'backup', 'status': f'❗ Megszakítva!', 'log': '\n--- MEGSZAKÍTVA! ---'})
+                return
             self.emit('task_progress', {'task': 'backup', 'log': 'Windows INF mappa másolása...'})
             inf_src = os.path.join(os.environ.get('SYSTEMROOT', r'C:\Windows'), 'INF')
             inbox_inf_folder = os.path.join(folder, '_Windows_Inbox_INF')
@@ -1591,6 +1643,7 @@ try {
 
     def _run_restore(self, online, source, target):
         logging.info(f"[RESTORE] _run_restore: online={online}, source={source}, target={target}")
+        self._cancel_flag = False
         def worker():
             mode = 'Élő' if online else 'Offline'
             logging.info(f"[RESTORE] Worker indult - {mode} mód")
@@ -1644,29 +1697,43 @@ try {
                     self.emit('task_progress', {'task': 'restore', 'log': '  ✅ Fallback másolás befejeződött.'})
 
             def run_dism_add_driver(driver_path, label=""):
-                """Run DISM /Add-Driver on a folder with /Recurse."""
+                """Run DISM /Add-Driver on a folder with /Recurse. Returns (returncode, cancelled)."""
                 scratch = os.path.join(norm_target, "Scratch")
                 os.makedirs(scratch, exist_ok=True)
                 cmd = ['dism', f'/Image:{norm_target}', '/Add-Driver', f'/Driver:{driver_path}', '/Recurse', '/ForceUnsigned', f'/ScratchDir:{scratch}']
                 self.emit('task_progress', {'task': 'restore', 'log': f'{label}Parancs: {" ".join(cmd)}'})
                 process = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
                                            startupinfo=self._si, creationflags=self._nw, errors='replace')
+                cancelled = False
                 for line in process.stdout:
+                    if self._check_cancel():
+                        process.terminate()
+                        cancelled = True
+                        break
                     stripped = line.strip()
                     if stripped:
                         self.emit('task_progress', {'task': 'restore', 'log': stripped})
                 process.wait()
-                self.emit('task_progress', {'task': 'restore', 'log': f'Return code: {process.returncode}'})
-                return process.returncode
+                if not cancelled:
+                    self.emit('task_progress', {'task': 'restore', 'log': f'Return code: {process.returncode}'})
+                return (process.returncode, cancelled)
 
             if online:
                 cmd = ['pnputil', '/add-driver', f"{norm_source}\\*.inf", '/subdirs', '/install']
                 self.emit('task_progress', {'task': 'restore', 'log': f'Parancs: {" ".join(cmd)}'})
                 process = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
                                            startupinfo=self._si, creationflags=self._nw, errors='replace')
+                cancelled = False
                 for line in process.stdout:
+                    if self._check_cancel():
+                        process.terminate()
+                        cancelled = True
+                        break
                     self.emit('task_progress', {'task': 'restore', 'log': line.strip()})
                 process.wait()
+                if cancelled:
+                    self.emit('task_complete', {'task': 'restore', 'status': '❗ Megszakítva!'})
+                    return
                 self.emit('task_progress', {'task': 'restore', 'log': f'\nReturn code: {process.returncode}'})
             elif is_wim_extract:
                 # WIM-ből kimentett driverek (Windows_Gyari_Alap_Driverek_*)
@@ -1681,11 +1748,20 @@ try {
                     if os.path.exists(new_format_repo):
                         self.emit('task_progress', {'task': 'restore', 'log': '1/2 FileRepository és INF fizikai másolása...'})
                         force_copy(new_format_repo, target_repo)
+                        if self._check_cancel():
+                            self.emit('task_complete', {'task': 'restore', 'status': '❗ Megszakítva!'})
+                            return
                         if os.path.exists(new_format_inf):
                             force_copy(new_format_inf, target_inf)
+                            if self._check_cancel():
+                                self.emit('task_complete', {'task': 'restore', 'status': '❗ Megszakítva!'})
+                                return
                     else:
                         self.emit('task_progress', {'task': 'restore', 'log': '1/2 DriverStore fizikai másolása...'})
                         force_copy(norm_source, target_repo)
+                        if self._check_cancel():
+                            self.emit('task_complete', {'task': 'restore', 'status': '❗ Megszakítva!'})
+                            return
 
                     self.emit('task_progress', {'task': 'restore', 'log': '✅ Fizikai másolás kész!'})
                 except Exception as e:
@@ -1695,7 +1771,10 @@ try {
 
                 # DISM regisztrálás a fizikai másolás után
                 self.emit('task_progress', {'task': 'restore', 'log': '\n2/2 DISM driver regisztrálás (inbox drivereknél sok hiba normális)...'})
-                run_dism_add_driver(norm_source, "")
+                _, dism_cancelled = run_dism_add_driver(norm_source, "")
+                if dism_cancelled:
+                    self.emit('task_complete', {'task': 'restore', 'status': '❗ Megszakítva!'})
+                    return
                 self.emit('task_progress', {'task': 'restore', 'log': '✅ A fizikai másolás + DISM regisztrálás kész. Az inbox driverek a másolásnak köszönhetően elérhetőek.'})
 
             elif has_inbox_subfolder:
@@ -1711,9 +1790,15 @@ try {
                 self.emit('task_progress', {'task': 'restore', 'log': '--- 1. LÉPÉS: Inbox driverek fizikai másolása a DriverStore-ba ---'})
                 try:
                     force_copy(inbox_subfolder, target_repo)
+                    if self._check_cancel():
+                        self.emit('task_complete', {'task': 'restore', 'status': '❗ Megszakítva!'})
+                        return
                     if os.path.isdir(inbox_inf_subfolder):
                         self.emit('task_progress', {'task': 'restore', 'log': 'Windows INF mappa visszamásolása (új formátumú backup)...'})
                         force_copy(inbox_inf_subfolder, target_inf)
+                        if self._check_cancel():
+                            self.emit('task_complete', {'task': 'restore', 'status': '❗ Megszakítva!'})
+                            return
                     else:
                         # Régi backup: nincs _Windows_Inbox_INF, ezért a FileRepository almappáiból
                         # kiszedjük az .inf fájlokat és bemásoljuk a Windows\INF-be
@@ -1754,15 +1839,24 @@ try {
                 if oem_folders:
                     self.emit('task_progress', {'task': 'restore', 'log': f'\n--- 2. LÉPÉS: {len(oem_folders)} db OEM driver mappa DISM regisztrálása ---'})
                     for i, oem_path in enumerate(oem_folders):
+                        if self._check_cancel():
+                            self.emit('task_complete', {'task': 'restore', 'status': '❗ Megszakítva!'})
+                            return
                         self.emit('task_progress', {'task': 'restore', 'log': f'\n[{i+1}/{len(oem_folders)}] {os.path.basename(oem_path)}:'})
-                        run_dism_add_driver(oem_path, "  ")
+                        _, dism_cancelled = run_dism_add_driver(oem_path, "  ")
+                        if dism_cancelled:
+                            self.emit('task_complete', {'task': 'restore', 'status': '❗ Megszakítva!'})
+                            return
                     self.emit('task_progress', {'task': 'restore', 'log': '\n✅ OEM driverek DISM regisztrálása kész!'})
                 else:
                     self.emit('task_progress', {'task': 'restore', 'log': '\nNincs OEM driver mappa a backup-ban.'})
 
             else:
                 # Egyéb mappa (pl. Driver_Backup_* third-party export) — tisztán DISM
-                run_dism_add_driver(norm_source, "")
+                _, dism_cancelled = run_dism_add_driver(norm_source, "")
+                if dism_cancelled:
+                    self.emit('task_complete', {'task': 'restore', 'status': '❗ Megszakítva!'})
+                    return
 
             # Post-install
             if online:
@@ -1816,6 +1910,7 @@ try {
             logging.info("[WIM] Mégse - nincs célmappa kiválasztva")
             return
         logging.info(f"[WIM] Célmappa: {dest}")
+        self._cancel_flag = False
 
         def worker():
             logging.info("[WIM] Worker indult - WIM kinyerés...")
@@ -1835,6 +1930,11 @@ try {
             os.makedirs(target_folder, exist_ok=True)
 
             try:
+                # Cancel check before mount
+                if self._check_cancel():
+                    self.emit('task_complete', {'task': 'wim', 'status': '❗ Megszakítva!'})
+                    return
+
                 logging.info("[WIM] DISM Mount-Image futtatása...")
                 self.emit('task_progress', {'task': 'wim', 'log': 'WIM csatolás (ez 4-5 perc)...', 'indeterminate': True,
                                             'counter': '1/3', 'status': 'Képfájl csatolása...'})
@@ -1842,6 +1942,11 @@ try {
                 if res.returncode != 0:
                     logging.error(f"[WIM] DISM Mount hiba: {res.stdout} {res.stderr}")
                     raise Exception(f"DISM Mount hiba: {res.stdout} {res.stderr}")
+                
+                # Cancel check after mount (will unmount in except)
+                if self._check_cancel():
+                    raise Exception("Megszakítva a felhasználó által")
+                
                 logging.info("[WIM] WIM csatolva, fájlok másolása...")
 
                 self.emit('task_progress', {'task': 'wim', 'log': 'Fájlok másolása...', 'counter': '2/3', 'status': 'Gyári driverek másolása...'})
