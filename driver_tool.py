@@ -2024,7 +2024,7 @@ if __name__ == "__main__":
         sys.exit()
 
     # Logging
-    log_filename = os.path.join(os.path.dirname(sys.executable if getattr(sys, 'frozen', False) else os.path.abspath(__file__)), "driver_tool_debug.log")
+    log_filename = os.path.join(os.path.dirname(sys.executable if getattr(sys, 'frozen', False) else os.path.abspath(__file__)), "DriverDoktor_debug.log")
     try:
         logging.basicConfig(filename=log_filename, level=logging.DEBUG,
                             format='%(asctime)s [%(levelname)s] %(message)s', datefmt='%Y-%m-%d %H:%M:%S', encoding='utf-8')
