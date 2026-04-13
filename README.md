@@ -1,4 +1,4 @@
-# 🔧 Ultimate Driver Tool
+# ♻️ DriverDoktor
 
 **Windows Driver Management Utility** — Professzionális szerviz eszköz driver törléshez, telepítéshez, mentéshez és visszaállításhoz.
 
@@ -151,19 +151,19 @@ Néhány driver használatban van:
 # PyInstaller build verzió infóval
 pyinstaller --noconfirm --onefile --windowed --uac-admin ^
   --add-data "ui.html;." ^
-  --icon "icon_red.ico" ^
+  --icon "icon_driverdoktor.ico" ^
   --version-file "version_info.txt" ^
-  --name "ULTIMATE DRIVER GYILKOLO (es telepito) SZERVIZ TOOL" ^
+  --name "DriverDoktor" ^
   driver_tool.py
 ```
 
 ### Projekt struktúra
 ```
-├── driver_tool.py      # Fő Python backend
-├── ui.html             # WebView2 UI frontend
-├── icon_red.ico        # Alkalmazás ikon
-├── version_info.txt    # Windows verzió metaadatok
-└── dist/               # Build kimenet
+├── driver_tool.py          # Fő Python backend
+├── ui.html                 # WebView2 UI frontend
+├── icon_driverdoktor.ico   # Alkalmazás ikon
+├── version_info.txt        # Windows verzió metaadatok
+└── dist/                   # Build kimenet
 ```
 
 ### Technológiák

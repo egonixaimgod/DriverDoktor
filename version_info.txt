@@ -29,13 +29,13 @@ VSVersionInfo(
       [
       StringTable(
         u'040904B0',
-        [StringStruct(u'CompanyName', u'EgonixAI - Driver Tool'),
-        StringStruct(u'FileDescription', u'ULTIMATE DRIVER GYILKOLO (es telepito) SZERVIZ TOOL - Windows Driver Management Utility'),
+        [StringStruct(u'CompanyName', u'EgonixAI'),
+        StringStruct(u'FileDescription', u'DriverDoktor - Windows Driver Management Utility'),
         StringStruct(u'FileVersion', u'1.0.53.0'),
-        StringStruct(u'InternalName', u'DriverTool'),
+        StringStruct(u'InternalName', u'DriverDoktor'),
         StringStruct(u'LegalCopyright', u'© 2024-2026 EgonixAI. MIT License.'),
-        StringStruct(u'OriginalFilename', u'ULTIMATE DRIVER GYILKOLO (es telepito) SZERVIZ TOOL.exe'),
-        StringStruct(u'ProductName', u'Ultimate Driver Tool'),
+        StringStruct(u'OriginalFilename', u'DriverDoktor.exe'),
+        StringStruct(u'ProductName', u'DriverDoktor'),
         StringStruct(u'ProductVersion', u'1.0.53.0')])
       ]),
     VarFileInfo([VarStruct(u'Translation', [1033, 1200])])

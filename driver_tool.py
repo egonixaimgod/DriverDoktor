@@ -2040,7 +2040,7 @@ if __name__ == "__main__":
     threading.excepthook = thread_exception_handler
 
     logging.info("=" * 50)
-    logging.info("ULTIMATE DRIVER GYILKOLO (es telepito) SZERVIZ TOOL ELINDITVA")
+    logging.info("DriverDoktor ELINDITVA")
     logging.info(f"Futtatasi konyvtar: {os.getcwd()}")
     logging.info("=" * 50)
 
@@ -2048,7 +2048,7 @@ if __name__ == "__main__":
     html_path = resource_path('ui.html')
 
     window = webview.create_window(
-        'ULTIMATE DRIVER GYILKOLO (es telepito) SZERVIZ TOOL',
+        'DriverDoktor',
         url=html_path,
         js_api=api,
         width=1200, height=780,
