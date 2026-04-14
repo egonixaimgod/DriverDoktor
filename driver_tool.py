@@ -115,8 +115,9 @@ def check_webview2_runtime():
             hr = wv2_loader.GetAvailableCoreWebView2BrowserVersionString(None, ctypes.byref(buf))
             if hr == 0 and buf.value:
                 version = buf.value
-        except Exception:
-            pass
+        except Exception as e:
+            import logging
+            logging.debug(e)
     
     if not version:
         return (False, "WebView2 Runtime nem található!\n\n"
@@ -154,8 +155,9 @@ def show_webview2_error(message):
         )
         if result == 6:  # IDYES
             webbrowser.open("https://go.microsoft.com/fwlink/p/?LinkId=2124703")
-    except Exception:
-        pass
+    except Exception as e:
+        import logging
+        logging.debug(e)
     sys.exit(1)
 
 
@@ -317,8 +319,9 @@ def run_progress_window(log_path):
                                                 self._window.evaluate_js(f'window.update({json.dumps(data)})')
                                         except json.JSONDecodeError:
                                             pass
-                except Exception:
-                    pass
+                except Exception as e:
+                    import logging
+                    logging.debug(e)
                 time.sleep(0.1)
 
         def stop(self):
@@ -423,8 +426,9 @@ class DriverToolApi:
             try:
                 if isinstance(data, dict):
                     self._write_progress(data)
-            except Exception:
-                pass
+            except Exception as e:
+                import logging
+                logging.debug(e)
 
         # Ablak cím frissítése autofix progress közben (backup megoldás ha a modal eltűnik)
         if self._window and event in ('task_start', 'task_progress', 'task_complete'):
@@ -442,8 +446,9 @@ class DriverToolApi:
                         self._window.set_title(f"DriverDoktor - {status}")
                 elif event == 'task_complete':
                     self._window.set_title('DriverDoktor')
-            except Exception:
-                pass  # Ne akadjon el ha a title frissítés nem sikerül
+            except Exception as e:
+                import logging
+                logging.debug(e)  # Ne akadjon el ha a title frissítés nem sikerül
 
         if self._window:
             payload = None
@@ -852,8 +857,9 @@ class DriverToolApi:
                     f'remove letter={efi_letter[0]}\n'
                 )
                 self._run(['diskpart'], input=diskpart_remove, text=True, timeout=30)
-            except Exception:
-                pass
+            except Exception as e:
+                import logging
+                logging.debug(e)
         
         if not success:
             # BIOS/Legacy mód vagy UEFI fallback - a Windows meghajtóra /f ALL
@@ -1060,8 +1066,9 @@ class DriverToolApi:
                         prefix = "💻 Laptop" if is_laptop else "🖥️ Asztali (Desktop)"
 
                         sys_info_text = f"{prefix} | {man} - {mod}"
-                except Exception:
-                    pass
+                except Exception as e:
+                    import logging
+                    logging.debug(e)
                 self.emit('hw_scan_progress', {'sys_info': sys_info_text, 'status': '⏳ PnP eszközök lekérdezése...'})
 
                 # PnP devices
@@ -1603,8 +1610,9 @@ try {
                     try:
                         self._autofix_window_proc.terminate()
                         self._autofix_window_proc.wait()  # Prevent zombie process
-                    except Exception:
-                        pass
+                    except Exception as e:
+                        import logging
+                        logging.debug(e)
                     self._autofix_window_proc = None
             threading.Thread(target=close_later, daemon=True).start()
         except Exception as e:
@@ -1616,8 +1624,9 @@ try {
             try:
                 self._autofix_log_file.write(json.dumps(data, ensure_ascii=False) + '\n')
                 self._autofix_log_file.flush()
-            except Exception:
-                pass
+            except Exception as e:
+                import logging
+                logging.debug(e)
 
     def start_autofix(self):
         logging.info("[API] start_autofix() - 1 KATTINTÁSOS DRIVER FIX INDÍTVA!")
@@ -1970,8 +1979,9 @@ try {
                 try:
                     with winreg.CreateKeyEx(winreg.HKEY_LOCAL_MACHINE, r"SOFTWARE\Policies\Microsoft\Windows\WindowsUpdate", 0, winreg.KEY_WRITE) as key:
                         winreg.SetValueEx(key, "ExcludeWUDriversInQualityUpdate", 0, winreg.REG_DWORD, 0)
-                except Exception:
-                    pass
+                except Exception as e:
+                    import logging
+                    logging.debug(e)
 
             # SearchOrderConfig = 1
             try:
@@ -2428,8 +2438,9 @@ try {
                 self._run(['diskpart'], 
                     input=f'select disk {disk_number}\nselect partition {efi_partition}\nremove letter={efi_letter[0]}\n',
                     text=True, timeout=30)
-            except Exception:
-                pass
+            except Exception as e:
+                import logging
+                logging.debug(e)
         
         if not success:
             self.emit('task_progress', {'task': task_name, 'log': f'bcdboot {target_drive}Windows /s {target_drive} /f ALL'})
@@ -2649,8 +2660,9 @@ try {
                                     try:
                                         shutil.copy2(src_inf, dst_inf)
                                         inf_count += 1
-                                    except Exception:
-                                        pass
+                                    except Exception as e:
+                                        import logging
+                                        logging.debug(e)
                         self.emit('task_progress', {'task': 'restore', 'log': f'✅ {inf_count} db .inf fájl kinyerve a Windows\\INF mappába (.pnf-eket a Windows legenerálja bootoláskor).'})
                     self.emit('task_progress', {'task': 'restore', 'log': '✅ Inbox driverek fizikai másolása kész!'})
                 except Exception as e:
@@ -3312,8 +3324,9 @@ class CliApi:
                 self._run(['diskpart'], 
                     input=f'select disk {disk_number}\nselect partition {efi_partition}\nremove letter={efi_letter[0]}\n',
                     text=True, timeout=30)
-            except Exception:
-                pass
+            except Exception as e:
+                import logging
+                logging.debug(e)
         
         if not success:
             print(f"bcdboot {target_drive}Windows /s {target_drive} /f ALL")
@@ -4072,8 +4085,9 @@ if __name__ == "__main__":
                 # Törlés
                 try:
                     os.remove(bootstrapper_path)
-                except Exception:
-                    pass
+                except Exception as e:
+                    import logging
+                    logging.debug(e)
                 
                 # Újraellenőrzés
                 wv2_ok2, wv2_info2 = check_webview2_runtime()
@@ -4123,8 +4137,9 @@ if __name__ == "__main__":
             sys.stdin = open('CONIN$', 'r')
             sys.stdout = open('CONOUT$', 'w')
             sys.stderr = open('CONOUT$', 'w')
-        except Exception:
-            pass
+        except Exception as e:
+            import logging
+            logging.debug(e)
         
         print("\n" + "=" * 60)
         print("  📋 DRIVERDOKTOR - CLI MÓD")
@@ -4163,8 +4178,9 @@ if __name__ == "__main__":
                 time.sleep(0.5)  # Adj időt a log kiírására
                 try:
                     window.destroy()
-                except Exception:
-                    pass
+                except Exception as e:
+                    import logging
+                    logging.debug(e)
                 return
             time.sleep(0.25)
         # Timeout
@@ -4172,8 +4188,9 @@ if __name__ == "__main__":
         _webview_error.set()
         try:
             window.destroy()
-        except Exception:
-            pass
+        except Exception as e:
+            import logging
+            logging.debug(e)
 
     watchdog_thread = threading.Thread(target=webview_watchdog, daemon=True)
     watchdog_thread.start()
@@ -4199,8 +4216,9 @@ if __name__ == "__main__":
             sys.stdin = open('CONIN$', 'r')
             sys.stdout = open('CONOUT$', 'w')
             sys.stderr = open('CONOUT$', 'w')
-        except Exception:
-            pass
+        except Exception as e:
+            import logging
+            logging.debug(e)
         
         print("\n" + "=" * 60)
         print("  ⚠️  GUI nem elérhető - CLI mód automatikusan aktiválva")
