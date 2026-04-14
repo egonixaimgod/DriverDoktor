@@ -1,4 +1,4 @@
-BUILD_NUMBER = 54
+BUILD_NUMBER = 55
 
 import os
 import sys
@@ -1616,7 +1616,12 @@ try {
                 logging.info("[RESTORE_POINT] Rendszervédelem bekapcsolva")
                 self.emit('task_progress', {'task': 'rp', 'log': '✅ Rendszervédelem bekapcsolva'})
 
-            # 2) Create restore point
+            # 2) Disable 24-hour frequency limit
+            logging.info("[RESTORE_POINT] 24 órás limit feloldása...")
+            self._run(['reg', 'add', r'HKLM\SOFTWARE\Microsoft\Windows NT\CurrentVersion\SystemRestore', 
+                       '/v', 'SystemRestorePointCreationFrequency', '/t', 'REG_DWORD', '/d', '0', '/f'])
+
+            # 3) Create restore point
             logging.info("[RESTORE_POINT] Checkpoint-Computer futtatása...")
             self.emit('task_progress', {'task': 'rp', 'log': f'Visszaállítási pont: {desc}', 'status': 'Pont létrehozása...'})
             create_ps = f'[Console]::OutputEncoding = [System.Text.Encoding]::UTF8; try {{ Checkpoint-Computer -Description "{desc}" -RestorePointType "MODIFY_SETTINGS" -ErrorAction Stop; Write-Output "OK" }} catch {{ Write-Output "FAIL: $($_.Exception.Message)" }}'
@@ -1624,7 +1629,7 @@ try {
             create_out = (res.stdout or '').strip()
             logging.debug(f"[RESTORE_POINT] Checkpoint result: {create_out}")
 
-            # 3) Verify
+            # 4) Verify
             logging.info("[RESTORE_POINT] Ellenőrzés...")
             verify_ps = f'[Console]::OutputEncoding = [System.Text.Encoding]::UTF8; (Get-ComputerRestorePoint | Where-Object {{ $_.Description -eq "{desc}" }}).Description'
             verify_res = self._run(["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", verify_ps], encoding='utf-8')
