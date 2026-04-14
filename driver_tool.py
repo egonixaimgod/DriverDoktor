@@ -1,4 +1,4 @@
-BUILD_NUMBER = 77
+BUILD_NUMBER = 78
 
 import os
 import sys
@@ -2245,6 +2245,169 @@ try {
                 self.emit('task_complete', {'task': 'rp', 'status': f'❌ Hiba: {create_out}'})
         self._safe_thread('rp', worker)
 
+    def repair_bcd_standalone(self):
+        """Önálló BCD javítás - a felhasználó kiválasztja a meghajtót."""
+        logging.info("[API] repair_bcd_standalone()")
+        target = self.select_directory('Válaszd ki a HALOTT WINDOWS meghajtóját (ahol a Windows mappa van)')
+        if not target:
+            logging.info("[BCD] Mégse - nincs cél kiválasztva")
+            return
+        target = os.path.splitdrive(os.path.abspath(target))[0] + "\\"
+        logging.info(f"[BCD] Standalone BCD javítás: {target}")
+        
+        def worker():
+            self.emit('task_start', {'task': 'bcd', 'title': 'BCD Boot Hiba Javítása'})
+            self.emit('task_progress', {'task': 'bcd', 'log': f'Kiválasztott meghajtó: {target}\n', 'indeterminate': True})
+            
+            # Ellenőrzés - van-e Windows mappa
+            windows_path = os.path.join(target, 'Windows')
+            if not os.path.exists(windows_path):
+                self.emit('task_progress', {'task': 'bcd', 'log': f'❌ Hiba: Windows mappa nem található!\n   Elérési út: {windows_path}'})
+                self.emit('task_complete', {'task': 'bcd', 'status': '❌ Windows mappa nem található!'})
+                return
+            
+            # BCD javítás (ugyanaz a kód mint a restore után)
+            self._repair_bcd_for_task(target, 'bcd')
+            
+            self.emit('task_progress', {'task': 'bcd', 'log': '\n==== BCD JAVÍTÁS BEFEJEZVE ===='})
+            self.emit('task_complete', {'task': 'bcd', 'status': '✅ BCD javítás befejezve!'})
+        
+        self._safe_thread('bcd', worker)
+    
+    def _repair_bcd_for_task(self, target_drive, task_name):
+        """BCD javítás közös logika - használható restore-ból vagy önállóan is."""
+        target_drive = target_drive.rstrip('\\') + '\\'
+        target_letter = target_drive[0].upper()
+        
+        self.emit('task_progress', {'task': task_name, 'log': '\n--- BOOT LOADER (BCD) JAVÍTÁS ---'})
+        self.emit('task_progress', {'task': task_name, 'log': f'Cél Windows meghajtó: {target_drive}'})
+        self.emit('task_progress', {'task': task_name, 'log': 'A Windows meghajtó lemezének azonosítása...'})
+        
+        disk_number = None
+        efi_letter = None
+        efi_partition = None
+        
+        try:
+            # Volume-ok listázása
+            res = self._run(['diskpart'], input='list volume\n', text=True, timeout=30)
+            
+            if res.returncode == 0 and res.stdout:
+                lines = res.stdout.splitlines()
+                target_volume = None
+                
+                # Windows volume keresése
+                for line in lines:
+                    parts = line.split()
+                    if len(parts) >= 3:
+                        for i, p in enumerate(parts):
+                            if p.upper() == target_letter and i >= 1:
+                                try:
+                                    target_volume = int(parts[1])
+                                except (ValueError, IndexError):
+                                    pass
+                                break
+                
+                if target_volume is not None:
+                    self.emit('task_progress', {'task': task_name, 'log': f'Windows volume: {target_volume}'})
+                    
+                    # Disk azonosítása
+                    res2 = self._run(['diskpart'], input=f'select volume {target_volume}\ndetail volume\n', text=True, timeout=30)
+                    
+                    if res2.returncode == 0 and res2.stdout:
+                        for line in res2.stdout.splitlines():
+                            if 'Disk' in line and '#' not in line:
+                                parts = line.split()
+                                for p in parts:
+                                    if p.isdigit():
+                                        disk_number = int(p)
+                                        break
+                                if disk_number is not None:
+                                    break
+                    
+                    if disk_number is not None:
+                        self.emit('task_progress', {'task': task_name, 'log': f'Lemez: Disk {disk_number}'})
+                        
+                        # EFI partíció keresése ezen a lemezen
+                        res3 = self._run(['diskpart'], input=f'select disk {disk_number}\nlist partition\n', text=True, timeout=30)
+                        
+                        if res3.returncode == 0 and res3.stdout:
+                            for line in res3.stdout.splitlines():
+                                line_upper = line.upper()
+                                if 'SYSTEM' in line_upper or 'EFI' in line_upper:
+                                    parts = line.split()
+                                    for i, p in enumerate(parts):
+                                        if p.isdigit() and i >= 1:
+                                            efi_partition = int(p)
+                                            break
+                                    if efi_partition:
+                                        break
+                        
+                        if efi_partition:
+                            self.emit('task_progress', {'task': task_name, 'log': f'EFI partíció: Partition {efi_partition}'})
+                            
+                            # Szabad betűjel keresése
+                            used_letters = set()
+                            for line in lines:
+                                parts = line.split()
+                                for p in parts:
+                                    if len(p) == 1 and p.isalpha():
+                                        used_letters.add(p.upper())
+                            
+                            free_letter = None
+                            for c in 'STUVWXYZ':
+                                if c not in used_letters:
+                                    free_letter = c
+                                    break
+                            
+                            if free_letter:
+                                res4 = self._run(['diskpart'], 
+                                    input=f'select disk {disk_number}\nselect partition {efi_partition}\nassign letter={free_letter}\n',
+                                    text=True, timeout=30)
+                                if res4.returncode == 0:
+                                    efi_letter = free_letter + ':'
+                                    self.emit('task_progress', {'task': task_name, 'log': f'EFI betűjel hozzárendelve: {efi_letter}'})
+        except Exception as e:
+            logging.warning(f"[BCD] Diskpart hiba: {e}")
+            self.emit('task_progress', {'task': task_name, 'log': f'⚠️ Lemez azonosítási hiba: {e}'})
+        
+        # bcdboot futtatása
+        success = False
+        
+        if efi_letter:
+            self.emit('task_progress', {'task': task_name, 'log': f'bcdboot {target_drive}Windows /s {efi_letter} /f UEFI'})
+            res = self._run(['bcdboot', f'{target_drive}Windows', '/s', efi_letter, '/f', 'UEFI'])
+            if res.returncode == 0:
+                success = True
+                self.emit('task_progress', {'task': task_name, 'log': '✅ BCD sikeresen újraépítve (UEFI)!'})
+            else:
+                self.emit('task_progress', {'task': task_name, 'log': '⚠️ UEFI bcdboot hiba, fallback...'})
+            
+            # EFI betűjel eltávolítása
+            try:
+                self._run(['diskpart'], 
+                    input=f'select disk {disk_number}\nselect partition {efi_partition}\nremove letter={efi_letter[0]}\n',
+                    text=True, timeout=30)
+            except Exception:
+                pass
+        
+        if not success:
+            self.emit('task_progress', {'task': task_name, 'log': f'bcdboot {target_drive}Windows /s {target_drive} /f ALL'})
+            res = self._run(['bcdboot', f'{target_drive}Windows', '/s', target_drive, '/f', 'ALL'])
+            if res.returncode == 0:
+                success = True
+                self.emit('task_progress', {'task': task_name, 'log': '✅ BCD sikeresen újraépítve (ALL)!'})
+            else:
+                self.emit('task_progress', {'task': task_name, 'log': f'⚠️ bcdboot hiba: {res.stderr[:200] if res.stderr else res.stdout[:200]}'})
+        
+        if not success:
+            self.emit('task_progress', {'task': task_name, 'log': 'bootrec parancsok futtatása...'})
+            for cmd in ['/fixmbr', '/fixboot', '/rebuildbcd']:
+                res = self._run(['bootrec', cmd])
+                status = '✅' if res.returncode == 0 else '⚠️ (nem elérhető)'
+                self.emit('task_progress', {'task': task_name, 'log': f'  bootrec {cmd}: {status}'})
+        
+        return success
+
     def restore_online(self):
         logging.info("[API] restore_online()")
         source = self.select_directory('ÉLŐ MÓD: Válassz kimentett driver mappát')
@@ -3133,6 +3296,24 @@ class CliApi:
             print(f"❌ Hiba: {res.stderr[:200] if res.stderr else 'Ismeretlen hiba'}")
             return False
     
+    def repair_bcd_standalone_cli(self):
+        """Önálló BCD javítás CLI módban."""
+        print("\n🔧 BCD BOOT HIBA JAVÍTÁSA")
+        print("-" * 50)
+        target = input("Add meg a HALOTT Windows meghajtóját (pl: D:\\): ").strip()
+        if not target:
+            print("❌ Nincs meghajtó megadva!")
+            return False
+        
+        target = target.rstrip('\\') + '\\'
+        windows_path = os.path.join(target, 'Windows')
+        
+        if not os.path.exists(windows_path):
+            print(f"❌ Windows mappa nem található: {windows_path}")
+            return False
+        
+        return self._repair_bcd_cli(target)
+    
     # ================================================================
     # WINDOWS UPDATE
     # ================================================================
@@ -3511,6 +3692,7 @@ def run_cli_mode():
     3. Lementett driverek visszaállítása
     4. WIM-ből gyári driverek kinyerése
     5. Visszaállítási pont létrehozása
+    6. BCD boot hiba javítása
     
     0. Vissza a főmenübe
 """)
@@ -3545,6 +3727,9 @@ def run_cli_mode():
                     print("❌ Offline módban nem elérhető!")
                 else:
                     api.create_restore_point()
+                input("\nNyomj ENTER-t a folytatáshoz...")
+            elif choice == '6':
+                api.repair_bcd_standalone_cli()
                 input("\nNyomj ENTER-t a folytatáshoz...")
     
     def wu_menu():

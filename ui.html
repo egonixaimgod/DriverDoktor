@@ -286,6 +286,11 @@ td input[type="checkbox"]{accent-color:var(--accent);width:16px;height:16px}
             <div class="card-desc">Létrehoz egy Windows rendszer-visszaállítási pontot a jelenlegi állapotról, mielőtt bármit változtatnál.</div>
             <button class="btn" onclick="createRestorePoint()">Visszaállítási pont létrehozása</button>
           </div>
+          <div class="card glass">
+            <div class="card-title">🔧 BCD Boot Hiba Javítása</div>
+            <div class="card-desc">Ha egy Windows nem bootol (0xc0000098, BCD hiba), ez a funkció újraépíti a boot loadert a kiválasztott meghajtón.</div>
+            <button class="btn btn-warning" onclick="repairBcd()">Boot loader javítása</button>
+          </div>
         </div>
       </div>
 
@@ -791,6 +796,21 @@ async function createRestorePoint() {
     await api().create_restore_point();
   } catch (e) {
     toast('Visszaállítási pont hiba: ' + e, 'error');
+  }
+}
+async function repairBcd() {
+  const ok = await showConfirm('BCD Boot Hiba Javítása',
+    'Ez a funkció újraépíti a boot loadert (BCD) egy kiválasztott Windows meghajtón.\n\n' +
+    'Használd ha:\n' +
+    '• 0xc0000098 vagy hasonló BCD hibát kapsz\n' +
+    '• A Windows nem bootol driver visszaállítás után\n' +
+    '• Boot Configuration Data sérült\n\n' +
+    'A következő lépésben válaszd ki a HALOTT Windows meghajtóját (ahol a Windows mappa van).');
+  if (!ok) return;
+  try {
+    await api().repair_bcd_standalone();
+  } catch (e) {
+    toast('BCD javítási hiba: ' + e, 'error');
   }
 }
 async function restoreDrivers() {
