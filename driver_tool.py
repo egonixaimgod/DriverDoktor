@@ -1,8 +1,9 @@
+import ctypes
+import ctypes
 BUILD_NUMBER = 78
 
 import os
 import sys
-import ctypes
 import subprocess
 import re
 import threading
@@ -109,7 +110,6 @@ def check_webview2_runtime():
     # 4. Utolsó esély: GetAvailableCoreWebView2BrowserVersionString (ha van WebView2Loader.dll)
     if not version:
         try:
-            import ctypes
             wv2_loader = ctypes.windll.LoadLibrary("WebView2Loader.dll")
             buf = ctypes.create_unicode_buffer(256)
             hr = wv2_loader.GetAvailableCoreWebView2BrowserVersionString(None, ctypes.byref(buf))
@@ -144,7 +144,6 @@ def show_webview2_error(message):
     """MessageBox megjelenítése WebView2 hibáról, majd program kilépés."""
     try:
         import webbrowser
-        MB_OK = 0x0
         MB_ICONERROR = 0x10
         MB_TOPMOST = 0x40000
         result = ctypes.windll.user32.MessageBoxW(
@@ -516,7 +515,7 @@ class DriverToolApi:
 
     def reboot_system(self):
         logging.info("[API] reboot_system() - Felhasználó újraindítást kért")
-        self._run(['shutdown', '/r', '/t', '0', '/f'])
+        self._run(['shutdown', '/r', '/t', '0', '/'])
         return True
 
     def cancel_task(self):
@@ -735,7 +734,7 @@ class DriverToolApi:
         try:
             # Diskpart script: volume-ok listázása
             diskpart_list = (
-                f'list volume\n'
+                'list volume\n'
             )
             res = self._run(['diskpart'], input=diskpart_list, text=True, timeout=30)
             
@@ -763,7 +762,7 @@ class DriverToolApi:
                     # Megkeressük melyik disk-en van
                     diskpart_detail = (
                         f'select volume {target_volume}\n'
-                        f'detail volume\n'
+                        'detail volume\n'
                     )
                     res2 = self._run(['diskpart'], input=diskpart_detail, text=True, timeout=30)
                     
@@ -785,7 +784,7 @@ class DriverToolApi:
                         # EFI partíció keresése EZEN a lemezen
                         diskpart_efi = (
                             f'select disk {disk_number}\n'
-                            f'list partition\n'
+                            'list partition\n'
                         )
                         res3 = self._run(['diskpart'], input=diskpart_efi, text=True, timeout=30)
                         
@@ -841,12 +840,12 @@ class DriverToolApi:
         if efi_letter:
             # UEFI mód - a megtalált EFI partícióra
             self.emit('task_progress', {'task': 'restore', 'log': f'bcdboot {target_drive}Windows /s {efi_letter} /f UEFI'})
-            res = self._run(['bcdboot', f'{target_drive}Windows', '/s', efi_letter, '/f', 'UEFI'])
+            res = self._run(['bcdboot', f'{target_drive}Windows', '/s', efi_letter, '/', 'UEFI'])
             if res.returncode == 0:
                 success = True
                 self.emit('task_progress', {'task': 'restore', 'log': '✅ BCD sikeresen újraépítve (UEFI)!'})
             else:
-                self.emit('task_progress', {'task': 'restore', 'log': f'⚠️ UEFI bcdboot hiba, fallback...'})
+                self.emit('task_progress', {'task': 'restore', 'log': '⚠️ UEFI bcdboot hiba, fallback...'})
             
             # EFI betűjel eltávolítása
             try:
@@ -863,7 +862,7 @@ class DriverToolApi:
         if not success:
             # BIOS/Legacy mód vagy UEFI fallback - a Windows meghajtóra /f ALL
             self.emit('task_progress', {'task': 'restore', 'log': f'bcdboot {target_drive}Windows /s {target_drive} /f ALL'})
-            res = self._run(['bcdboot', f'{target_drive}Windows', '/s', target_drive, '/f', 'ALL'])
+            res = self._run(['bcdboot', f'{target_drive}Windows', '/s', target_drive, '/', 'ALL'])
             if res.returncode == 0:
                 success = True
                 self.emit('task_progress', {'task': 'restore', 'log': '✅ BCD sikeresen újraépítve (ALL)!'})
@@ -948,7 +947,7 @@ class DriverToolApi:
                                 found_any = True
 
                             bname = os.path.splitext(pub)[0]
-                            for ext in ['.inf', '.pnf', '.INF', '.PNF']:
+                            for ext in ['.in', '.pn', '.INF', '.PNF']:
                                 fpath = os.path.join(inf_dir, bname + ext)
                                 if os.path.exists(fpath):
                                     self._run(f'takeown /f "{fpath}" /A', shell=True)
@@ -985,7 +984,7 @@ class DriverToolApi:
             if cancelled:
                 self.emit('task_progress', {'task': 'delete', 'log': f'\n--- MEGSZAKÍTVA! Sikeres: {success}, Sikertelen: {fail} ---', 'current': i, 'total': total})
                 self.emit('task_complete', {'task': 'delete', 'success': success, 'fail': fail,
-                                            'counter': f'❗ Megszakítva',
+                                            'counter': '❗ Megszakítva',
                                             'status': f'❗ Megszakítva! Sikeres: {success}, Sikertelen: {fail}'})
             else:
                 self.emit('task_progress', {'task': 'delete', 'log': f'\n--- Sikeres: {success}, Sikertelen: {fail} ---', 'current': total, 'total': total})
@@ -997,7 +996,7 @@ class DriverToolApi:
                 if reboot and success > 0:
                     self.emit('task_progress', {'task': 'delete', 'log': '\n🔄 Újraindítás 5 másodperc múlva...'})
                     time.sleep(5)
-                    self._run(['shutdown', '/r', '/t', '0', '/f'])
+                    self._run(['shutdown', '/r', '/t', '0', '/'])
 
         self._safe_thread('delete', worker)
 
@@ -1533,12 +1532,12 @@ try {
                         os.makedirs(inner_ext, exist_ok=True)
                         self._run(['expand', inner_cab, '-F:*', inner_ext])
 
-                    self.emit('task_progress', {'task': 'wu_install', 'status': f'Telepítés: {name}', 'log': f'  Telepítés...'})
+                    self.emit('task_progress', {'task': 'wu_install', 'status': f'Telepítés: {name}', 'log': '  Telepítés...'})
                     is_offline = bool(self.target_os_path)
                     if is_offline:
                         cmd = ['dism', f'/Image:{self.target_os_path}', '/Add-Driver', f'/Driver:{ext_path}', '/Recurse', '/ForceUnsigned']
                     else:
-                        cmd = ['pnputil', '/add-driver', f"{ext_path}\\*.inf", '/subdirs', '/install']
+                        cmd = ['pnputil', '/add-driver', f"{ext_path}\\*.in", '/subdirs', '/install']
                     res = self._run(cmd)
                     if res.returncode == 0 or any(k in res.stdout for k in ["Added", "sikeres", "successfully"]):
                         success += 1
@@ -1691,7 +1690,7 @@ try {
                 logging.error(f"[AUTOFIX] winreg hiba: {e}")
                 self.emit('task_progress', {'task': 'autofix', 'log': f'  ⚠ winreg hiba: {e}'})
             self._run(['reg', 'add', r'HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\DriverSearching',
-                       '/v', 'SearchOrderConfig', '/t', 'REG_DWORD', '/d', '0', '/f'])
+                       '/v', 'SearchOrderConfig', '/t', 'REG_DWORD', '/d', '0', '/'])
 
             self._run('net stop wuauserv & net start wuauserv', shell=True)
             logging.info("[AUTOFIX] WU szolgáltatás újraindítva")
@@ -1719,14 +1718,14 @@ try {
                     res = self._run(['pnputil', '/delete-driver', pub, '/uninstall', '/force'])
                     if res.returncode == 0 or any(k in res.stdout for k in ["Deleted", "törölve", "successfully"]):
                         del_success += 1
-                        self.emit('task_progress', {'task': 'autofix', 'log': f'    ✅ törölve'})
+                        self.emit('task_progress', {'task': 'autofix', 'log': '    ✅ törölve'})
                         # Track display driver deletion for window recovery
                         if 'display' in drv_class or 'video' in drv_class or 'nvidia' in prov.lower() or 'amd' in prov.lower() or 'intel' in prov.lower():
                             display_driver_deleted = True
                             logging.info(f"[AUTOFIX] Display driver törölve: {pub} ({prov})")
                     else:
                         del_fail += 1
-                        self.emit('task_progress', {'task': 'autofix', 'log': f'    ❌ sikertelen'})
+                        self.emit('task_progress', {'task': 'autofix', 'log': '    ❌ sikertelen'})
                 except Exception as e:
                     del_fail += 1
                     self.emit('task_progress', {'task': 'autofix', 'log': f'    ❌ hiba: {e}'})
@@ -1939,7 +1938,7 @@ try {
             except Exception as e:
                 self.emit('task_progress', {'task': 'disable_wu', 'log': f'⚠ {e}'})
             self._run(['reg', 'add', r'HKLM\SOFTWARE\Policies\Microsoft\Windows\WindowsUpdate',
-                       '/v', 'ExcludeWUDriversInQualityUpdate', '/t', 'REG_DWORD', '/d', '1', '/f'])
+                       '/v', 'ExcludeWUDriversInQualityUpdate', '/t', 'REG_DWORD', '/d', '1', '/'])
             try:
                 with winreg.CreateKeyEx(winreg.HKEY_LOCAL_MACHINE, r"SOFTWARE\Microsoft\Windows\CurrentVersion\DriverSearching", 0, winreg.KEY_WRITE) as key:
                     winreg.SetValueEx(key, "SearchOrderConfig", 0, winreg.REG_DWORD, 0)
@@ -1947,7 +1946,7 @@ try {
             except Exception as e:
                 self.emit('task_progress', {'task': 'disable_wu', 'log': f'⚠ {e}'})
             self._run(['reg', 'add', r'HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\DriverSearching',
-                       '/v', 'SearchOrderConfig', '/t', 'REG_DWORD', '/d', '0', '/f'])
+                       '/v', 'SearchOrderConfig', '/t', 'REG_DWORD', '/d', '0', '/'])
             self._run('net stop wuauserv & net start wuauserv', shell=True)
             self.emit('task_progress', {'task': 'disable_wu', 'log': '✅ WU szolgáltatás újraindítva'})
             self.emit('task_complete', {'task': 'disable_wu', 'status': '✅ WU driver letiltás kész!'})
@@ -1993,9 +1992,9 @@ try {
                 self.emit('task_progress', {'task': 'enable_wu', 'log': f'⚠ {e}'})
 
             self._run(['reg', 'add', r'HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\DriverSearching',
-                       '/v', 'SearchOrderConfig', '/t', 'REG_DWORD', '/d', '1', '/f'])
+                       '/v', 'SearchOrderConfig', '/t', 'REG_DWORD', '/d', '1', '/'])
             self._run(['reg', 'delete', r'HKLM\SOFTWARE\Policies\Microsoft\Windows\WindowsUpdate',
-                       '/v', 'ExcludeWUDriversInQualityUpdate', '/f'])
+                       '/v', 'ExcludeWUDriversInQualityUpdate', '/'])
 
             # Stop services
             logging.info("[WU_ENABLE] Szolgáltatások leállítása...")
@@ -2007,7 +2006,7 @@ try {
             sysroot = os.environ.get('SYSTEMROOT', r'C:\Windows')
             sw_dist = os.path.join(sysroot, 'SoftwareDistribution')
             logging.info(f"[WU_ENABLE] SoftwareDistribution törlése: {sw_dist}")
-            self.emit('task_progress', {'task': 'enable_wu', 'log': f'SoftwareDistribution törlése...'})
+            self.emit('task_progress', {'task': 'enable_wu', 'log': 'SoftwareDistribution törlése...'})
             for _ in range(3):
                 try:
                     if os.path.exists(sw_dist):
@@ -2185,7 +2184,7 @@ try {
                     if self._check_cancel():
                         cancelled = True
                         break
-                    inf_folder = os.path.join(folder, inf.replace('.inf', ''))
+                    inf_folder = os.path.join(folder, inf.replace('.in', ''))
                     os.makedirs(inf_folder, exist_ok=True)
                     res = self._run(['pnputil', '/export-driver', inf, inf_folder])
                     if res.returncode == 0:
@@ -2202,7 +2201,7 @@ try {
 
             # Copy inbox drivers (FileRepository + INF)
             if self._check_cancel():
-                self.emit('task_complete', {'task': 'backup', 'status': f'❗ Megszakítva!', 'log': '\n--- MEGSZAKÍTVA! ---'})
+                self.emit('task_complete', {'task': 'backup', 'status': '❗ Megszakítva!', 'log': '\n--- MEGSZAKÍTVA! ---'})
                 return
             self.emit('task_progress', {'task': 'backup', 'log': 'Windows inbox driverek másolása (FileRepository)...', 'indeterminate': True})
             windows_dir = os.path.join(self.target_os_path, 'Windows') if self.target_os_path else os.environ.get('SYSTEMROOT', r'C:\Windows')
@@ -2212,7 +2211,7 @@ try {
             self._run(['robocopy', driverstore, inbox_folder, '/E', '/R:0', '/W:0', '/NFL', '/NDL', '/NJH', '/NJS', '/NC', '/NS', '/NP'])
 
             if self._check_cancel():
-                self.emit('task_complete', {'task': 'backup', 'status': f'❗ Megszakítva!', 'log': '\n--- MEGSZAKÍTVA! ---'})
+                self.emit('task_complete', {'task': 'backup', 'status': '❗ Megszakítva!', 'log': '\n--- MEGSZAKÍTVA! ---'})
                 return
             self.emit('task_progress', {'task': 'backup', 'log': 'Windows INF mappa másolása...'})
             inf_src = os.path.join(windows_dir, 'INF')
@@ -2249,7 +2248,7 @@ try {
                 logging.warning(f"[RESTORE_POINT] Enable-ComputerRestore hiba: {enable_out}")
                 # Try via registry + vssadmin as fallback
                 self.emit('task_progress', {'task': 'rp', 'log': f'⚠ Enable-ComputerRestore hiba: {enable_out}\nRegistry + vssadmin fallback...'})
-                self._run(['reg', 'add', r'HKLM\SOFTWARE\Microsoft\Windows NT\CurrentVersion\SystemRestore', '/v', 'DisableSR', '/t', 'REG_DWORD', '/d', '0', '/f'])
+                self._run(['reg', 'add', r'HKLM\SOFTWARE\Microsoft\Windows NT\CurrentVersion\SystemRestore', '/v', 'DisableSR', '/t', 'REG_DWORD', '/d', '0', '/'])
                 self._run(['vssadmin', 'resize', 'shadowstorage', f'/for={os.environ.get("SystemDrive", "C:")}', f'/on={os.environ.get("SystemDrive", "C:")}', '/maxsize=5%'])
                 # Retry enable
                 enable_res2 = self._run(["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", enable_ps], encoding='utf-8')
@@ -2267,7 +2266,7 @@ try {
             # 2) Disable 24-hour frequency limit
             logging.info("[RESTORE_POINT] 24 órás limit feloldása...")
             self._run(['reg', 'add', r'HKLM\SOFTWARE\Microsoft\Windows NT\CurrentVersion\SystemRestore', 
-                       '/v', 'SystemRestorePointCreationFrequency', '/t', 'REG_DWORD', '/d', '0', '/f'])
+                       '/v', 'SystemRestorePointCreationFrequency', '/t', 'REG_DWORD', '/d', '0', '/'])
 
             # 3) Create restore point
             logging.info("[RESTORE_POINT] Checkpoint-Computer futtatása...")
@@ -2425,7 +2424,7 @@ try {
         
         if efi_letter:
             self.emit('task_progress', {'task': task_name, 'log': f'bcdboot {target_drive}Windows /s {efi_letter} /f UEFI'})
-            res = self._run(['bcdboot', f'{target_drive}Windows', '/s', efi_letter, '/f', 'UEFI'])
+            res = self._run(['bcdboot', f'{target_drive}Windows', '/s', efi_letter, '/', 'UEFI'])
             if res.returncode == 0:
                 success = True
                 self.emit('task_progress', {'task': task_name, 'log': '✅ BCD sikeresen újraépítve (UEFI)!'})
@@ -2443,7 +2442,7 @@ try {
         
         if not success:
             self.emit('task_progress', {'task': task_name, 'log': f'bcdboot {target_drive}Windows /s {target_drive} /f ALL'})
-            res = self._run(['bcdboot', f'{target_drive}Windows', '/s', target_drive, '/f', 'ALL'])
+            res = self._run(['bcdboot', f'{target_drive}Windows', '/s', target_drive, '/', 'ALL'])
             if res.returncode == 0:
                 success = True
                 self.emit('task_progress', {'task': task_name, 'log': '✅ BCD sikeresen újraépítve (ALL)!'})
@@ -2653,7 +2652,7 @@ try {
                             if not os.path.isdir(repo_path):
                                 continue
                             for fname in os.listdir(repo_path):
-                                if fname.lower().endswith('.inf'):
+                                if fname.lower().endswith('.in'):
                                     src_inf = os.path.join(repo_path, fname)
                                     dst_inf = os.path.join(target_inf, fname)
                                     try:
@@ -2675,7 +2674,7 @@ try {
                     item_path = os.path.join(norm_source, item)
                     if os.path.isdir(item_path) and item not in ("_Windows_Inbox_Drivers", "_Windows_Inbox_INF"):
                         # Check if folder contains any .inf files (directly or in subfolders)
-                        has_inf = any(f.lower().endswith('.inf') for _, _, fns in os.walk(item_path) for f in fns)
+                        has_inf = any(f.lower().endswith('.in') for _, _, fns in os.walk(item_path) for f in fns)
                         if has_inf:
                             oem_folders.append(item_path)
 
@@ -3036,7 +3035,7 @@ class CliApi:
                         found_any = True
                         
                     bname = os.path.splitext(pub)[0]
-                    for ext in ['.inf', '.pnf', '.INF', '.PNF']:
+                    for ext in ['.in', '.pn', '.INF', '.PNF']:
                         fpath = os.path.join(inf_dir, bname + ext)
                         if os.path.exists(fpath):
                             self._run(f'takeown /f "{fpath}" /A', shell=True)
@@ -3082,7 +3081,7 @@ class CliApi:
         """Third-party driverek mentése."""
         folder = os.path.join(dest_folder, f"DriverDoktor_Export_{datetime.now().strftime('%Y%m%d_%H%M%S')}")
         os.makedirs(folder, exist_ok=True)
-        print(f"\n💾 Third-party driverek mentése...")
+        print("\n💾 Third-party driverek mentése...")
         print(f"   Cél: {folder}")
         print("-" * 50)
         
@@ -3102,7 +3101,7 @@ class CliApi:
         """Összes driver mentése (OEM + inbox)."""
         folder = os.path.join(dest_folder, f"DriverDoktor_FullExport_{datetime.now().strftime('%Y%m%d_%H%M%S')}")
         os.makedirs(folder, exist_ok=True)
-        print(f"\n💾 ÖSSZES driver mentése...")
+        print("\n💾 ÖSSZES driver mentése...")
         print(f"   Cél: {folder}")
         print("-" * 50)
         
@@ -3122,7 +3121,7 @@ class CliApi:
             
             for i, inf in enumerate(all_infs, 1):
                 print(f"  [{i}/{len(all_infs)}] {inf}... ", end="", flush=True)
-                inf_folder = os.path.join(folder, inf.replace('.inf', ''))
+                inf_folder = os.path.join(folder, inf.replace('.in', ''))
                 os.makedirs(inf_folder, exist_ok=True)
                 res = self._run(['pnputil', '/export-driver', inf, inf_folder])
                 if res.returncode == 0:
@@ -3167,11 +3166,11 @@ class CliApi:
         if online and not self.target_os_path:
             # Online mód - pnputil
             print("🔄 pnputil /add-driver futtatása...")
-            res = self._run(['pnputil', '/add-driver', f"{source_folder}\\*.inf", '/subdirs', '/install'])
+            res = self._run(['pnputil', '/add-driver', f"{source_folder}\\*.in", '/subdirs', '/install'])
             if res.returncode == 0:
                 print("✅ Visszaállítás sikeres!")
             else:
-                print(f"⚠️  Részleges siker vagy hiba. Részletek:")
+                print("⚠️  Részleges siker vagy hiba. Részletek:")
                 print(res.stdout[:500] if res.stdout else res.stderr[:500])
             
             print("\n🔄 Hardverek újraszkennelése...")
@@ -3193,7 +3192,7 @@ class CliApi:
             if res.returncode == 0:
                 print("✅ Visszaállítás sikeres!")
             else:
-                print(f"⚠️  Részleges siker vagy hiba. Néhány inbox driver nem telepíthető DISM-mel.")
+                print("⚠️  Részleges siker vagy hiba. Néhány inbox driver nem telepíthető DISM-mel.")
                 print(res.stdout[:300] if res.stdout else "")
             
             # === BCD JAVÍTÁS (boot loader) ===
@@ -3311,7 +3310,7 @@ class CliApi:
         
         if efi_letter:
             print(f"bcdboot {target_drive}Windows /s {efi_letter} /f UEFI")
-            res = self._run(['bcdboot', f'{target_drive}Windows', '/s', efi_letter, '/f', 'UEFI'])
+            res = self._run(['bcdboot', f'{target_drive}Windows', '/s', efi_letter, '/', 'UEFI'])
             if res.returncode == 0:
                 success = True
                 print("✅ BCD sikeresen újraépítve (UEFI)!")
@@ -3329,7 +3328,7 @@ class CliApi:
         
         if not success:
             print(f"bcdboot {target_drive}Windows /s {target_drive} /f ALL")
-            res = self._run(['bcdboot', f'{target_drive}Windows', '/s', target_drive, '/f', 'ALL'])
+            res = self._run(['bcdboot', f'{target_drive}Windows', '/s', target_drive, '/', 'ALL'])
             if res.returncode == 0:
                 success = True
                 print("✅ BCD sikeresen újraépítve (ALL)!")
@@ -3349,7 +3348,7 @@ class CliApi:
 
     def extract_wim(self, wim_path, dest_folder):
         """WIM-ből gyári driverek kinyerése."""
-        print(f"\n📀 WIM driver kinyerés...")
+        print("\n📀 WIM driver kinyerés...")
         print(f"   WIM: {wim_path}")
         print(f"   Cél: {dest_folder}")
         print("-" * 50)
@@ -3401,7 +3400,7 @@ class CliApi:
             return False
             
         desc = f"DriverDoktor_Backup_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
-        print(f"\n🛡️  Visszaállítási pont létrehozása...")
+        print("\n🛡️  Visszaállítási pont létrehozása...")
         print(f"   Név: {desc}")
         print("-" * 50)
         
@@ -3409,7 +3408,7 @@ class CliApi:
         print("1/2 Rendszervédelem engedélyezése...")
         self._run(["powershell", "-NoProfile", "-Command", 'Enable-ComputerRestore -Drive "$($env:SystemDrive)\\" -ErrorAction SilentlyContinue'])
         self._run(['reg', 'add', r'HKLM\SOFTWARE\Microsoft\Windows NT\CurrentVersion\SystemRestore',
-                   '/v', 'SystemRestorePointCreationFrequency', '/t', 'REG_DWORD', '/d', '0', '/f'])
+                   '/v', 'SystemRestorePointCreationFrequency', '/t', 'REG_DWORD', '/d', '0', '/'])
         
         # Create restore point
         print("2/2 Visszaállítási pont létrehozása...")
@@ -3505,7 +3504,7 @@ class CliApi:
             print(f"  ⚠️  {e}")
         
         self._run(['reg', 'add', r'HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\DriverSearching',
-                   '/v', 'SearchOrderConfig', '/t', 'REG_DWORD', '/d', '0', '/f'])
+                   '/v', 'SearchOrderConfig', '/t', 'REG_DWORD', '/d', '0', '/'])
         
         print("  🔄 WU szolgáltatás újraindítása...")
         self._run('net stop wuauserv & net start wuauserv', shell=True)
@@ -3736,7 +3735,7 @@ try {
                     print(f"\r   {i} másodperc...", end="", flush=True)
                     time.sleep(1)
                 print("\n🔄 Újraindítás MOST!")
-                self._run(['shutdown', '/r', '/t', '0', '/f'])
+                self._run(['shutdown', '/r', '/t', '0', '/'])
             except KeyboardInterrupt:
                 print("\n❌ Újraindítás megszakítva.")
         else:
@@ -3883,7 +3882,7 @@ def run_cli_mode():
         while True:
             print_header()
             status = api.check_wu_status()
-            print(f"""
+            print("""
   🔄 WINDOWS UPDATE BEÁLLÍTÁSOK
   
   Jelenlegi állapot: {status}
@@ -3964,10 +3963,8 @@ if __name__ == "__main__":
     
     if "--cli" in sys.argv:
         if getattr(sys, "frozen", False):
-            import ctypes
             # Attach to the parent console if running from cmd in windowed mode
             if ctypes.windll.kernel32.AttachConsole(-1):
-                import io
                 sys.stdout = open("CONOUT$", "w", encoding="utf-8")
                 sys.stderr = open("CONOUT$", "w", encoding="utf-8")
                 sys.stdin = open("CONIN$", "r", encoding="utf-8")
