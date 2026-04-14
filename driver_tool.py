@@ -2310,6 +2310,210 @@ try {
 
 
 # ================================================================
+# CLI MÓD (WinPE kompatibilis)
+# ================================================================
+def run_cli_mode():
+    """Parancssoros mód - működik WinPE-ben is GUI nélkül."""
+    import argparse
+    
+    print("=" * 60)
+    print("  DriverDoktor CLI - Parancssoros mód")
+    print("  (WinPE kompatibilis)")
+    print("=" * 60)
+    
+    si = subprocess.STARTUPINFO()
+    si.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+    nw = subprocess.CREATE_NO_WINDOW
+    
+    target_os = None
+    
+    def run_cmd(cmd, shell=False):
+        try:
+            if shell:
+                return subprocess.run(cmd, shell=True, capture_output=True, text=True, startupinfo=si, creationflags=nw, timeout=120)
+            else:
+                return subprocess.run(cmd, capture_output=True, text=True, startupinfo=si, creationflags=nw, timeout=120)
+        except Exception as e:
+            class DummyRes:
+                returncode = 1
+                stdout = ""
+                stderr = str(e)
+            return DummyRes()
+    
+    def list_drivers(all_drivers=False):
+        """Driver lista megjelenítése."""
+        print("\n📋 Driverek listázása...")
+        
+        if target_os:
+            # Offline mód
+            res = run_cmd(['dism', f'/Image:{target_os}', '/Get-Drivers', '/Format:Table'])
+        else:
+            res = run_cmd(['pnputil', '/enum-drivers'])
+        
+        if res.returncode != 0:
+            print(f"❌ Hiba: {res.stderr}")
+            return []
+        
+        drivers = []
+        lines = res.stdout.split('\n')
+        
+        for line in lines:
+            line = line.strip()
+            if not line:
+                continue
+            
+            # pnputil formátum: "oem123.inf" vagy "Published Name: oem123.inf"
+            if '.inf' in line.lower():
+                parts = line.split()
+                for p in parts:
+                    if '.inf' in p.lower():
+                        inf_name = p.strip(':').strip()
+                        if not all_drivers and not inf_name.lower().startswith('oem'):
+                            continue
+                        if inf_name not in drivers:
+                            drivers.append(inf_name)
+        
+        if drivers:
+            print(f"\n{'Third-party' if not all_drivers else 'Összes'} driver ({len(drivers)} db):")
+            print("-" * 40)
+            for i, d in enumerate(drivers, 1):
+                print(f"  {i:3}. {d}")
+        else:
+            print("Nincs találat.")
+        
+        return drivers
+    
+    def delete_drivers(drivers, force=False):
+        """Driverek törlése."""
+        print(f"\n🗑️  {len(drivers)} driver törlése...")
+        
+        success = 0
+        fail = 0
+        
+        for d in drivers:
+            print(f"  Törlés: {d}...", end=" ")
+            
+            if target_os:
+                res = run_cmd(['dism', f'/Image:{target_os}', '/Remove-Driver', f'/Driver:{d}'])
+            else:
+                res = run_cmd(['pnputil', '/delete-driver', d, '/uninstall', '/force'])
+            
+            if res.returncode == 0 or 'deleted' in res.stdout.lower() or 'törölve' in res.stdout.lower():
+                print("✅")
+                success += 1
+            else:
+                print("❌")
+                fail += 1
+        
+        print(f"\n--- Eredmény: ✅ {success} sikeres, ❌ {fail} sikertelen ---")
+        return success, fail
+    
+    def export_drivers(output_path):
+        """Driver export DISM-mel."""
+        print(f"\n💾 Driverek mentése: {output_path}")
+        
+        os.makedirs(output_path, exist_ok=True)
+        
+        if target_os:
+            res = run_cmd(['dism', f'/Image:{target_os}', '/Export-Driver', f'/Destination:{output_path}'])
+        else:
+            res = run_cmd(['dism', '/Online', '/Export-Driver', f'/Destination:{output_path}'])
+        
+        if res.returncode == 0:
+            print("✅ Mentés sikeres!")
+            return True
+        else:
+            print(f"❌ Hiba: {res.stderr}")
+            return False
+    
+    def set_target(path):
+        """Cél OS beállítása (offline mód)."""
+        nonlocal target_os
+        if path and os.path.isdir(os.path.join(path, 'Windows')):
+            target_os = path
+            print(f"✅ Cél OS: {target_os}")
+            return True
+        elif path:
+            print(f"❌ Nem található Windows mappa: {path}")
+            return False
+        else:
+            target_os = None
+            print("✅ Visszaállítva: jelenlegi rendszer")
+            return True
+    
+    # Interaktív menü
+    while True:
+        print("\n" + "=" * 40)
+        if target_os:
+            print(f"  [Offline mód: {target_os}]")
+        print("  1. Third-party driverek listázása")
+        print("  2. ÖSSZES driver listázása (veszélyes!)")
+        print("  3. Driver(ek) törlése")
+        print("  4. Driverek mentése (export)")
+        print("  5. Cél OS váltása (offline)")
+        print("  6. Hardver újraszkennelés")
+        print("  0. Kilépés")
+        print("=" * 40)
+        
+        try:
+            choice = input("Választás: ").strip()
+        except (EOFError, KeyboardInterrupt):
+            break
+        
+        if choice == '1':
+            list_drivers(all_drivers=False)
+        
+        elif choice == '2':
+            list_drivers(all_drivers=True)
+        
+        elif choice == '3':
+            all_mode = input("Összes driver mód? (i/n): ").strip().lower() == 'i'
+            drivers = list_drivers(all_drivers=all_mode)
+            if not drivers:
+                continue
+            
+            sel = input("Törlendő sorszámok (pl: 1,3,5 vagy 'mind'): ").strip()
+            
+            if sel.lower() == 'mind':
+                to_delete = drivers
+            else:
+                indices = [int(x.strip())-1 for x in sel.split(',') if x.strip().isdigit()]
+                to_delete = [drivers[i] for i in indices if 0 <= i < len(drivers)]
+            
+            if to_delete:
+                confirm = input(f"Biztosan törölsz {len(to_delete)} drivert? (i/n): ").strip().lower()
+                if confirm == 'i':
+                    delete_drivers(to_delete)
+        
+        elif choice == '4':
+            path = input("Mentés helye (mappa): ").strip()
+            if path:
+                export_drivers(path)
+        
+        elif choice == '5':
+            path = input("Cél OS path (üres = jelenlegi): ").strip()
+            set_target(path if path else None)
+        
+        elif choice == '6':
+            if target_os:
+                print("❌ Offline módban nem elérhető.")
+            else:
+                print("🔄 Hardver újraszkennelés...")
+                res = run_cmd(['pnputil', '/scan-devices'])
+                if res.returncode == 0:
+                    print("✅ Kész!")
+                else:
+                    print(f"❌ Hiba: {res.stderr}")
+        
+        elif choice == '0':
+            print("Viszlát!")
+            break
+        
+        else:
+            print("❌ Érvénytelen választás!")
+
+
+# ================================================================
 # MAIN
 # ================================================================
 if __name__ == "__main__":
@@ -2317,6 +2521,16 @@ if __name__ == "__main__":
     if len(sys.argv) >= 3 and sys.argv[1] == '--progress':
         log_path = sys.argv[2]
         run_progress_window(log_path)
+        sys.exit(0)
+    
+    # CLI mód
+    if '--cli' in sys.argv:
+        if not is_admin():
+            print("❌ Rendszergazdai jogosultság szükséges!")
+            print("   Futtasd rendszergazdaként!")
+            input("Nyomj ENTER-t a kilépéshez...")
+            sys.exit(1)
+        run_cli_mode()
         sys.exit(0)
     
     if not is_admin():
@@ -2370,19 +2584,23 @@ if __name__ == "__main__":
         webview.start(func=on_start, debug=False)
     except Exception as e:
         logging.error(f"[MAIN] WebView indítási hiba: {e}")
-        logging.error("[MAIN] WinPE-ben a WebView2 Runtime szükséges!")
-        import traceback
-        logging.error(traceback.format_exc())
-        # Mutassunk hibaüzenetet
+        logging.error("[MAIN] Automatikus CLI mód indítása...")
+        
+        # Konzol ablak létrehozása ha nincs (windowed exe-nél)
         try:
-            import ctypes
-            ctypes.windll.user32.MessageBoxW(0, 
-                f"A DriverDoktor nem tudott elindulni!\n\n"
-                f"Hiba: {e}\n\n"
-                f"WinPE környezetben a WebView2 Runtime szükséges.\n"
-                f"Próbáld a normál Windows-ból futtatni.",
-                "DriverDoktor - Hiba", 0x10)
-        except:
+            ctypes.windll.kernel32.AllocConsole()
+            # Stdin/stdout/stderr átirányítása az új konzolra
+            sys.stdin = open('CONIN$', 'r')
+            sys.stdout = open('CONOUT$', 'w')
+            sys.stderr = open('CONOUT$', 'w')
+        except Exception:
             pass
+        
+        print("\n" + "=" * 60)
+        print("  ⚠️  GUI nem elérhető - CLI mód automatikusan aktiválva")
+        print(f"  Hiba: {e}")
+        print("=" * 60)
+        
+        run_cli_mode()
     finally:
         os._exit(0)
