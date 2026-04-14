@@ -2921,19 +2921,32 @@ class CliApi:
             parts = line.split(":", 1)
             if len(parts) == 2:
                 key, val = parts[0].strip(), parts[1].strip()
-                if "Published Name" in key or "Published name" in key:
+                if "Published Name" in key or "Közzétett név" in key or "Published name" in key:
                     current["published"] = val
-                elif "Original File Name" in key or "Original name" in key:
+                elif "Original File Name" in key or "Eredeti fájlnév" in key or "Original name" in key:
                     current["original"] = val
-                elif "Provider Name" in key or "Provider" in key:
+                elif "Provider Name" in key or "Szolgáltató neve" in key or "Provider" in key:
                     current["provider"] = val
-                elif "Class Name" in key:
+                elif "Class Name" in key or "Osztálynév" in key:
                     current["class"] = val
-                elif "Date and Version" in key:
+                elif "Date and Version" in key or "Dátum és verzió" in key:
                     current["version"] = val
         if current and "published" in current:
             drivers.append(current)
-        return drivers
+            
+        valid_drivers = []
+        rep = os.path.join(self.target_os_path, "Windows", "System32", "DriverStore", "FileRepository")
+        for d in drivers:
+            pub = d.get("published", "")
+            if not pub:
+                continue
+            if pub.lower().startswith("oem"):
+                valid_drivers.append(d)
+                continue
+            if glob.glob(os.path.join(rep, f"{pub}_*")):
+                valid_drivers.append(d)
+                
+        return valid_drivers
     
     def list_drivers(self, all_drivers=False):
         """Driver lista megjelenítése."""
@@ -3062,7 +3075,10 @@ class CliApi:
         print(f"   Cél: {folder}")
         print("-" * 50)
         
-        res = self._run(['dism', '/online', '/export-driver', f'/destination:{folder}'])
+        if self.target_os_path:
+            res = self._run(['dism', f'/Image:{self.target_os_path}', '/export-driver', f'/destination:{folder}'])
+        else:
+            res = self._run(['dism', '/online', '/export-driver', f'/destination:{folder}'])
         
         if res.returncode == 0:
             print("✅ Mentés sikeres!")
@@ -3079,28 +3095,37 @@ class CliApi:
         print(f"   Cél: {folder}")
         print("-" * 50)
         
+        success = 0
         # OEM driverek
         print("1/3 OEM driverek exportálása...")
-        enum_res = self._run(['pnputil', '/enum-drivers'])
-        all_infs = re.findall(r'(oem\d+\.inf)', enum_res.stdout, re.I)
-        
-        success = 0
-        for i, inf in enumerate(all_infs, 1):
-            print(f"  [{i}/{len(all_infs)}] {inf}... ", end="", flush=True)
-            inf_folder = os.path.join(folder, inf.replace('.inf', ''))
-            os.makedirs(inf_folder, exist_ok=True)
-            res = self._run(['pnputil', '/export-driver', inf, inf_folder])
+        if self.target_os_path:
+            res = self._run(['dism', f'/Image:{self.target_os_path}', '/export-driver', f'/destination:{folder}'])
             if res.returncode == 0:
-                print("✅")
-                success += 1
+                print("   ✅ OEM export sikeres (DISM offline)")
+                success = 1
             else:
-                print("❌")
-        
-        print(f"   OEM: {success}/{len(all_infs)} exportálva")
+                print("   ❌ OEM export hiba")
+        else:
+            enum_res = self._run(['pnputil', '/enum-drivers'])
+            all_infs = re.findall(r'(oem\d+\.inf)', enum_res.stdout, re.I)
+            
+            for i, inf in enumerate(all_infs, 1):
+                print(f"  [{i}/{len(all_infs)}] {inf}... ", end="", flush=True)
+                inf_folder = os.path.join(folder, inf.replace('.inf', ''))
+                os.makedirs(inf_folder, exist_ok=True)
+                res = self._run(['pnputil', '/export-driver', inf, inf_folder])
+                if res.returncode == 0:
+                    print("✅")
+                    success += 1
+                else:
+                    print("❌")
+            
+            print(f"   OEM: {success}/{len(all_infs)} exportálva")
         
         # FileRepository (inbox)
         print("2/3 Windows inbox driverek (FileRepository) másolása...")
-        driverstore = os.path.join(os.environ.get('SYSTEMROOT', r'C:\Windows'), 'System32', 'DriverStore', 'FileRepository')
+        windows_dir = os.path.join(self.target_os_path, 'Windows') if self.target_os_path else os.environ.get('SYSTEMROOT', r'C:\Windows')
+        driverstore = os.path.join(windows_dir, 'System32', 'DriverStore', 'FileRepository')
         inbox_folder = os.path.join(folder, '_Windows_Inbox_Drivers')
         os.makedirs(inbox_folder, exist_ok=True)
         self._run(['robocopy', driverstore, inbox_folder, '/E', '/R:0', '/W:0', '/NFL', '/NDL', '/NJH', '/NJS', '/NC', '/NS', '/NP'])
@@ -3108,7 +3133,7 @@ class CliApi:
         
         # INF mappa
         print("3/3 Windows INF mappa másolása...")
-        inf_src = os.path.join(os.environ.get('SYSTEMROOT', r'C:\Windows'), 'INF')
+        inf_src = os.path.join(windows_dir, 'INF')
         inbox_inf = os.path.join(folder, '_Windows_Inbox_INF')
         os.makedirs(inbox_inf, exist_ok=True)
         self._run(['robocopy', inf_src, inbox_inf, '/E', '/R:0', '/W:0', '/NFL', '/NDL', '/NJH', '/NJS', '/NC', '/NS', '/NP'])
@@ -3359,6 +3384,10 @@ class CliApi:
     
     def create_restore_point(self):
         """Visszaállítási pont létrehozása."""
+        if self.target_os_path:
+            print("\n❌ Hiba: Visszaállítási pont csak Élő rendszeren készíthető!")
+            return False
+            
         desc = f"DriverDoktor_Backup_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
         print(f"\n🛡️  Visszaállítási pont létrehozása...")
         print(f"   Név: {desc}")
@@ -3386,7 +3415,11 @@ class CliApi:
         """Önálló BCD javítás CLI módban."""
         print("\n🔧 BCD BOOT HIBA JAVÍTÁSA")
         print("-" * 50)
-        target = input("Add meg a HALOTT Windows meghajtóját (pl: D:\\): ").strip()
+        
+        target = self.target_os_path
+        if not target:
+            target = input("Add meg a HALOTT Windows meghajtóját (pl: D:\\): ").strip()
+            
         if not target:
             print("❌ Nincs meghajtó megadva!")
             return False
