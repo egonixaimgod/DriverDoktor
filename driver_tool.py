@@ -1,4 +1,4 @@
-BUILD_NUMBER = 76
+BUILD_NUMBER = 77
 
 import os
 import sys
@@ -707,55 +707,150 @@ class DriverToolApi:
         self.emit('task_progress', {'task': 'restore', 'log': '\n--- BOOT LOADER (BCD) JAVÍTÁS ---'})
         
         target_drive = target_drive.rstrip('\\') + '\\'
+        target_letter = target_drive[0].upper()
         windows_path = os.path.join(target_drive, 'Windows')
         
         if not os.path.exists(windows_path):
             self.emit('task_progress', {'task': 'restore', 'log': f'⚠️ Windows mappa nem található: {windows_path}'})
             return False
         
-        # 1. EFI partíció keresése (UEFI rendszereknél)
-        self.emit('task_progress', {'task': 'restore', 'log': 'EFI partíció keresése...'})
+        self.emit('task_progress', {'task': 'restore', 'log': f'Cél Windows meghajtó: {target_drive}'})
         
+        # 1. Megkeressük melyik DISK-en van a Windows partíció
+        self.emit('task_progress', {'task': 'restore', 'log': 'A Windows meghajtó lemezének azonosítása...'})
+        
+        disk_number = None
         efi_letter = None
+        
         try:
-            # Diskpart-tal megkeressük az EFI partíciót
-            diskpart_script = 'list volume\n'
-            res = self._run(['diskpart'], input=diskpart_script, text=True, timeout=30)
+            # Diskpart script: volume-ok listázása
+            diskpart_list = (
+                f'list volume\n'
+            )
+            res = self._run(['diskpart'], input=diskpart_list, text=True, timeout=30)
             
             if res.returncode == 0 and res.stdout:
                 lines = res.stdout.splitlines()
+                target_volume = None
+                
+                # Megkeressük a Windows volume számát
                 for line in lines:
-                    # FAT32 partíció ~100-550MB (EFI)
-                    if 'FAT32' in line.upper():
-                        parts = line.split()
+                    parts = line.split()
+                    if len(parts) >= 3:
+                        # Volume X  Ltr  Label  Fs  Type  Size  Status
+                        # Volume 2   D           NTFS  Partition  100GB  Healthy
                         for i, p in enumerate(parts):
-                            if p.upper() == 'FAT32' and i >= 2:
-                                # Volume szám és betűjel
-                                vol_letter = parts[2] if len(parts) > 2 else None
-                                if vol_letter and len(vol_letter) == 1 and vol_letter.isalpha():
-                                    efi_letter = vol_letter + ':'
+                            if p.upper() == target_letter and i >= 1:
+                                try:
+                                    target_volume = int(parts[1])
+                                except (ValueError, IndexError):
+                                    pass
+                                break
+                
+                if target_volume is not None:
+                    self.emit('task_progress', {'task': 'restore', 'log': f'Windows volume: {target_volume}'})
+                    
+                    # Megkeressük melyik disk-en van
+                    diskpart_detail = (
+                        f'select volume {target_volume}\n'
+                        f'detail volume\n'
+                    )
+                    res2 = self._run(['diskpart'], input=diskpart_detail, text=True, timeout=30)
+                    
+                    if res2.returncode == 0 and res2.stdout:
+                        for line in res2.stdout.splitlines():
+                            if 'Disk' in line and '#' not in line:
+                                # "Disk 0" vagy "Lemez 0"
+                                parts = line.split()
+                                for i, p in enumerate(parts):
+                                    if p.isdigit():
+                                        disk_number = int(p)
+                                        break
+                                if disk_number is not None:
                                     break
-                        if efi_letter:
-                            break
+                    
+                    if disk_number is not None:
+                        self.emit('task_progress', {'task': 'restore', 'log': f'Lemez: Disk {disk_number}'})
+                        
+                        # EFI partíció keresése EZEN a lemezen
+                        diskpart_efi = (
+                            f'select disk {disk_number}\n'
+                            f'list partition\n'
+                        )
+                        res3 = self._run(['diskpart'], input=diskpart_efi, text=True, timeout=30)
+                        
+                        efi_partition = None
+                        if res3.returncode == 0 and res3.stdout:
+                            for line in res3.stdout.splitlines():
+                                line_upper = line.upper()
+                                # EFI/System típusú partíció keresése
+                                if 'SYSTEM' in line_upper or 'EFI' in line_upper:
+                                    parts = line.split()
+                                    for i, p in enumerate(parts):
+                                        if p.isdigit() and i >= 1:
+                                            efi_partition = int(p)
+                                            break
+                                    if efi_partition:
+                                        break
+                        
+                        if efi_partition:
+                            self.emit('task_progress', {'task': 'restore', 'log': f'EFI partíció: Partition {efi_partition}'})
+                            
+                            # EFI partícióhoz betűjel rendelése
+                            # Keresünk egy szabad betűjelet
+                            used_letters = set()
+                            for line in lines:
+                                parts = line.split()
+                                for p in parts:
+                                    if len(p) == 1 and p.isalpha():
+                                        used_letters.add(p.upper())
+                            
+                            free_letter = None
+                            for c in 'STUVWXYZ':
+                                if c not in used_letters:
+                                    free_letter = c
+                                    break
+                            
+                            if free_letter:
+                                diskpart_assign = (
+                                    f'select disk {disk_number}\n'
+                                    f'select partition {efi_partition}\n'
+                                    f'assign letter={free_letter}\n'
+                                )
+                                res4 = self._run(['diskpart'], input=diskpart_assign, text=True, timeout=30)
+                                if res4.returncode == 0:
+                                    efi_letter = free_letter + ':'
+                                    self.emit('task_progress', {'task': 'restore', 'log': f'EFI betűjel hozzárendelve: {efi_letter}'})
         except Exception as e:
             logging.warning(f"[BCD] Diskpart hiba: {e}")
+            self.emit('task_progress', {'task': 'restore', 'log': f'⚠️ Lemez azonosítási hiba: {e}'})
         
         # 2. bcdboot futtatása
         success = False
         
         if efi_letter:
-            # UEFI mód - EFI partícióra
-            self.emit('task_progress', {'task': 'restore', 'log': f'EFI partíció: {efi_letter}'})
+            # UEFI mód - a megtalált EFI partícióra
             self.emit('task_progress', {'task': 'restore', 'log': f'bcdboot {target_drive}Windows /s {efi_letter} /f UEFI'})
             res = self._run(['bcdboot', f'{target_drive}Windows', '/s', efi_letter, '/f', 'UEFI'])
             if res.returncode == 0:
                 success = True
                 self.emit('task_progress', {'task': 'restore', 'log': '✅ BCD sikeresen újraépítve (UEFI)!'})
             else:
-                self.emit('task_progress', {'task': 'restore', 'log': f'⚠️ UEFI bcdboot hiba: {res.stderr[:200] if res.stderr else res.stdout[:200]}'})
+                self.emit('task_progress', {'task': 'restore', 'log': f'⚠️ UEFI bcdboot hiba, fallback...'})
+            
+            # EFI betűjel eltávolítása
+            try:
+                diskpart_remove = (
+                    f'select disk {disk_number}\n'
+                    f'select partition {efi_partition}\n'
+                    f'remove letter={efi_letter[0]}\n'
+                )
+                self._run(['diskpart'], input=diskpart_remove, text=True, timeout=30)
+            except Exception:
+                pass
         
         if not success:
-            # BIOS/Legacy mód vagy UEFI fallback - célmeghajtóra
+            # BIOS/Legacy mód vagy UEFI fallback - a Windows meghajtóra /f ALL
             self.emit('task_progress', {'task': 'restore', 'log': f'bcdboot {target_drive}Windows /s {target_drive} /f ALL'})
             res = self._run(['bcdboot', f'{target_drive}Windows', '/s', target_drive, '/f', 'ALL'])
             if res.returncode == 0:
@@ -764,7 +859,7 @@ class DriverToolApi:
             else:
                 self.emit('task_progress', {'task': 'restore', 'log': f'⚠️ bcdboot hiba: {res.stderr[:200] if res.stderr else res.stdout[:200]}'})
         
-        # 3. bootrec parancsok (ha van)
+        # 3. bootrec parancsok (ha még mindig nem sikerült)
         if not success:
             self.emit('task_progress', {'task': 'restore', 'log': 'bootrec parancsok futtatása...'})
             for cmd in ['/fixmbr', '/fixboot', '/rebuildbcd']:
@@ -2822,37 +2917,145 @@ class CliApi:
         return True
     
     def _repair_bcd_cli(self, target_drive):
-        """BCD újraépítése CLI módban."""
+        """BCD újraépítése CLI módban - megkeresi a megfelelő lemezen az EFI-t."""
         print("\n" + "-" * 50)
         print("🔧 BOOT LOADER (BCD) JAVÍTÁS")
         print("-" * 50)
         
         target_drive = target_drive.rstrip('\\') + '\\'
+        target_letter = target_drive[0].upper()
         windows_path = os.path.join(target_drive, 'Windows')
         
         if not os.path.exists(windows_path):
             print(f"⚠️  Windows mappa nem található: {windows_path}")
             return False
         
-        # 1. Próbáljuk a bcdboot ALL módban (működik UEFI és BIOS-on is)
-        print(f"1/2 bcdboot {target_drive}Windows /s {target_drive} /f ALL")
-        res = self._run(['bcdboot', f'{target_drive}Windows', '/s', target_drive, '/f', 'ALL'])
+        print(f"Cél Windows meghajtó: {target_drive}")
         
-        if res.returncode == 0:
-            print("✅ BCD sikeresen újraépítve!")
-            return True
-        else:
-            print(f"⚠️  bcdboot hiba, bootrec parancsok futtatása...")
+        # 1. Megkeressük melyik DISK-en van a Windows partíció
+        print("A Windows meghajtó lemezének azonosítása...")
         
-        # 2. Fallback: bootrec parancsok
-        print("2/2 bootrec parancsok...")
-        for cmd in ['/fixmbr', '/fixboot', '/rebuildbcd']:
-            print(f"  bootrec {cmd}... ", end="", flush=True)
-            res = self._run(['bootrec', cmd])
+        disk_number = None
+        efi_letter = None
+        efi_partition = None
+        
+        try:
+            # Volume-ok listázása
+            res = self._run(['diskpart'], input='list volume\n', text=True, timeout=30)
+            
+            if res.returncode == 0 and res.stdout:
+                lines = res.stdout.splitlines()
+                target_volume = None
+                
+                # Windows volume keresése
+                for line in lines:
+                    parts = line.split()
+                    if len(parts) >= 3:
+                        for i, p in enumerate(parts):
+                            if p.upper() == target_letter and i >= 1:
+                                try:
+                                    target_volume = int(parts[1])
+                                except (ValueError, IndexError):
+                                    pass
+                                break
+                
+                if target_volume is not None:
+                    print(f"Windows volume: {target_volume}")
+                    
+                    # Disk azonosítása
+                    res2 = self._run(['diskpart'], input=f'select volume {target_volume}\ndetail volume\n', text=True, timeout=30)
+                    
+                    if res2.returncode == 0 and res2.stdout:
+                        for line in res2.stdout.splitlines():
+                            if 'Disk' in line and '#' not in line:
+                                parts = line.split()
+                                for p in parts:
+                                    if p.isdigit():
+                                        disk_number = int(p)
+                                        break
+                                if disk_number is not None:
+                                    break
+                    
+                    if disk_number is not None:
+                        print(f"Lemez: Disk {disk_number}")
+                        
+                        # EFI partíció keresése ezen a lemezen
+                        res3 = self._run(['diskpart'], input=f'select disk {disk_number}\nlist partition\n', text=True, timeout=30)
+                        
+                        if res3.returncode == 0 and res3.stdout:
+                            for line in res3.stdout.splitlines():
+                                line_upper = line.upper()
+                                if 'SYSTEM' in line_upper or 'EFI' in line_upper:
+                                    parts = line.split()
+                                    for i, p in enumerate(parts):
+                                        if p.isdigit() and i >= 1:
+                                            efi_partition = int(p)
+                                            break
+                                    if efi_partition:
+                                        break
+                        
+                        if efi_partition:
+                            print(f"EFI partíció: Partition {efi_partition}")
+                            
+                            # Szabad betűjel keresése
+                            used_letters = set()
+                            for line in lines:
+                                parts = line.split()
+                                for p in parts:
+                                    if len(p) == 1 and p.isalpha():
+                                        used_letters.add(p.upper())
+                            
+                            free_letter = None
+                            for c in 'STUVWXYZ':
+                                if c not in used_letters:
+                                    free_letter = c
+                                    break
+                            
+                            if free_letter:
+                                res4 = self._run(['diskpart'], 
+                                    input=f'select disk {disk_number}\nselect partition {efi_partition}\nassign letter={free_letter}\n',
+                                    text=True, timeout=30)
+                                if res4.returncode == 0:
+                                    efi_letter = free_letter + ':'
+                                    print(f"EFI betűjel: {efi_letter}")
+        except Exception as e:
+            print(f"⚠️  Lemez azonosítási hiba: {e}")
+        
+        # 2. bcdboot futtatása
+        success = False
+        
+        if efi_letter:
+            print(f"bcdboot {target_drive}Windows /s {efi_letter} /f UEFI")
+            res = self._run(['bcdboot', f'{target_drive}Windows', '/s', efi_letter, '/f', 'UEFI'])
             if res.returncode == 0:
-                print("✅")
+                success = True
+                print("✅ BCD sikeresen újraépítve (UEFI)!")
             else:
-                print("⚠️")
+                print("⚠️  UEFI bcdboot hiba, fallback...")
+            
+            # EFI betűjel eltávolítása
+            try:
+                self._run(['diskpart'], 
+                    input=f'select disk {disk_number}\nselect partition {efi_partition}\nremove letter={efi_letter[0]}\n',
+                    text=True, timeout=30)
+            except Exception:
+                pass
+        
+        if not success:
+            print(f"bcdboot {target_drive}Windows /s {target_drive} /f ALL")
+            res = self._run(['bcdboot', f'{target_drive}Windows', '/s', target_drive, '/f', 'ALL'])
+            if res.returncode == 0:
+                success = True
+                print("✅ BCD sikeresen újraépítve (ALL)!")
+            else:
+                print("⚠️  bcdboot hiba, bootrec parancsok...")
+        
+        if not success:
+            print("bootrec parancsok...")
+            for cmd in ['/fixmbr', '/fixboot', '/rebuildbcd']:
+                print(f"  bootrec {cmd}... ", end="", flush=True)
+                res = self._run(['bootrec', cmd])
+                print("✅" if res.returncode == 0 else "⚠️")
         
         print("-" * 50)
         print("✅ BCD javítás befejezve!")
