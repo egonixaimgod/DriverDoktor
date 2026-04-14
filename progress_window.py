@@ -9,8 +9,14 @@ import os
 import sys
 import json
 import time
-import webview
 import threading
+
+# Ellenőrizzük hogy van-e pywebview
+try:
+    import webview
+except ImportError:
+    print("HIBA: pywebview nincs telepítve! pip install pywebview")
+    sys.exit(1)
 
 # Software rendering bekapcsolása - GPU független
 os.environ['WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS'] = (
