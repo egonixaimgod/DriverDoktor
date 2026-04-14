@@ -2256,7 +2256,7 @@ try {
             # 2) Disable 24-hour frequency limit
             logging.info("[RESTORE_POINT] 24 órás limit feloldása...")
             self._run(['reg', 'add', r'HKLM\SOFTWARE\Microsoft\Windows NT\CurrentVersion\SystemRestore', 
-                       '/v', 'SystemRestorePointCreationFrequency', '/t', 'REG_DWORD', '/d', '0', '/'])
+                       '/v', 'SystemRestorePointCreationFrequency', '/t', 'REG_DWORD', '/d', '0', '/f'])
 
             # 3) Create restore point
             logging.info("[RESTORE_POINT] Checkpoint-Computer futtatása...")
@@ -3395,7 +3395,7 @@ class CliApi:
         print("1/2 Rendszervédelem engedélyezése...")
         self._run(["powershell", "-NoProfile", "-Command", 'Enable-ComputerRestore -Drive "$($env:SystemDrive)\\" -ErrorAction SilentlyContinue'])
         self._run(['reg', 'add', r'HKLM\SOFTWARE\Microsoft\Windows NT\CurrentVersion\SystemRestore',
-                   '/v', 'SystemRestorePointCreationFrequency', '/t', 'REG_DWORD', '/d', '0', '/'])
+                   '/v', 'SystemRestorePointCreationFrequency', '/t', 'REG_DWORD', '/d', '0', '/f'])
         
         # Create restore point
         print("2/2 Visszaállítási pont létrehozása...")
