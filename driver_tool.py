@@ -575,8 +575,8 @@ class DriverToolApi:
     # ================================================================
     # DRIVER DELETION
     # ================================================================
-    def delete_drivers(self, published_names, list_all=False):
-        logging.info(f"[API] delete_drivers() - {len(published_names)} driver, list_all={list_all}")
+    def delete_drivers(self, published_names, list_all=False, reboot=False):
+        logging.info(f"[API] delete_drivers() - {len(published_names)} driver, list_all={list_all}, reboot={reboot}")
         logging.info(f"[DELETE] Törlendő driverek: {published_names}")
         self._cancel_flag = False
         def worker():
@@ -681,6 +681,12 @@ class DriverToolApi:
                 self.emit('task_complete', {'task': 'delete', 'success': success, 'fail': fail,
                                             'counter': f'✅ {success} / ❌ {fail}',
                                             'status': f'Kész! Sikeres: {success}, Sikertelen: {fail}'})
+                
+                # Újraindítás ha kérték
+                if reboot and success > 0:
+                    self.emit('task_progress', {'task': 'delete', 'log': '\n🔄 Újraindítás 5 másodperc múlva...'})
+                    time.sleep(5)
+                    self._run(['shutdown', '/r', '/t', '0', '/f'])
 
         self._safe_thread('delete', worker)
 

@@ -232,6 +232,11 @@ td input[type="checkbox"]{accent-color:var(--accent);width:16px;height:16px}
           <div class="toolbar">
             <button class="btn" onclick="loadDrivers()">🔄 Frissítés</button>
             <button class="btn btn-danger" onclick="deleteSelected()" id="btn-delete" disabled>🗑 Kijelöltek Törlése</button>
+            <label class="toggle" title="Törlés után automatikusan újraindítja a gépet" style="margin-left:10px;">
+              <input type="checkbox" id="reboot-after-delete">
+              <span class="toggle-track"></span>
+              Törlés után azonnali újraindítás
+            </label>
             <button class="btn" onclick="selectAllDrivers()">☑ Mind Kijelölése</button>
             <div class="toolbar-right">
               <label class="toggle" title="FIGYELEM: Gyári driverek törlése tönkreteheti a rendszert!">
@@ -561,10 +566,12 @@ async function deleteSelected() {
     toast('Nincs érvényes driver kijelölve!', 'error');
     return;
   }
-  const ok = await showConfirm('Megerősítés', 'Biztosan törlöd a kiválasztott ' + names.length + ' drivert és eltávolítod az eszközökről is?');
+  const reboot = document.getElementById('reboot-after-delete').checked;
+  const msg = 'Biztosan törlöd a kiválasztott ' + names.length + ' drivert?' + (reboot ? '\n\n🔄 A gép ÚJRAINDUL a törlés után!' : '');
+  const ok = await showConfirm('Megerősítés', msg);
   if (!ok) return;
   try {
-    await api().delete_drivers(names, listAll);
+    await api().delete_drivers(names, listAll, reboot);
   } catch (e) {
     toast('Hiba a törlés során: ' + e, 'error');
   }
