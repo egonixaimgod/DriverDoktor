@@ -938,7 +938,7 @@ try {
             total = len(selected_pool)
             self.emit('task_start', {'task': 'wu_install', 'title': f'Katalógus Driver Telepítés ({total} db)'})
 
-            temp_dir = os.path.join(os.environ.get('TEMP', 'C:\\Temp'), 'driver_tool_wu')
+            temp_dir = os.path.join(os.environ.get('TEMP', 'C:\\Temp'), 'driverdoktor_wu')
             os.makedirs(temp_dir, exist_ok=True)
             logging.debug(f"[CATALOG_INSTALL] Temp dir: {temp_dir}")
             success = 0
@@ -1475,7 +1475,7 @@ try {
         self._cancel_flag = False
 
         def worker():
-            folder = os.path.join(dest, f"Driver_Backup_{datetime.now().strftime('%Y%m%d_%H%M%S')}")
+            folder = os.path.join(dest, f"DriverDoktor_Export_{datetime.now().strftime('%Y%m%d_%H%M%S')}")
             logging.info(f"[BACKUP] Célmappa létrehozása: {folder}")
             os.makedirs(folder, exist_ok=True)
             self.emit('task_start', {'task': 'backup', 'title': 'Driver Exportálás'})
@@ -1525,7 +1525,7 @@ try {
         self._cancel_flag = False
 
         def worker():
-            folder = os.path.join(dest, f"ALL_Driver_Backup_{datetime.now().strftime('%Y%m%d_%H%M%S')}")
+            folder = os.path.join(dest, f"DriverDoktor_FullExport_{datetime.now().strftime('%Y%m%d_%H%M%S')}")
             os.makedirs(folder, exist_ok=True)
             self.emit('task_start', {'task': 'backup', 'title': 'ÖSSZES Driver Exportálása'})
             self.emit('task_progress', {'task': 'backup', 'log': 'Driver lista lekérdezése...', 'indeterminate': True})
@@ -1587,7 +1587,7 @@ try {
         logging.info("[API] create_restore_point()")
         def worker():
             logging.info("[RESTORE_POINT] Worker indult - visszaállítási pont létrehozása...")
-            desc = f"Driver_Cleaner_Backup_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+            desc = f"DriverDoktor_Backup_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
             logging.info(f"[RESTORE_POINT] Név: {desc}")
             self.emit('task_start', {'task': 'rp', 'title': 'Visszaállítási Pont'})
             self.emit('task_progress', {'task': 'rp', 'log': 'Rendszervédelem engedélyezése...', 'indeterminate': True})
@@ -1640,8 +1640,8 @@ try {
                 logging.info(f"[RESTORE_POINT] Sikeresen létrehozva: {desc}")
                 self.emit('task_complete', {'task': 'rp', 'status': f'✅ Visszaállítási pont létrehozva: {desc}'})
             elif 'OK' in create_out:
-                logging.warning("[RESTORE_POINT] Lefutott de nem ellenőrizhető (24 órás limit?)")
-                self.emit('task_complete', {'task': 'rp', 'status': '⚠ Lefutott de nem ellenőrizhető (24 órás limit?)'})
+                logging.warning("[RESTORE_POINT] Lefutott de nem ellenőrizhető (késleltetett létrehozás?)")
+                self.emit('task_complete', {'task': 'rp', 'status': '⚠ Visszaállítási pont létrehozás elindítva (ellenőrzés később)'})
             else:
                 logging.error(f"[RESTORE_POINT] Hiba: {create_out}")
                 self.emit('task_complete', {'task': 'rp', 'status': f'❌ Hiba: {create_out}'})
@@ -1808,8 +1808,8 @@ try {
                 self.emit('task_progress', {'task': 'restore', 'log': '✅ A fizikai másolás + DISM regisztrálás kész. Az inbox driverek a másolásnak köszönhetően elérhetőek.'})
 
             elif has_inbox_subfolder:
-                # ALL_Driver_Backup_* formátum: _Windows_Inbox_Drivers + oem almanák
-                self.emit('task_progress', {'task': 'restore', 'log': 'ALL_Driver_Backup formátum észlelve.\n'
+                # DriverDoktor_FullExport / ALL_Driver_Backup formátum: _Windows_Inbox_Drivers + oem almappák
+                self.emit('task_progress', {'task': 'restore', 'log': 'Teljes export formátum észlelve (DriverDoktor_FullExport / ALL_Driver_Backup).\n'
                                             'Az inbox drivereket fizikailag másoljuk (DISM nem tudja telepíteni őket),\n'
                                             'az OEM drivereket DISM-mel regisztráljuk.\n'})
 
@@ -1882,7 +1882,7 @@ try {
                     self.emit('task_progress', {'task': 'restore', 'log': '\nNincs OEM driver mappa a backup-ban.'})
 
             else:
-                # Egyéb mappa (pl. Driver_Backup_* third-party export) — tisztán DISM
+                # Egyéb mappa (pl. DriverDoktor_Export / Driver_Backup third-party export) — tisztán DISM
                 _, dism_cancelled = run_dism_add_driver(norm_source, "")
                 if dism_cancelled:
                     self.emit('task_complete', {'task': 'restore', 'status': '❗ Megszakítva!'})
