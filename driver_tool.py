@@ -1,4 +1,4 @@
-BUILD_NUMBER = 55
+BUILD_NUMBER = 68
 
 import os
 import sys
@@ -29,6 +29,10 @@ try:
 except AttributeError:
     _FOLDER_DIALOG = webview.FOLDER_DIALOG
     _OPEN_DIALOG = webview.OPEN_DIALOG
+
+# WebView2 init state (watchdog)
+_webview_ready = threading.Event()
+_webview_error = threading.Event()
 
 # Suppress noisy PIL/Pillow debug logging
 logging.getLogger('PIL').setLevel(logging.WARNING)
@@ -266,18 +270,25 @@ class DriverToolApi:
         logging.info("[INIT] DriverToolApi kész.")
 
     def set_window(self, window):
+        global _webview_ready, _webview_error
         logging.info("[WINDOW] WebView ablak beállítása...")
         self._window = window
         # Wait for WebView2 DOM to be ready
+        dom_ready = False
         for i in range(50):
             try:
                 if self._window and self._window.evaluate_js('1+1') == 2:
                     logging.info(f"[WINDOW] WebView2 DOM kész ({i+1} próba után)")
+                    dom_ready = True
+                    _webview_ready.set()
                     break
             except Exception as e:
                 if i == 49:
                     logging.warning(f"[WINDOW] WebView2 DOM nem reagál: {e}")
             time.sleep(0.1)
+        if not dom_ready:
+            logging.error("[WINDOW] WebView2 init sikertelen, watchdog átveszi...")
+            _webview_error.set()
 
     def emit(self, event, data=None):
         # Log minden emit event-et
@@ -2551,11 +2562,22 @@ if __name__ == "__main__":
         logging.basicConfig(level=logging.DEBUG)
 
     def global_exception_handler(exc_type, exc_value, exc_traceback):
+        global _webview_error
+        err_str = str(exc_value)
         logging.exception("FATÁLIS HIBA:", exc_info=(exc_type, exc_value, exc_traceback))
+        # WebView2 hibák detektálása
+        if 'WebView2' in err_str or 'ICoreWebView2' in err_str or '.NET' in err_str:
+            logging.error("[MAIN] WebView2 hiba detektálva exception handler-ben!")
+            _webview_error.set()
     sys.excepthook = global_exception_handler
 
     def thread_exception_handler(args):
+        global _webview_error
+        err_str = str(args.exc_value)
         logging.exception("HÁTTÉRSZÁL HIBA:", exc_info=(args.exc_type, args.exc_value, args.exc_traceback))
+        if 'WebView2' in err_str or 'ICoreWebView2' in err_str or '.NET' in err_str:
+            logging.error("[MAIN] WebView2 hiba detektálva szál exception handler-ben!")
+            _webview_error.set()
     threading.excepthook = thread_exception_handler
 
     logging.info("=" * 50)
@@ -2579,13 +2601,49 @@ if __name__ == "__main__":
     def on_start():
         api.set_window(window)
 
+    # Watchdog: ha 15mp alatt nem indul el a GUI, bezárja az ablakot és CLI-re vált
+    def webview_watchdog():
+        global _webview_ready, _webview_error
+        TIMEOUT = 15  # seconds
+        start = time.time()
+        while time.time() - start < TIMEOUT:
+            if _webview_ready.is_set():
+                logging.info("[WATCHDOG] WebView2 sikeresen elindult")
+                return  # GUI OK
+            if _webview_error.is_set():
+                logging.error("[WATCHDOG] WebView2 hiba detektálva, ablak bezárása...")
+                time.sleep(0.5)  # Adj időt a log kiírására
+                try:
+                    window.destroy()
+                except Exception:
+                    pass
+                return
+            time.sleep(0.25)
+        # Timeout
+        logging.error(f"[WATCHDOG] {TIMEOUT}s timeout - WebView2 nem válaszol, ablak bezárása...")
+        _webview_error.set()
+        try:
+            window.destroy()
+        except Exception:
+            pass
+
+    watchdog_thread = threading.Thread(target=webview_watchdog, daemon=True)
+    watchdog_thread.start()
+
+    gui_failed = False
     try:
         logging.info("[MAIN] webview.start() hívása...")
         webview.start(func=on_start, debug=False)
+        # webview.start() visszatért - ellenőrizzük hogy sikeres volt-e
+        if not _webview_ready.is_set() or _webview_error.is_set():
+            gui_failed = True
+            logging.info("[MAIN] GUI nem indult el sikeresen, CLI mód következik...")
     except Exception as e:
+        gui_failed = True
         logging.error(f"[MAIN] WebView indítási hiba: {e}")
         logging.error("[MAIN] Automatikus CLI mód indítása...")
-        
+    
+    if gui_failed:
         # Konzol ablak létrehozása ha nincs (windowed exe-nél)
         try:
             ctypes.windll.kernel32.AllocConsole()
@@ -2598,9 +2656,9 @@ if __name__ == "__main__":
         
         print("\n" + "=" * 60)
         print("  ⚠️  GUI nem elérhető - CLI mód automatikusan aktiválva")
-        print(f"  Hiba: {e}")
+        print("  (Telepítsd a WebView2 Runtime-ot a GUI-hoz)")
         print("=" * 60)
         
         run_cli_mode()
-    finally:
-        os._exit(0)
+    
+    os._exit(0)
