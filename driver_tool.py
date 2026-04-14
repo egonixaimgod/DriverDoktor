@@ -1170,7 +1170,6 @@ class DriverToolApi:
                 time_str = f"{_m} perc {_s} mp" if _m else f"{_s} mp"
                 mode = "WU API" if self.wu_api_mode else "Katalógus"
                 found = len(self.hw_updates_pool)
-                installed = len(self._hw_installed_devs)
                 final_sys = f"{sys_info_text} | ✅ Kész ({mode})! {found} frissítés ({total_devs} eszköz)"
 
                 self.emit('hw_scan_result', {
@@ -3868,7 +3867,7 @@ def run_cli_mode():
         while True:
             print_header()
             status = api.check_wu_status()
-            print("""
+            print(f"""
   🔄 WINDOWS UPDATE BEÁLLÍTÁSOK
   
   Jelenlegi állapot: {status}
