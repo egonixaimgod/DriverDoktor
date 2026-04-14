@@ -1,4 +1,4 @@
-BUILD_NUMBER = 71
+BUILD_NUMBER = 72
 
 import os
 import sys
@@ -2704,13 +2704,13 @@ if __name__ == "__main__":
     logging.info(f"Futtatasi konyvtar: {os.getcwd()}")
     logging.info("=" * 50)
 
-    # WebView2 Runtime verzió ellenőrzés induláskor
+    # WebView2 Runtime verzió ellenőrzés induláskor (csak figyelmeztetés, nem blokkoló)
     wv2_ok, wv2_info = check_webview2_runtime()
     if wv2_ok:
         logging.info(f"[INIT] WebView2 Runtime OK: v{wv2_info}")
     else:
-        logging.error(f"[INIT] WebView2 Runtime hiba: {wv2_info}")
-        show_webview2_error(wv2_info)
+        logging.warning(f"[INIT] WebView2 Runtime figyelmeztetés: {wv2_info}")
+        logging.info("[INIT] GUI megpróbálása mindenképp, CLI fallback elérhető...")
 
     # Hardware rendering (gyors) - az autofix progress külön ablakban jelenik meg
 
