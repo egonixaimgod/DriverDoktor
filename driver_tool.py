@@ -1061,53 +1061,37 @@ try {
             with open(self._autofix_log_path, 'w', encoding='utf-8') as f:
                 pass
             
-            # Progress window script path és Python interpreter keresése
+            # Progress window keresése
             if getattr(sys, 'frozen', False):
-                # PyInstaller exe - keressük a progress_window.py-t az exe mellett
+                # PyInstaller exe mód - progress_window.exe-t keressük az exe mellett
                 base_path = os.path.dirname(sys.executable)
-                progress_script = os.path.join(base_path, 'progress_window.py')
+                progress_exe = os.path.join(base_path, 'progress_window.exe')
                 
-                # Keressünk Python interpretert a rendszeren
-                python_exe = None
-                python_paths = [
-                    r'C:\Python312\python.exe',
-                    r'C:\Python311\python.exe',
-                    r'C:\Python310\python.exe',
-                    r'C:\Python39\python.exe',
-                    os.path.expandvars(r'%LOCALAPPDATA%\Programs\Python\Python312\python.exe'),
-                    os.path.expandvars(r'%LOCALAPPDATA%\Programs\Python\Python311\python.exe'),
-                ]
-                for p in python_paths:
-                    if os.path.exists(p):
-                        python_exe = p
-                        break
-                
-                # Ha nincs Python, próbáljuk meg a where paranccsal
-                if not python_exe:
-                    try:
-                        result = subprocess.run(['where', 'python'], capture_output=True, text=True, timeout=5)
-                        if result.returncode == 0 and result.stdout.strip():
-                            python_exe = result.stdout.strip().split('\n')[0].strip()
-                    except Exception:
-                        pass
+                if os.path.exists(progress_exe):
+                    self._autofix_window_proc = subprocess.Popen(
+                        [progress_exe, self._autofix_log_path],
+                        creationflags=subprocess.CREATE_NO_WINDOW
+                    )
+                    logging.info(f"[AUTOFIX] Progress ablak indítva (EXE): {progress_exe}")
+                else:
+                    logging.warning(f"[AUTOFIX] Progress exe nem található: {progress_exe}")
+                    self._autofix_window_proc = None
             else:
-                # Development mód - használjuk a jelenlegi Python-t
+                # Development mód - Python scriptként futtatjuk
                 base_path = os.path.dirname(os.path.abspath(__file__))
                 progress_script = os.path.join(base_path, 'progress_window.py')
-                python_exe = sys.executable
+                
+                if os.path.exists(progress_script):
+                    self._autofix_window_proc = subprocess.Popen(
+                        [sys.executable, progress_script, self._autofix_log_path],
+                        creationflags=subprocess.CREATE_NO_WINDOW
+                    )
+                    logging.info(f"[AUTOFIX] Progress ablak indítva (DEV): {progress_script}")
+                else:
+                    logging.warning(f"[AUTOFIX] Progress script nem található: {progress_script}")
+                    self._autofix_window_proc = None
             
-            # Ha megvan a script és a Python, indítsuk el külön processben
-            if os.path.exists(progress_script) and python_exe and os.path.exists(python_exe):
-                self._autofix_window_proc = subprocess.Popen(
-                    [python_exe, progress_script, self._autofix_log_path],
-                    creationflags=subprocess.CREATE_NO_WINDOW
-                )
-                logging.info(f"[AUTOFIX] Progress ablak indítva: {progress_script} (Python: {python_exe})")
-            else:
-                logging.warning(f"[AUTOFIX] Progress ablak nem indítható - script: {progress_script}, python: {python_exe}")
-                self._autofix_window_proc = None
-            
-            # Megnyitjuk a log fájlt írásra (a title update fallback mindig működik)
+            # Megnyitjuk a log fájlt írásra
             self._autofix_log_file = open(self._autofix_log_path, 'w', encoding='utf-8', buffering=1)
             logging.info(f"[AUTOFIX] Progress log: {self._autofix_log_path}")
         except Exception as e:
