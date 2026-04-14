@@ -1250,9 +1250,10 @@ try {
             # Töröljük a régi fájlt ha van
             if os.path.exists(self._autofix_log_path):
                 os.remove(self._autofix_log_path)
-            # Létrehozzuk üres fájlként
-            with open(self._autofix_log_path, 'w', encoding='utf-8') as f:
-                pass
+            
+            # Megnyitjuk a log fájlt írásra ELŐSZÖR (mielőtt a subprocess elindul)
+            self._autofix_log_file = open(self._autofix_log_path, 'w', encoding='utf-8', buffering=1)
+            logging.info(f"[AUTOFIX] Progress log létrehozva: {self._autofix_log_path}")
             
             # Az exe önmagát hívja meg --progress argumentummal
             # Ez mind frozen, mind dev módban működik
@@ -1261,10 +1262,6 @@ try {
                 creationflags=subprocess.CREATE_NO_WINDOW
             )
             logging.info(f"[AUTOFIX] Progress ablak indítva: {sys.executable} --progress")
-            
-            # Megnyitjuk a log fájlt írásra
-            self._autofix_log_file = open(self._autofix_log_path, 'w', encoding='utf-8', buffering=1)
-            logging.info(f"[AUTOFIX] Progress log: {self._autofix_log_path}")
         except Exception as e:
             logging.error(f"[AUTOFIX] Progress ablak nyitási hiba: {e}")
             self._autofix_log_file = None
