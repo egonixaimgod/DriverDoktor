@@ -1001,6 +1001,11 @@ class DriverToolApi:
     # ================================================================
     def start_hw_scan(self):
         logging.info("[API] start_hw_scan() hívás")
+        if self.target_os_path:
+            self.emit('toast', {'message': '❌ Hiba: Hardver keresés csak Élő rendszeren működik!', 'type': 'error'})
+            self.emit('hw_scan_result', {'pool': [], 'installed': [], 'sys_info': '❌ Offline módban nem elérhető', 'time': ''})
+            return
+
         if self._hw_scanning:
             logging.warning("[HW_SCAN] Már fut egy scan!")
             return
@@ -1616,6 +1621,12 @@ try {
 
     def start_autofix(self):
         logging.info("[API] start_autofix() - 1 KATTINTÁSOS DRIVER FIX INDÍTVA!")
+        
+        if self.target_os_path:
+            self.emit('toast', {'message': '❌ Hiba: Az 1 Kattintásos Fix (Autofix) csak Élő (Online) rendszeren futtatható!', 'type': 'error'})
+            self.emit('task_error', {'task': 'autofix', 'error': 'Ezt a funkciót nem használhatod Offline módban!'})
+            return
+
         logging.info("=" * 60)
         logging.info("[AUTOFIX] TELJES DRIVER ÚJRATELEPÍTÉS INDÍTÁSA")
         logging.info("=" * 60)
@@ -1870,6 +1881,8 @@ try {
     # ================================================================
     def check_wu_status(self):
         logging.info("[API] check_wu_status()")
+        if self.target_os_path:
+            return {'status': 'Offline (Nem olvasható)', 'color': 'unknown'}
         try:
             policy_disabled = False
             search_disabled = False
@@ -1904,6 +1917,9 @@ try {
 
     def disable_wu(self):
         logging.info("[API] disable_wu()")
+        if self.target_os_path:
+            self.emit('toast', {'message': '❌ Hiba: A Windows Update beállítások csak Élő rendszeren módosíthatók!', 'type': 'error'})
+            return
         def worker():
             logging.info("[WU] WU driver letiltás indítása...")
             self.emit('task_start', {'task': 'disable_wu', 'title': 'WU Driver Letiltás'})
@@ -1931,6 +1947,9 @@ try {
 
     def enable_wu(self):
         logging.info("[API] enable_wu()")
+        if self.target_os_path:
+            self.emit('toast', {'message': '❌ Hiba: A Windows Update beállítások csak Élő rendszeren módosíthatók!', 'type': 'error'})
+            return
         def worker():
             logging.info("[WU_ENABLE] Worker indult - WU engedélyezés és reset...")
             self.emit('task_start', {'task': 'enable_wu', 'title': 'WU Driver Engedélyezés + Reset'})
@@ -2038,6 +2057,9 @@ try {
 
     def restart_wu(self):
         logging.info("[API] restart_wu()")
+        if self.target_os_path:
+            self.emit('toast', {'message': '❌ Hiba: A Windows Update szolgáltatások csak Élő rendszeren indíthatók újra!', 'type': 'error'})
+            return
         def worker():
             logging.info("[WU_RESTART] Worker indult - szolgáltatások újraindítása...")
             self.emit('task_start', {'task': 'restart_wu', 'title': 'WU Szolgáltatások Újraindítása'})
@@ -2084,8 +2106,9 @@ try {
             self.emit('task_progress', {'task': 'backup', 'log': f'Célmappa: {folder}\nExportálás indítása...', 'indeterminate': True})
 
             logging.info("[BACKUP] DISM export-driver futtatása...")
+            dism_cmd = ['dism', f'/Image:{self.target_os_path}', '/export-driver', f'/destination:{folder}'] if self.target_os_path else ['dism', '/online', '/export-driver', f'/destination:{folder}']
             process = subprocess.Popen(
-                ['dism', '/online', '/export-driver', f'/destination:{folder}'],
+                dism_cmd,
                 stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
                 startupinfo=self._si, creationflags=self._nw, errors='replace')
 
@@ -2133,26 +2156,35 @@ try {
             self.emit('task_start', {'task': 'backup', 'title': 'ÖSSZES Driver Exportálása'})
             self.emit('task_progress', {'task': 'backup', 'log': 'Driver lista lekérdezése...', 'indeterminate': True})
 
-            enum_res = self._run(['pnputil', '/enum-drivers'])
-            all_infs = re.findall(r'(oem\d+\.inf)', enum_res.stdout, re.I)
-            self.emit('task_progress', {'task': 'backup', 'log': f'OEM driverek: {len(all_infs)} db'})
-
             success = 0
             fail = 0
             cancelled = False
-            for i, inf in enumerate(all_infs):
-                if self._check_cancel():
-                    cancelled = True
-                    break
-                inf_folder = os.path.join(folder, inf.replace('.inf', ''))
-                os.makedirs(inf_folder, exist_ok=True)
-                res = self._run(['pnputil', '/export-driver', inf, inf_folder])
+
+            if self.target_os_path:
+                self.emit('task_progress', {'task': 'backup', 'log': 'DISM export indítása a kiválasztott rendszerből...'})
+                res = self._run(['dism', f'/Image:{self.target_os_path}', '/export-driver', f'/destination:{folder}'])
                 if res.returncode == 0:
                     success += 1
                 else:
                     fail += 1
-                self.emit('task_progress', {'task': 'backup', 'current': i + 1, 'total': len(all_infs),
-                                            'counter': f'{i+1}/{len(all_infs)}', 'status': f'Export: {inf}'})
+            else:
+                enum_res = self._run(['pnputil', '/enum-drivers'])
+                all_infs = re.findall(r'(oem\d+\.inf)', enum_res.stdout, re.I)
+                self.emit('task_progress', {'task': 'backup', 'log': f'OEM driverek: {len(all_infs)} db'})
+
+                for i, inf in enumerate(all_infs):
+                    if self._check_cancel():
+                        cancelled = True
+                        break
+                    inf_folder = os.path.join(folder, inf.replace('.inf', ''))
+                    os.makedirs(inf_folder, exist_ok=True)
+                    res = self._run(['pnputil', '/export-driver', inf, inf_folder])
+                    if res.returncode == 0:
+                        success += 1
+                    else:
+                        fail += 1
+                    self.emit('task_progress', {'task': 'backup', 'current': i + 1, 'total': len(all_infs),
+                                                'counter': f'{i+1}/{len(all_infs)}', 'status': f'Export: {inf}'})
 
             if cancelled:
                 self.emit('task_complete', {'task': 'backup', 'status': f'❗ Megszakítva! OEM: {success} db exportálva',
@@ -2164,7 +2196,8 @@ try {
                 self.emit('task_complete', {'task': 'backup', 'status': f'❗ Megszakítva!', 'log': '\n--- MEGSZAKÍTVA! ---'})
                 return
             self.emit('task_progress', {'task': 'backup', 'log': 'Windows inbox driverek másolása (FileRepository)...', 'indeterminate': True})
-            driverstore = os.path.join(os.environ.get('SYSTEMROOT', r'C:\Windows'), 'System32', 'DriverStore', 'FileRepository')
+            windows_dir = os.path.join(self.target_os_path, 'Windows') if self.target_os_path else os.environ.get('SYSTEMROOT', r'C:\Windows')
+            driverstore = os.path.join(windows_dir, 'System32', 'DriverStore', 'FileRepository')
             inbox_folder = os.path.join(folder, '_Windows_Inbox_Drivers')
             os.makedirs(inbox_folder, exist_ok=True)
             self._run(['robocopy', driverstore, inbox_folder, '/E', '/R:0', '/W:0', '/NFL', '/NDL', '/NJH', '/NJS', '/NC', '/NS', '/NP'])
@@ -2173,7 +2206,7 @@ try {
                 self.emit('task_complete', {'task': 'backup', 'status': f'❗ Megszakítva!', 'log': '\n--- MEGSZAKÍTVA! ---'})
                 return
             self.emit('task_progress', {'task': 'backup', 'log': 'Windows INF mappa másolása...'})
-            inf_src = os.path.join(os.environ.get('SYSTEMROOT', r'C:\Windows'), 'INF')
+            inf_src = os.path.join(windows_dir, 'INF')
             inbox_inf_folder = os.path.join(folder, '_Windows_Inbox_INF')
             os.makedirs(inbox_inf_folder, exist_ok=True)
             self._run(['robocopy', inf_src, inbox_inf_folder, '/E', '/R:0', '/W:0', '/NFL', '/NDL', '/NJH', '/NJS', '/NC', '/NS', '/NP'])
@@ -2182,12 +2215,15 @@ try {
                              if os.path.exists(os.path.join(dp, f)))
             size_mb = total_size / (1024 * 1024)
             self.emit('task_complete', {'task': 'backup',
-                                        'status': f'✅ Kész! OEM: {success} db ({fail} sikertelen), Inbox másolva. Méret: {size_mb:.0f} MB',
+                                        'status': f'✅ Kész! OEM: {"Sikeres" if success else "Sikertelen"}, Inbox másolva. Méret: {size_mb:.0f} MB',
                                         'log': f'\n--- Export kész: {folder} ({size_mb:.0f} MB) | Sikeres: {success}, Sikertelen: {fail} ---'})
         self._safe_thread('backup', worker)
 
     def create_restore_point(self):
         logging.info("[API] create_restore_point()")
+        if self.target_os_path:
+            self.emit('toast', {'message': '❌ Hiba: Visszaállítási pont csak Élő rendszeren készíthető!', 'type': 'error'})
+            return
         def worker():
             logging.info("[RESTORE_POINT] Worker indult - visszaállítási pont létrehozása...")
             desc = f"DriverDoktor_Backup_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
