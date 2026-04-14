@@ -499,23 +499,31 @@ function updateTargetLabel(path, sysDrive) {
   }
 }
 async function changeTarget() {
-  const res = await api().change_target_os();
-  if (!res) return;
-  if (!res.has_windows) {
-    const ok = await showConfirm('Nincs Windows mappa', 'Nem találok Windows mappát ezen az útvonalon:\n' + res.path + '\n\nBiztosan ezt választod?');
-    if (!ok) return;
+  try {
+    const res = await api().change_target_os();
+    if (!res) return;
+    if (!res.has_windows) {
+      const ok = await showConfirm('Nincs Windows mappa', 'Nem találok Windows mappát ezen az útvonalon:\n' + res.path + '\n\nBiztosan ezt választod?');
+      if (!ok) return;
+    }
+    await api().apply_target_os(res.path);
+    updateTargetLabel(res.path);
+    toast('Célpont beállítva: ' + res.path, 'info');
+    loadDrivers();
+  } catch (e) {
+    toast('Hiba a célpont váltásakor: ' + e, 'error');
   }
-  await api().apply_target_os(res.path);
-  updateTargetLabel(res.path);
-  toast('Célpont beállítva: ' + res.path, 'info');
-  loadDrivers();
 }
 async function resetTarget() {
-  await api().reset_target_os();
-  const data = await api().get_init_data();
-  updateTargetLabel(null, data.sys_drive);
-  toast('Visszaállítva: jelenlegi rendszer', 'success');
-  loadDrivers();
+  try {
+    await api().reset_target_os();
+    const data = await api().get_init_data();
+    updateTargetLabel(null, data.sys_drive);
+    toast('Visszaállítva: jelenlegi rendszer', 'success');
+    loadDrivers();
+  } catch (e) {
+    toast('Hiba a visszaállítás során: ' + e, 'error');
+  }
 }
 
 /* ========== DRIVER LIST ========== */
@@ -823,7 +831,11 @@ async function restoreDrivers() {
     'ÉLŐRENDSZERRE (erre a futó Windowsra) akarod visszatenni a drivereket?',
     'Igen (Élő mód)', 'Nem (Offline WinPE)', 'Mégse');
   if (choice === true) {
-    await api().restore_online();
+    try {
+      await api().restore_online();
+    } catch (e) {
+      toast('Élő visszaállítási hiba: ' + e, 'error');
+    }
   } else if (choice === false) {
     const ok = await showConfirm('Offline Visszaállítás Lépései', 
       'OFFLINE módot választottál.\n\nA folyamat a következőképpen fog lezajlani:\n\n' +
@@ -833,7 +845,11 @@ async function restoreDrivers() {
       '   Ezután ki kell választanod azt a mappát, ahol a lementett drivereid vannak (pl. a WIM-ből kinyert driverek mappája).\n\n' +
       'Készen állsz a varázsló indítására?');
     if (ok) {
-      await api().restore_offline();
+      try {
+        await api().restore_offline();
+      } catch (e) {
+        toast('Offline visszaállítási hiba: ' + e, 'error');
+      }
     }
   }
 }
@@ -841,7 +857,11 @@ async function extractWim() {
   const ok = await showConfirm('ISO / WIM Alap Driver Kinyerés',
     'Ezzel az opcióval egy hivatalos Windows ISO sources\\install.wim fájljából bányásszuk ki a TISZTA Windows drivereket.\n\nAkarod folytatni?');
   if (!ok) return;
-  await api().extract_wim();
+  try {
+    await api().extract_wim();
+  } catch (e) {
+    toast('WIM kinyerési hiba: ' + e, 'error');
+  }
 }
 
 /* ========== PROGRESS MODAL ========== */
