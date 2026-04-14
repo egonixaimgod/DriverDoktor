@@ -2049,6 +2049,10 @@ if __name__ == "__main__":
     logging.info(f"Futtatasi konyvtar: {os.getcwd()}")
     logging.info("=" * 50)
 
+    # WebView2 software rendering - GPU driver törléskor is működik az ablak
+    os.environ['WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS'] = '--disable-gpu --disable-gpu-compositing'
+    logging.info("[WEBVIEW] Software rendering mód bekapcsolva (GPU-független)")
+
     api = DriverToolApi()
     html_path = resource_path('ui.html')
 
