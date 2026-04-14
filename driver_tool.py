@@ -2977,17 +2977,62 @@ class CliApi:
             pub = drv.get('published', '?')
             print(f"  [{i}/{total}] {pub}... ", end="", flush=True)
             
-            if is_offline:
+            is_oem = pub.lower().startswith("oem")
+            
+            if is_offline and is_oem:
                 res = self._run(['dism', f'/Image:{self.target_os_path}', '/Remove-Driver', f'/Driver:{pub}'])
-            else:
+            elif not is_offline:
                 res = self._run(['pnputil', '/delete-driver', pub, '/uninstall', '/force'])
+            else:
+                class DummyRes:
+                    returncode = 1
+                    stdout = ""
+                res = DummyRes()
             
             if res.returncode == 0 or any(k in res.stdout.lower() for k in ['deleted', 'törölve', 'successfully']):
                 print("✅")
                 success += 1
             else:
-                print("❌")
-                fail += 1
+                if not is_oem:
+                    found_any = False
+                    if is_offline:
+                        rep = os.path.join(self.target_os_path, "Windows", "System32", "DriverStore", "FileRepository")
+                        inf_dir = os.path.join(self.target_os_path, "Windows", "INF")
+                    else:
+                        rep = os.path.join(os.environ.get('SYSTEMROOT', r'C:\Windows'), "System32", "DriverStore", "FileRepository")
+                        inf_dir = os.path.join(os.environ.get('SYSTEMROOT', r'C:\Windows'), "INF")
+                    
+                    dirs = glob.glob(os.path.join(rep, f"{pub}_*"))
+                    if dirs:
+                        for d in dirs:
+                            self._run(f'takeown /f "{d}" /r /d y', shell=True)
+                            self._run(f'icacls "{d}" /grant *S-1-5-32-544:F /t', shell=True)
+                            shutil.rmtree(d, ignore_errors=True)
+                            self._run(f'rmdir /s /q "{d}"', shell=True)
+                        found_any = True
+                        
+                    bname = os.path.splitext(pub)[0]
+                    for ext in ['.inf', '.pnf', '.INF', '.PNF']:
+                        fpath = os.path.join(inf_dir, bname + ext)
+                        if os.path.exists(fpath):
+                            self._run(f'takeown /f "{fpath}" /A', shell=True)
+                            self._run(f'icacls "{fpath}" /grant *S-1-5-32-544:F', shell=True)
+                            try:
+                                os.remove(fpath)
+                                found_any = True
+                            except OSError:
+                                self._run(f'del /f /q "{fpath}"', shell=True)
+                                found_any = True
+                    
+                    if found_any:
+                        print("✅ (force)")
+                        success += 1
+                    else:
+                        print("❌")
+                        fail += 1
+                else:
+                    print("❌")
+                    fail += 1
         
         print("-" * 50)
         print(f"✅ Sikeres: {success}  |  ❌ Sikertelen: {fail}")
@@ -3390,6 +3435,10 @@ class CliApi:
     
     def disable_wu_drivers(self):
         """WU driver frissítések letiltása."""
+        if self.target_os_path:
+            print("\n❌ Hiba: A Windows Update beállítások csak Élő rendszeren módosíthatók!")
+            return
+            
         print("\n⛔ WU driver frissítések letiltása...")
         print("-" * 50)
         
@@ -3421,6 +3470,10 @@ class CliApi:
     
     def enable_wu_drivers(self):
         """WU driver frissítések engedélyezése + teljes reset."""
+        if self.target_os_path:
+            print("\n❌ Hiba: A Windows Update beállítások csak Élő rendszeren módosíthatók!")
+            return
+            
         print("\n✅ WU driver frissítések engedélyezése + reset...")
         print("-" * 50)
         
@@ -3465,6 +3518,10 @@ class CliApi:
     
     def restart_wu_services(self):
         """WU szolgáltatások újraindítása."""
+        if self.target_os_path:
+            print("\n❌ Hiba: A Windows Update beállítások csak Élő rendszeren módosíthatók!")
+            return
+            
         print("\n🔄 WU szolgáltatások újraindítása...")
         print("-" * 50)
         
@@ -3491,6 +3548,10 @@ class CliApi:
     # ================================================================
     def autofix(self):
         """Teljes automatikus driver fix (mint a GUI-ban)."""
+        if self.target_os_path:
+            print("\n❌ Hiba: Az 1 Kattintásos Fix (Autofix) csak Élő (Online) rendszeren futtatható!")
+            return
+            
         print("\n" + "=" * 60)
         print("  ⚡ 1 KATTINTÁSOS AUTOMATIKUS DRIVER FIX")
         print("=" * 60)
