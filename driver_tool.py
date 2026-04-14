@@ -510,6 +510,11 @@ class DriverToolApi:
         logging.info(f"[API] get_init_data() hívás - build={BUILD_NUMBER}, target={self.target_os_path}")
         return {'build': BUILD_NUMBER, 'sys_drive': self.sys_drive, 'target_os': self.target_os_path}
 
+    def reboot_system(self):
+        logging.info("[API] reboot_system() - Felhasználó újraindítást kért")
+        self._run(['shutdown', '/r', '/t', '0', '/f'])
+        return True
+
     def cancel_task(self):
         """API hívás a hosszan tartó műveletek (pl. törlés) megszakítására."""
         logging.warning("[API] cancel_task() — Felhasználó megszakítást kért!")
@@ -1842,17 +1847,16 @@ try {
             # PHASE 6: Reboot (only if changes were made)
             changes_made = (del_success > 0) or (install_success > 0)
             if changes_made:
-                self.emit('task_progress', {'task': 'autofix', 'phase': '🔵 6. FÁZIS: Újraindítás',
-                                            'log': f'\n{"=" * 50}\nFÁZIS 6: Újraindítás 30 másodperc múlva!\n\n⚡ Teljes idő: {elapsed()}'})
-                for c in range(30, 0, -1):
-                    if check_cancel(): return
-                    self.emit('task_progress', {'task': 'autofix', 'counter': f'Újraindítás {c} mp múlva...', 'current': 30 - c, 'total': 30})
-                    time.sleep(1)
-
-                self.emit('task_progress', {'task': 'autofix', 'log': '🔄 Újraindítás MOST!'})
-                self.emit('task_complete', {'task': 'autofix', 'status': '🔄 Újraindítás...', 'counter': 'Reboot'})
+                self.emit('task_progress', {'task': 'autofix', 'phase': '🔵 6. FÁZIS: Befejezve, újraindításra várva',
+                                            'log': f'\n{"=" * 50}\nDriverek sikeresen frissítve!\n\n⚡ Teljes idő: {elapsed()}'})
+                self.emit('task_progress', {'task': 'autofix', 'log': '🔄 Várakozás a felhasználó döntésére az újraindításról...'})
+                self.emit('task_complete', {'task': 'autofix', 'status': '✅ Újraindítás szükséges', 'counter': 'Keresés...'})
                 self._close_autofix_progress_window()
-                self._run(['shutdown', '/r', '/t', '0', '/f'])
+
+                # Front-end ask_reboot modal
+                time.sleep(1)
+                self.emit('ask_reboot', {})
+                
             else:
                 self.emit('task_progress', {'task': 'autofix', 'phase': '✅ KÉSZ',
                                             'log': f'\n{"=" * 50}\nNem történt változás - újraindítás nem szükséges.\n\n⚡ Teljes idő: {elapsed()}'})

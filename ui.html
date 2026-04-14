@@ -462,6 +462,11 @@ window.handlePyEvent = function(payload) {
     case 'wu_status':
       updateWuStatus(data);
       break;
+    case 'ask_reboot':
+      showConfirm('Újraindítás Szükséges', 'A driverek telepítése sikeresen befejeződött.\n\nSzeretnéd most AZONNAL újraindítani a számítógépet a változások érvénybe lépéséhez?').then(res => {
+        if (res === true) api().reboot_system();
+      });
+      break;
     case 'alert':
       showAlert(data.title || 'Értesítés', data.message || '', data.type);
       break;
@@ -850,6 +855,19 @@ function showProgressModal(title, phase) {
   document.getElementById('mp-progress-fill').style.width = '0%';
   document.getElementById('mp-progress').classList.remove('progress-indeterminate');
   
+  if (currentTask === 'autofix') {
+    document.getElementById('mp-log').style.display = 'none';
+    document.getElementById('mp-progress').style.display = 'none';
+    document.getElementById('mp-counter').style.display = 'none';
+    document.getElementById('mp-time').style.display = 'none';
+    document.getElementById('mp-status').innerHTML = '<br><br><span style="font-size:16px;color:var(--green)">⚡ A folyamat részletei a külső, biztonságos ablakban láthatóak.</span><br><br>Ezt a főablakot addig zároltuk, amíg a folyamat be nem fejeződik.';
+  } else {
+    document.getElementById('mp-log').style.display = 'block';
+    document.getElementById('mp-progress').style.display = 'block';
+    document.getElementById('mp-counter').style.display = 'block';
+    document.getElementById('mp-time').style.display = 'block';
+  }
+
   // Reset button states
   const closeBtn = document.getElementById('mp-close-btn');
   const cancelBtn = document.getElementById('mp-cancel-btn');
@@ -870,6 +888,9 @@ function showProgressModal(title, phase) {
 function updateProgressModal(data) {
   if (data.phase) document.getElementById('mp-phase').textContent = data.phase;
   if (data.title) document.getElementById('mp-title').textContent = data.title;
+  
+  if (currentTask === 'autofix') return;
+  
   if (data.status) document.getElementById('mp-status').textContent = data.status;
   if (data.counter) document.getElementById('mp-counter').textContent = data.counter;
   if (data.log) appendLog(data.log);
@@ -899,9 +920,11 @@ function onTaskComplete(data) {
   document.getElementById('mp-close-btn').style.display = 'inline-flex';
   document.getElementById('mp-cancel-btn').style.display = 'none';
   
-  if (data.log) appendLog(data.log);
-  if (data.status) document.getElementById('mp-status').textContent = data.status;
-  if (data.counter) document.getElementById('mp-counter').textContent = data.counter;
+  if (data.task !== 'autofix') {
+    if (data.log) appendLog(data.log);
+    if (data.status) document.getElementById('mp-status').textContent = data.status;
+    if (data.counter) document.getElementById('mp-counter').textContent = data.counter;
+  }
   
   // Refresh relevant views
   if (data.task === 'delete' || data.task === 'restore') setTimeout(loadDrivers, 500);
@@ -920,7 +943,11 @@ async function cancelTask() {
     const cancelBtn = document.getElementById('mp-cancel-btn');
     cancelBtn.disabled = true;
     cancelBtn.textContent = '⏳ Megszakítás...';
-    document.getElementById('mp-status').textContent = '⏳ Megszakítás folyamatban...';
+    if (currentTask !== 'autofix') {
+      document.getElementById('mp-status').textContent = '⏳ Megszakítás folyamatban...';
+    } else {
+      document.getElementById('mp-status').innerHTML += '<br><br><span style="color:var(--yellow)">⏳ Megszakítás folyamatban... Várd meg amíg az alfolyamatok leállnak!</span>';
+    }
     try {
       await api().cancel_task();
     } catch (e) {
