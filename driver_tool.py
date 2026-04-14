@@ -1,4 +1,4 @@
-BUILD_NUMBER = 73
+BUILD_NUMBER = 74
 
 import os
 import sys
@@ -3359,13 +3359,31 @@ if __name__ == "__main__":
     logging.info(f"Futtatasi konyvtar: {os.getcwd()}")
     logging.info("=" * 50)
 
-    # WebView2 Runtime verzió ellenőrzés induláskor (csak figyelmeztetés, nem blokkoló)
+    # WebView2 Runtime verzió ellenőrzés - ha túl régi, egyből CLI mód
     wv2_ok, wv2_info = check_webview2_runtime()
     if wv2_ok:
         logging.info(f"[INIT] WebView2 Runtime OK: v{wv2_info}")
     else:
-        logging.warning(f"[INIT] WebView2 Runtime figyelmeztetés: {wv2_info}")
-        logging.info("[INIT] GUI megpróbálása mindenképp, CLI fallback elérhető...")
+        logging.warning(f"[INIT] WebView2 nem megfelelő: {wv2_info}")
+        logging.info("[INIT] GUI nem indítható - EGYBŐL CLI mód!")
+        
+        # Konzol ablak létrehozása (windowed exe-nél nincs)
+        try:
+            ctypes.windll.kernel32.AllocConsole()
+            sys.stdin = open('CONIN$', 'r')
+            sys.stdout = open('CONOUT$', 'w')
+            sys.stderr = open('CONOUT$', 'w')
+        except Exception:
+            pass
+        
+        print("\n" + "=" * 60)
+        print("  ⚠️  WebView2 Runtime túl régi vagy hiányzik!")
+        print("  📋 CLI MÓD automatikusan aktiválva")
+        print("  💡 GUI-hoz frissítsd: https://go.microsoft.com/fwlink/p/?LinkId=2124703")
+        print("=" * 60)
+        
+        run_cli_mode()
+        os._exit(0)
 
     # Hardware rendering (gyors) - az autofix progress külön ablakban jelenik meg
 
