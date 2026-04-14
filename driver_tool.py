@@ -1,4 +1,4 @@
-BUILD_NUMBER = 72
+BUILD_NUMBER = 73
 
 import os
 import sys
@@ -2440,29 +2440,24 @@ try {
 
 
 # ================================================================
-# CLI MÓD (WinPE kompatibilis)
+# CLI MÓD - Teljes funkcionalitás (GUI tükör)
 # ================================================================
-def run_cli_mode():
-    """Parancssoros mód - működik WinPE-ben is GUI nélkül."""
-    import argparse
+class CliApi:
+    """CLI verzió API - ugyanazokat a funkciókat hívja mint a GUI, de konzolra ír."""
     
-    print("=" * 60)
-    print("  DriverDoktor CLI - Parancssoros mód")
-    print("  (WinPE kompatibilis)")
-    print("=" * 60)
+    def __init__(self):
+        self.target_os_path = None
+        self.sys_drive = os.environ.get('SystemDrive', 'C:') + '\\'
+        self._si = subprocess.STARTUPINFO()
+        self._si.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+        self._nw = subprocess.CREATE_NO_WINDOW
+        self._cancel_flag = False
     
-    si = subprocess.STARTUPINFO()
-    si.dwFlags |= subprocess.STARTF_USESHOWWINDOW
-    nw = subprocess.CREATE_NO_WINDOW
-    
-    target_os = None
-    
-    def run_cmd(cmd, shell=False):
+    def _run(self, cmd, **kwargs):
+        """Parancs futtatás (GUI verzióból)."""
         try:
-            if shell:
-                return subprocess.run(cmd, shell=True, capture_output=True, text=True, startupinfo=si, creationflags=nw, timeout=120)
-            else:
-                return subprocess.run(cmd, capture_output=True, text=True, startupinfo=si, creationflags=nw, timeout=120)
+            return subprocess.run(cmd, capture_output=True, text=True, errors='replace',
+                                  startupinfo=self._si, creationflags=self._nw, **kwargs)
         except Exception as e:
             class DummyRes:
                 returncode = 1
@@ -2470,175 +2465,835 @@ def run_cli_mode():
                 stderr = str(e)
             return DummyRes()
     
-    def list_drivers(all_drivers=False):
-        """Driver lista megjelenítése."""
-        print("\n📋 Driverek listázása...")
-        
-        if target_os:
-            # Offline mód
-            res = run_cmd(['dism', f'/Image:{target_os}', '/Get-Drivers', '/Format:Table'])
-        else:
-            res = run_cmd(['pnputil', '/enum-drivers'])
-        
-        if res.returncode != 0:
-            print(f"❌ Hiba: {res.stderr}")
-            return []
-        
+    def _print_progress(self, msg, end='\n'):
+        """Progress kiírás."""
+        print(msg, end=end, flush=True)
+    
+    # ================================================================
+    # DRIVER KEZELÉS
+    # ================================================================
+    def get_third_party_drivers(self):
+        """Third-party driverek listája."""
+        self._print_progress("📋 Third-party driverek lekérdezése...")
+        res = self._run(['pnputil', '/enum-drivers'])
         drivers = []
-        lines = res.stdout.split('\n')
-        
-        for line in lines:
+        current = {}
+        for line in res.stdout.splitlines():
             line = line.strip()
             if not line:
+                if current and "published" in current:
+                    drivers.append(current)
+                    current = {}
                 continue
-            
-            # pnputil formátum: "oem123.inf" vagy "Published Name: oem123.inf"
-            if '.inf' in line.lower():
-                parts = line.split()
-                for p in parts:
-                    if '.inf' in p.lower():
-                        inf_name = p.strip(':').strip()
-                        if not all_drivers and not inf_name.lower().startswith('oem'):
-                            continue
-                        if inf_name not in drivers:
-                            drivers.append(inf_name)
-        
-        if drivers:
-            print(f"\n{'Third-party' if not all_drivers else 'Összes'} driver ({len(drivers)} db):")
-            print("-" * 40)
-            for i, d in enumerate(drivers, 1):
-                print(f"  {i:3}. {d}")
-        else:
-            print("Nincs találat.")
-        
+            parts = line.split(":", 1)
+            if len(parts) == 2:
+                key, val = parts[0].strip(), parts[1].strip()
+                if "Published Name" in key or "Közzétett név" in key:
+                    current["published"] = val
+                elif "Original Name" in key or "Eredeti név" in key:
+                    current["original"] = val
+                elif "Provider Name" in key or "Szolgáltató neve" in key:
+                    current["provider"] = val
+                elif "Class Name" in key or "Osztály neve" in key:
+                    current["class"] = val
+                elif "Driver Version" in key or "Illesztőprogram verziója" in key:
+                    current["version"] = val
+        if current and "published" in current:
+            drivers.append(current)
         return drivers
     
-    def delete_drivers(drivers, force=False):
+    def get_all_drivers(self):
+        """Összes driver listája (veszélyes mód)."""
+        self._print_progress("📋 Összes driver lekérdezése (PowerShell)...")
+        cmd = ['powershell', '-NoProfile', '-Command',
+               '[Console]::OutputEncoding = [System.Text.Encoding]::UTF8; Get-WindowsDriver -Online -All | Select-Object ProviderName, ClassName, Version, Driver, OriginalFileName | ConvertTo-Json -Depth 2 -WarningAction SilentlyContinue']
+        res = self._run(cmd, encoding='utf-8')
+        out = res.stdout.strip()
+        if not out:
+            return []
+        try:
+            data = json.loads(out)
+            if isinstance(data, dict):
+                data = [data]
+            return [{"published": d.get("Driver", ""), "original": d.get("OriginalFileName", ""),
+                     "provider": d.get("ProviderName", ""), "class": d.get("ClassName", ""),
+                     "version": d.get("Version", "")} for d in data]
+        except Exception:
+            return []
+    
+    def get_offline_drivers(self, all_drivers=False):
+        """Offline OS driverek listája."""
+        self._print_progress(f"📋 Offline driverek lekérdezése: {self.target_os_path}...")
+        cmd = ['dism', f'/Image:{self.target_os_path}', '/Get-Drivers']
+        if all_drivers:
+            cmd.append('/all')
+        res = self._run(cmd)
+        drivers = []
+        current = {}
+        for line in res.stdout.splitlines():
+            line = line.strip()
+            if not line:
+                if current and "published" in current:
+                    drivers.append(current)
+                    current = {}
+                continue
+            parts = line.split(":", 1)
+            if len(parts) == 2:
+                key, val = parts[0].strip(), parts[1].strip()
+                if "Published Name" in key or "Published name" in key:
+                    current["published"] = val
+                elif "Original File Name" in key or "Original name" in key:
+                    current["original"] = val
+                elif "Provider Name" in key or "Provider" in key:
+                    current["provider"] = val
+                elif "Class Name" in key:
+                    current["class"] = val
+                elif "Date and Version" in key:
+                    current["version"] = val
+        if current and "published" in current:
+            drivers.append(current)
+        return drivers
+    
+    def list_drivers(self, all_drivers=False):
+        """Driver lista megjelenítése."""
+        if self.target_os_path:
+            drivers = self.get_offline_drivers(all_drivers)
+        elif all_drivers:
+            drivers = self.get_all_drivers()
+        else:
+            drivers = self.get_third_party_drivers()
+        
+        if not drivers:
+            print("❌ Nincs találat vagy hiba történt.")
+            return []
+        
+        mode = "ÖSSZES" if all_drivers else "Third-party"
+        loc = f" ({self.target_os_path})" if self.target_os_path else ""
+        print(f"\n{'='*60}")
+        print(f"  {mode} driverek{loc}: {len(drivers)} db")
+        print(f"{'='*60}")
+        print(f"{'#':>4}  {'Published':<18} {'Provider':<25} {'Class':<15}")
+        print("-" * 70)
+        for i, d in enumerate(drivers, 1):
+            pub = d.get('published', '?')[:17]
+            prov = d.get('provider', '?')[:24]
+            cls = d.get('class', '?')[:14]
+            print(f"{i:4}  {pub:<18} {prov:<25} {cls:<15}")
+        print("-" * 70)
+        return drivers
+    
+    def delete_drivers(self, drivers, reboot=False):
         """Driverek törlése."""
-        print(f"\n🗑️  {len(drivers)} driver törlése...")
+        total = len(drivers)
+        print(f"\n🗑️  {total} driver törlése indul...")
+        print("-" * 50)
         
         success = 0
         fail = 0
+        is_offline = bool(self.target_os_path)
         
-        for d in drivers:
-            print(f"  Törlés: {d}...", end=" ")
+        for i, drv in enumerate(drivers, 1):
+            pub = drv.get('published', '?')
+            print(f"  [{i}/{total}] {pub}... ", end="", flush=True)
             
-            if target_os:
-                res = run_cmd(['dism', f'/Image:{target_os}', '/Remove-Driver', f'/Driver:{d}'])
+            if is_offline:
+                res = self._run(['dism', f'/Image:{self.target_os_path}', '/Remove-Driver', f'/Driver:{pub}'])
             else:
-                res = run_cmd(['pnputil', '/delete-driver', d, '/uninstall', '/force'])
+                res = self._run(['pnputil', '/delete-driver', pub, '/uninstall', '/force'])
             
-            if res.returncode == 0 or 'deleted' in res.stdout.lower() or 'törölve' in res.stdout.lower():
+            if res.returncode == 0 or any(k in res.stdout.lower() for k in ['deleted', 'törölve', 'successfully']):
                 print("✅")
                 success += 1
             else:
                 print("❌")
                 fail += 1
         
-        print(f"\n--- Eredmény: ✅ {success} sikeres, ❌ {fail} sikertelen ---")
+        print("-" * 50)
+        print(f"✅ Sikeres: {success}  |  ❌ Sikertelen: {fail}")
+        
+        # Post-delete scan
+        if not is_offline and success > 0:
+            print("\n🔄 Hardverek újraszkennelése...")
+            self._run(['pnputil', '/scan-devices'])
+            time.sleep(2)
+            print("✅ Kész!")
+            
+            if reboot:
+                print("\n🔄 Újraindítás 5 másodperc múlva...")
+                time.sleep(5)
+                self._run(['shutdown', '/r', '/t', '0', '/f'])
+        
         return success, fail
     
-    def export_drivers(output_path):
-        """Driver export DISM-mel."""
-        print(f"\n💾 Driverek mentése: {output_path}")
+    # ================================================================
+    # MENTÉS ÉS VISSZAÁLLÍTÁS
+    # ================================================================
+    def backup_third_party(self, dest_folder):
+        """Third-party driverek mentése."""
+        folder = os.path.join(dest_folder, f"DriverDoktor_Export_{datetime.now().strftime('%Y%m%d_%H%M%S')}")
+        os.makedirs(folder, exist_ok=True)
+        print(f"\n💾 Third-party driverek mentése...")
+        print(f"   Cél: {folder}")
+        print("-" * 50)
         
-        os.makedirs(output_path, exist_ok=True)
-        
-        if target_os:
-            res = run_cmd(['dism', f'/Image:{target_os}', '/Export-Driver', f'/Destination:{output_path}'])
-        else:
-            res = run_cmd(['dism', '/Online', '/Export-Driver', f'/Destination:{output_path}'])
+        res = self._run(['dism', '/online', '/export-driver', f'/destination:{folder}'])
         
         if res.returncode == 0:
             print("✅ Mentés sikeres!")
+            return folder
+        else:
+            print(f"❌ Hiba: {res.stderr[:200] if res.stderr else 'Ismeretlen hiba'}")
+            return None
+    
+    def backup_all(self, dest_folder):
+        """Összes driver mentése (OEM + inbox)."""
+        folder = os.path.join(dest_folder, f"DriverDoktor_FullExport_{datetime.now().strftime('%Y%m%d_%H%M%S')}")
+        os.makedirs(folder, exist_ok=True)
+        print(f"\n💾 ÖSSZES driver mentése...")
+        print(f"   Cél: {folder}")
+        print("-" * 50)
+        
+        # OEM driverek
+        print("1/3 OEM driverek exportálása...")
+        enum_res = self._run(['pnputil', '/enum-drivers'])
+        all_infs = re.findall(r'(oem\d+\.inf)', enum_res.stdout, re.I)
+        
+        success = 0
+        for i, inf in enumerate(all_infs, 1):
+            print(f"  [{i}/{len(all_infs)}] {inf}... ", end="", flush=True)
+            inf_folder = os.path.join(folder, inf.replace('.inf', ''))
+            os.makedirs(inf_folder, exist_ok=True)
+            res = self._run(['pnputil', '/export-driver', inf, inf_folder])
+            if res.returncode == 0:
+                print("✅")
+                success += 1
+            else:
+                print("❌")
+        
+        print(f"   OEM: {success}/{len(all_infs)} exportálva")
+        
+        # FileRepository (inbox)
+        print("2/3 Windows inbox driverek (FileRepository) másolása...")
+        driverstore = os.path.join(os.environ.get('SYSTEMROOT', r'C:\Windows'), 'System32', 'DriverStore', 'FileRepository')
+        inbox_folder = os.path.join(folder, '_Windows_Inbox_Drivers')
+        os.makedirs(inbox_folder, exist_ok=True)
+        self._run(['robocopy', driverstore, inbox_folder, '/E', '/R:0', '/W:0', '/NFL', '/NDL', '/NJH', '/NJS', '/NC', '/NS', '/NP'])
+        print("   ✅ FileRepository másolva")
+        
+        # INF mappa
+        print("3/3 Windows INF mappa másolása...")
+        inf_src = os.path.join(os.environ.get('SYSTEMROOT', r'C:\Windows'), 'INF')
+        inbox_inf = os.path.join(folder, '_Windows_Inbox_INF')
+        os.makedirs(inbox_inf, exist_ok=True)
+        self._run(['robocopy', inf_src, inbox_inf, '/E', '/R:0', '/W:0', '/NFL', '/NDL', '/NJH', '/NJS', '/NC', '/NS', '/NP'])
+        print("   ✅ INF mappa másolva")
+        
+        # Összegzés
+        total_size = sum(os.path.getsize(os.path.join(dp, f)) for dp, _, fns in os.walk(folder) for f in fns if os.path.exists(os.path.join(dp, f)))
+        print("-" * 50)
+        print(f"✅ Mentés kész! Méret: {total_size / (1024*1024):.0f} MB")
+        return folder
+    
+    def restore_drivers(self, source_folder, online=True):
+        """Driverek visszaállítása."""
+        print(f"\n{'♻️'} Driverek visszaállítása...")
+        print(f"   Forrás: {source_folder}")
+        if not online:
+            print(f"   Cél: {self.target_os_path}")
+        print("-" * 50)
+        
+        if online and not self.target_os_path:
+            # Online mód - pnputil
+            print("🔄 pnputil /add-driver futtatása...")
+            res = self._run(['pnputil', '/add-driver', f"{source_folder}\\*.inf", '/subdirs', '/install'])
+            if res.returncode == 0:
+                print("✅ Visszaállítás sikeres!")
+            else:
+                print(f"⚠️  Részleges siker vagy hiba. Részletek:")
+                print(res.stdout[:500] if res.stdout else res.stderr[:500])
+            
+            print("\n🔄 Hardverek újraszkennelése...")
+            self._run(['pnputil', '/scan-devices'])
+            time.sleep(3)
+            print("✅ Kész!")
+        else:
+            # Offline mód - DISM
+            target = self.target_os_path or input("Cél OS meghajtó (pl: D:\\): ").strip()
+            if not target:
+                print("❌ Nincs cél megadva!")
+                return False
+            
+            print(f"🔄 DISM /Add-Driver futtatása ({target})...")
+            scratch = os.path.join(target, "Scratch")
+            os.makedirs(scratch, exist_ok=True)
+            res = self._run(['dism', f'/Image:{target}', '/Add-Driver', f'/Driver:{source_folder}', '/Recurse', '/ForceUnsigned', f'/ScratchDir:{scratch}'])
+            
+            if res.returncode == 0:
+                print("✅ Visszaállítás sikeres!")
+            else:
+                print(f"⚠️  Részleges siker vagy hiba. Néhány inbox driver nem telepíthető DISM-mel.")
+                print(res.stdout[:300] if res.stdout else "")
+        
+        return True
+    
+    def extract_wim(self, wim_path, dest_folder):
+        """WIM-ből gyári driverek kinyerése."""
+        print(f"\n📀 WIM driver kinyerés...")
+        print(f"   WIM: {wim_path}")
+        print(f"   Cél: {dest_folder}")
+        print("-" * 50)
+        
+        sys_temp = os.environ.get('TEMP', 'C:\\Temp')
+        mount_dir = os.path.join(sys_temp, f"WIM_Mount_Temp_{int(time.time())}")
+        target_folder = os.path.join(dest_folder, f"Windows_Gyari_Alap_Driverek_{datetime.now().strftime('%Y%m%d_%H%M')}")
+        
+        if os.path.exists(mount_dir):
+            shutil.rmtree(mount_dir, ignore_errors=True)
+        os.makedirs(mount_dir, exist_ok=True)
+        os.makedirs(target_folder, exist_ok=True)
+        
+        try:
+            print("1/3 WIM csatolása (ez 3-5 perc)...")
+            res = self._run(["dism", "/Mount-Image", f"/ImageFile:{wim_path}", "/Index:1", f"/MountDir:{mount_dir}", "/ReadOnly"])
+            if res.returncode != 0:
+                raise Exception(f"Mount hiba: {res.stderr}")
+            
+            print("2/3 FileRepository + INF másolása...")
+            driverstore = os.path.join(mount_dir, "Windows", "System32", "DriverStore", "FileRepository")
+            target_repo = os.path.join(target_folder, "FileRepository")
+            if os.path.exists(driverstore):
+                shutil.copytree(driverstore, target_repo, dirs_exist_ok=True)
+            
+            inf_dir = os.path.join(mount_dir, "Windows", "INF")
+            target_inf = os.path.join(target_folder, "INF")
+            if os.path.exists(inf_dir):
+                shutil.copytree(inf_dir, target_inf, dirs_exist_ok=True)
+            
+            print("3/3 WIM leválasztása...")
+            self._run(["dism", "/Unmount-Image", f"/MountDir:{mount_dir}", "/Discard"])
+            shutil.rmtree(mount_dir, ignore_errors=True)
+            
+            print("-" * 50)
+            print(f"✅ Gyári driverek kimentve: {target_folder}")
+            return target_folder
+            
+        except Exception as e:
+            print(f"❌ Hiba: {e}")
+            self._run(["dism", "/Unmount-Image", f"/MountDir:{mount_dir}", "/Discard"])
+            shutil.rmtree(mount_dir, ignore_errors=True)
+            return None
+    
+    def create_restore_point(self):
+        """Visszaállítási pont létrehozása."""
+        desc = f"DriverDoktor_Backup_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+        print(f"\n🛡️  Visszaállítási pont létrehozása...")
+        print(f"   Név: {desc}")
+        print("-" * 50)
+        
+        # Enable System Restore
+        print("1/2 Rendszervédelem engedélyezése...")
+        self._run(["powershell", "-NoProfile", "-Command", 'Enable-ComputerRestore -Drive "C:\\" -ErrorAction SilentlyContinue'])
+        self._run(['reg', 'add', r'HKLM\SOFTWARE\Microsoft\Windows NT\CurrentVersion\SystemRestore',
+                   '/v', 'SystemRestorePointCreationFrequency', '/t', 'REG_DWORD', '/d', '0', '/f'])
+        
+        # Create restore point
+        print("2/2 Visszaállítási pont létrehozása...")
+        ps_cmd = f'Checkpoint-Computer -Description "{desc}" -RestorePointType "MODIFY_SETTINGS" -ErrorAction Stop'
+        res = self._run(["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", ps_cmd], encoding='utf-8')
+        
+        if res.returncode == 0:
+            print("✅ Visszaállítási pont létrehozva!")
             return True
         else:
-            print(f"❌ Hiba: {res.stderr}")
+            print(f"❌ Hiba: {res.stderr[:200] if res.stderr else 'Ismeretlen hiba'}")
             return False
     
-    def set_target(path):
-        """Cél OS beállítása (offline mód)."""
-        nonlocal target_os
-        if path and os.path.isdir(os.path.join(path, 'Windows')):
-            target_os = path
-            print(f"✅ Cél OS: {target_os}")
-            return True
-        elif path:
-            print(f"❌ Nem található Windows mappa: {path}")
-            return False
+    # ================================================================
+    # WINDOWS UPDATE
+    # ================================================================
+    def check_wu_status(self):
+        """WU driver frissítés állapota."""
+        policy_disabled = False
+        search_disabled = False
+        
+        try:
+            with winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, r"SOFTWARE\Policies\Microsoft\Windows\WindowsUpdate", 0, winreg.KEY_READ) as key:
+                val, _ = winreg.QueryValueEx(key, "ExcludeWUDriversInQualityUpdate")
+                if val == 1:
+                    policy_disabled = True
+        except (FileNotFoundError, OSError):
+            pass
+        
+        try:
+            with winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, r"SOFTWARE\Microsoft\Windows\CurrentVersion\DriverSearching", 0, winreg.KEY_READ) as key:
+                val, _ = winreg.QueryValueEx(key, "SearchOrderConfig")
+                if val == 0:
+                    search_disabled = True
+        except (FileNotFoundError, OSError):
+            pass
+        
+        if policy_disabled and search_disabled:
+            return "⛔ LETILTVA (policy + eszközbeállítások)"
+        elif policy_disabled:
+            return "⛔ LETILTVA (policy)"
+        elif search_disabled:
+            return "⛔ LETILTVA (eszközbeállítások)"
         else:
-            target_os = None
+            return "✅ ENGEDÉLYEZVE"
+    
+    def disable_wu_drivers(self):
+        """WU driver frissítések letiltása."""
+        print("\n⛔ WU driver frissítések letiltása...")
+        print("-" * 50)
+        
+        try:
+            with winreg.CreateKeyEx(winreg.HKEY_LOCAL_MACHINE, r"SOFTWARE\Policies\Microsoft\Windows\WindowsUpdate", 0, winreg.KEY_WRITE) as key:
+                winreg.SetValueEx(key, "ExcludeWUDriversInQualityUpdate", 0, winreg.REG_DWORD, 1)
+            print("  ✅ ExcludeWUDriversInQualityUpdate = 1")
+        except Exception as e:
+            print(f"  ⚠️  {e}")
+        
+        self._run(['reg', 'add', r'HKLM\SOFTWARE\Policies\Microsoft\Windows\WindowsUpdate',
+                   '/v', 'ExcludeWUDriversInQualityUpdate', '/t', 'REG_DWORD', '/d', '1', '/f'])
+        
+        try:
+            with winreg.CreateKeyEx(winreg.HKEY_LOCAL_MACHINE, r"SOFTWARE\Microsoft\Windows\CurrentVersion\DriverSearching", 0, winreg.KEY_WRITE) as key:
+                winreg.SetValueEx(key, "SearchOrderConfig", 0, winreg.REG_DWORD, 0)
+            print("  ✅ SearchOrderConfig = 0")
+        except Exception as e:
+            print(f"  ⚠️  {e}")
+        
+        self._run(['reg', 'add', r'HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\DriverSearching',
+                   '/v', 'SearchOrderConfig', '/t', 'REG_DWORD', '/d', '0', '/f'])
+        
+        print("  🔄 WU szolgáltatás újraindítása...")
+        self._run('net stop wuauserv & net start wuauserv', shell=True)
+        
+        print("-" * 50)
+        print("✅ WU driver letiltás kész!")
+    
+    def enable_wu_drivers(self):
+        """WU driver frissítések engedélyezése + teljes reset."""
+        print("\n✅ WU driver frissítések engedélyezése + reset...")
+        print("-" * 50)
+        
+        # Policy törlés
+        try:
+            with winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, r"SOFTWARE\Policies\Microsoft\Windows\WindowsUpdate", 0, winreg.KEY_WRITE) as key:
+                winreg.DeleteValue(key, "ExcludeWUDriversInQualityUpdate")
+            print("  ✅ Policy törölve")
+        except FileNotFoundError:
+            print("  ℹ️  Policy nem létezett")
+        except Exception as e:
+            print(f"  ⚠️  {e}")
+        
+        # SearchOrderConfig = 1
+        try:
+            with winreg.CreateKeyEx(winreg.HKEY_LOCAL_MACHINE, r"SOFTWARE\Microsoft\Windows\CurrentVersion\DriverSearching", 0, winreg.KEY_WRITE) as key:
+                winreg.SetValueEx(key, "SearchOrderConfig", 0, winreg.REG_DWORD, 1)
+            print("  ✅ SearchOrderConfig = 1")
+        except Exception as e:
+            print(f"  ⚠️  {e}")
+        
+        # Szolgáltatások
+        print("  🔄 WU szolgáltatások újraindítása...")
+        for svc in ['wuauserv', 'bits', 'cryptsvc']:
+            self._run(f'net stop {svc} /y', shell=True)
+        time.sleep(2)
+        
+        # SoftwareDistribution törlés
+        sw_dist = os.path.join(os.environ.get('SYSTEMROOT', r'C:\Windows'), 'SoftwareDistribution')
+        if os.path.exists(sw_dist):
+            print("  🗑️  SoftwareDistribution törlése...")
+            shutil.rmtree(sw_dist, ignore_errors=True)
+        
+        for svc in ['cryptsvc', 'bits', 'wuauserv']:
+            self._run(f'net start {svc}', shell=True)
+        
+        self._run('wuauclt.exe /resetauthorization /detectnow', shell=True)
+        self._run('UsoClient.exe StartScan', shell=True)
+        
+        print("-" * 50)
+        print("✅ WU engedélyezés + reset kész!")
+    
+    def restart_wu_services(self):
+        """WU szolgáltatások újraindítása."""
+        print("\n🔄 WU szolgáltatások újraindítása...")
+        print("-" * 50)
+        
+        for svc in ['wuauserv', 'bits', 'cryptsvc', 'msiserver']:
+            print(f"  stop {svc}...", end=" ", flush=True)
+            self._run(f'net stop {svc} /y', shell=True)
+            print("✅")
+        
+        time.sleep(2)
+        
+        for svc in ['rpcss', 'cryptsvc', 'bits', 'msiserver', 'wuauserv']:
+            print(f"  start {svc}...", end=" ", flush=True)
+            self._run(f'net start {svc}', shell=True)
+            print("✅")
+        
+        self._run('wuauclt.exe /resetauthorization /detectnow', shell=True)
+        self._run('UsoClient.exe StartScan', shell=True)
+        
+        print("-" * 50)
+        print("✅ WU szolgáltatások újraindítva!")
+    
+    # ================================================================
+    # AUTOFIX (1 kattintásos driver fix)
+    # ================================================================
+    def autofix(self):
+        """Teljes automatikus driver fix (mint a GUI-ban)."""
+        print("\n" + "=" * 60)
+        print("  ⚡ 1 KATTINTÁSOS AUTOMATIKUS DRIVER FIX")
+        print("=" * 60)
+        print("""
+Lépések:
+  1️⃣  Windows Update driver keresés LETILTÁSA
+  2️⃣  Összes third-party driver TÖRLÉSE
+  3️⃣  Hardver újraszkennelés
+  4️⃣  WU driver telepítés (friss driverek)
+  5️⃣  Újraindítás
+""")
+        
+        confirm = input("Biztosan elindítod? (igen/nem): ").strip().lower()
+        if confirm not in ['igen', 'i', 'yes', 'y']:
+            print("❌ Megszakítva.")
+            return
+        
+        start_time = time.time()
+        
+        # FÁZIS 1: WU letiltás
+        print("\n" + "=" * 50)
+        print("  FÁZIS 1: WU driver letiltás")
+        print("=" * 50)
+        self.disable_wu_drivers()
+        
+        # FÁZIS 2: Third-party driverek törlése
+        print("\n" + "=" * 50)
+        print("  FÁZIS 2: Third-party driverek törlése")
+        print("=" * 50)
+        drivers = self.get_third_party_drivers()
+        if drivers:
+            print(f"Talált: {len(drivers)} db third-party driver")
+            self.delete_drivers(drivers, reboot=False)
+        else:
+            print("Nincs third-party driver.")
+        
+        # FÁZIS 3: Hardver scan
+        print("\n" + "=" * 50)
+        print("  FÁZIS 3: Hardver újraszkennelés")
+        print("=" * 50)
+        print("🔄 pnputil /scan-devices...")
+        self._run(['pnputil', '/scan-devices'])
+        time.sleep(5)
+        print("✅ Kész!")
+        
+        # FÁZIS 4: WU driver telepítés
+        print("\n" + "=" * 50)
+        print("  FÁZIS 4: WU driver telepítés")
+        print("=" * 50)
+        print("🔄 Driver frissítések keresése és telepítése...")
+        print("   (Ez akár 5-10 percig is tarthat)")
+        
+        ps_script = r"""
+[Console]::OutputEncoding = [System.Text.Encoding]::UTF8
+try {
+    $Session = New-Object -ComObject Microsoft.Update.Session
+    $Searcher = $Session.CreateUpdateSearcher()
+    try { $SM = New-Object -ComObject Microsoft.Update.ServiceManager; $SM.AddService2("7971f918-a847-4430-9279-4a52d1efe18d", 7, "") | Out-Null } catch {}
+    $Searcher.ServerSelection = 3; $Searcher.ServiceID = "7971f918-a847-4430-9279-4a52d1efe18d"
+    $Result = $Searcher.Search("IsInstalled=0 and Type='Driver'")
+    if ($Result.Updates.Count -eq 0) { Write-Output "EMPTY"; exit }
+    $ToInstall = New-Object -ComObject Microsoft.Update.UpdateColl
+    foreach ($U in $Result.Updates) {
+        if (-not $U.EulaAccepted) { $U.AcceptEula() }
+        $ToInstall.Add($U) | Out-Null
+        Write-Output "FOUND: $($U.Title)"
+    }
+    Write-Output "TOTAL: $($ToInstall.Count)"
+    $s = 0; $f = 0
+    for ($i = 0; $i -lt $ToInstall.Count; $i++) {
+        $U = $ToInstall.Item($i)
+        $SC = New-Object -ComObject Microsoft.Update.UpdateColl; $SC.Add($U) | Out-Null
+        Write-Output "DL: $($U.Title)"
+        $DL = $Session.CreateUpdateDownloader(); $DL.Updates = $SC
+        try { $DR = $DL.Download() } catch { Write-Output "FAIL: $($U.Title)"; $f++; continue }
+        if ($DR.ResultCode -ne 2 -and $DR.ResultCode -ne 3) { Write-Output "FAIL: $($U.Title)"; $f++; continue }
+        Write-Output "INST: $($U.Title)"
+        $Inst = $Session.CreateUpdateInstaller(); $Inst.Updates = $SC
+        try { $IR = $Inst.Install() } catch { Write-Output "FAIL: $($U.Title)"; $f++; continue }
+        $rc = $IR.GetUpdateResult(0).ResultCode
+        if ($rc -eq 2 -or $rc -eq 3) { Write-Output "OK: $($U.Title)"; $s++ } else { Write-Output "FAIL: $($U.Title)"; $f++ }
+    }
+    Write-Output "DONE: s=$s f=$f"
+} catch { Write-Output "ERROR: $($_.Exception.Message)" }
+"""
+        process = subprocess.Popen(
+            ["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", ps_script],
+            stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, encoding='utf-8', errors='replace',
+            startupinfo=self._si, creationflags=self._nw)
+        
+        install_success = 0
+        install_fail = 0
+        
+        for line in process.stdout:
+            line = line.strip()
+            if not line:
+                continue
+            if line.startswith("FOUND:"):
+                print(f"  📦 {line[6:].strip()}")
+            elif line.startswith("TOTAL:"):
+                print(f"\n  Összesen {line[6:].strip()} driver telepítése...")
+            elif line.startswith("DL:"):
+                print(f"  ⬇ {line[3:].strip()}")
+            elif line.startswith("INST:"):
+                print(f"  ⚙ {line[5:].strip()}")
+            elif line.startswith("OK:"):
+                install_success += 1
+                print(f"  ✅ {line[3:].strip()}")
+            elif line.startswith("FAIL:"):
+                install_fail += 1
+                print(f"  ❌ {line[5:].strip()}")
+            elif line == "EMPTY":
+                print("  ℹ️  Nincs elérhető driver frissítés.")
+            elif line.startswith("ERROR:"):
+                print(f"  ❌ HIBA: {line[6:].strip()}")
+            elif line.startswith("DONE:"):
+                print(f"\n  Telepítés kész: ✅ {install_success} sikeres, ❌ {install_fail} sikertelen")
+        
+        process.wait()
+        
+        if install_success > 0:
+            print("\n🔄 Eszközök újraszkennelése...")
+            self._run(['pnputil', '/scan-devices'])
+        
+        # Összegzés
+        elapsed = int(time.time() - start_time)
+        print("\n" + "=" * 60)
+        print(f"  ⚡ AUTOFIX KÉSZ! (Idő: {elapsed // 60} perc {elapsed % 60} mp)")
+        print("=" * 60)
+        
+        # FÁZIS 5: Újraindítás
+        if install_success > 0 or len(drivers) > 0:
+            print("\n🔄 Újraindítás 30 másodperc múlva...")
+            print("   (Ctrl+C a megszakításhoz)")
+            try:
+                for i in range(30, 0, -1):
+                    print(f"\r   {i} másodperc...", end="", flush=True)
+                    time.sleep(1)
+                print("\n🔄 Újraindítás MOST!")
+                self._run(['shutdown', '/r', '/t', '0', '/f'])
+            except KeyboardInterrupt:
+                print("\n❌ Újraindítás megszakítva.")
+        else:
+            print("\nNem történt változás - újraindítás nem szükséges.")
+
+
+def run_cli_mode():
+    """Parancssoros mód - TELJES funkcionalitás (GUI tükör)."""
+    api = CliApi()
+    
+    def clear_screen():
+        os.system('cls' if os.name == 'nt' else 'clear')
+    
+    def print_header():
+        clear_screen()
+        print("=" * 60)
+        print("  ♻️  DRIVERDOKTOR - CLI MÓD")
+        print("  🖥️  Tiszta rendszer (Build " + str(BUILD_NUMBER) + ")")
+        print("=" * 60)
+        if api.target_os_path:
+            print(f"  📌 Offline mód: {api.target_os_path}")
+        else:
+            print("  📌 Jelenlegi rendszer (online)")
+        print("=" * 60)
+    
+    def main_menu():
+        print("""
+  FŐMENÜ - Válassz kategóriát:
+
+    💿  1. Driverek kezelése
+    💾  2. Mentés és Visszaállítás
+    🔄  3. Windows Update
+    ⚡  4. 1 Kattintásos Driver Fix
+    
+    ⚙️   5. Cél OS váltása (offline mód)
+    ❌  0. Kilépés
+""")
+    
+    def drivers_menu():
+        while True:
+            print_header()
+            print("""
+  💿 DRIVEREK KEZELÉSE
+
+    1. Third-party driverek listázása
+    2. ÖSSZES driver listázása (veszélyes!)
+    3. Driver(ek) törlése
+    4. Hardver újraszkennelés
+    
+    0. Vissza a főmenübe
+""")
+            choice = input("Választás: ").strip()
+            
+            if choice == '0':
+                break
+            elif choice == '1':
+                drivers = api.list_drivers(all_drivers=False)
+                input("\nNyomj ENTER-t a folytatáshoz...")
+            elif choice == '2':
+                drivers = api.list_drivers(all_drivers=True)
+                input("\nNyomj ENTER-t a folytatáshoz...")
+            elif choice == '3':
+                all_mode = input("Összes driver mód? (i/n): ").strip().lower() == 'i'
+                drivers = api.list_drivers(all_drivers=all_mode)
+                if not drivers:
+                    input("\nNyomj ENTER-t a folytatáshoz...")
+                    continue
+                
+                sel = input("\nTörlendő sorszámok (pl: 1,3,5 vagy 'mind'): ").strip()
+                if sel.lower() == 'mind':
+                    to_delete = drivers
+                else:
+                    indices = [int(x.strip())-1 for x in sel.split(',') if x.strip().isdigit()]
+                    to_delete = [drivers[i] for i in indices if 0 <= i < len(drivers)]
+                
+                if to_delete:
+                    reboot = input("Törlés után újraindítás? (i/n): ").strip().lower() == 'i'
+                    confirm = input(f"Biztosan törölsz {len(to_delete)} drivert? (i/n): ").strip().lower()
+                    if confirm == 'i':
+                        api.delete_drivers(to_delete, reboot=reboot)
+                input("\nNyomj ENTER-t a folytatáshoz...")
+            elif choice == '4':
+                if api.target_os_path:
+                    print("❌ Offline módban nem elérhető!")
+                else:
+                    print("🔄 Hardver újraszkennelés...")
+                    api._run(['pnputil', '/scan-devices'])
+                    time.sleep(2)
+                    print("✅ Kész!")
+                input("\nNyomj ENTER-t a folytatáshoz...")
+    
+    def backup_menu():
+        while True:
+            print_header()
+            print("""
+  💾 MENTÉS ÉS VISSZAÁLLÍTÁS
+
+    1. Third-party driverek mentése
+    2. ÖSSZES driver mentése (OEM + inbox)
+    3. Lementett driverek visszaállítása
+    4. WIM-ből gyári driverek kinyerése
+    5. Visszaállítási pont létrehozása
+    
+    0. Vissza a főmenübe
+""")
+            choice = input("Választás: ").strip()
+            
+            if choice == '0':
+                break
+            elif choice == '1':
+                dest = input("Mentés célmappája: ").strip()
+                if dest:
+                    api.backup_third_party(dest)
+                input("\nNyomj ENTER-t a folytatáshoz...")
+            elif choice == '2':
+                dest = input("Mentés célmappája: ").strip()
+                if dest:
+                    api.backup_all(dest)
+                input("\nNyomj ENTER-t a folytatáshoz...")
+            elif choice == '3':
+                source = input("Lementett driver mappa: ").strip()
+                if source:
+                    online = input("Online mód (jelenlegi rendszer)? (i/n): ").strip().lower() == 'i'
+                    api.restore_drivers(source, online=online)
+                input("\nNyomj ENTER-t a folytatáshoz...")
+            elif choice == '4':
+                wim = input("install.wim fájl elérési útja: ").strip()
+                dest = input("Kinyerés célmappája: ").strip()
+                if wim and dest:
+                    api.extract_wim(wim, dest)
+                input("\nNyomj ENTER-t a folytatáshoz...")
+            elif choice == '5':
+                if api.target_os_path:
+                    print("❌ Offline módban nem elérhető!")
+                else:
+                    api.create_restore_point()
+                input("\nNyomj ENTER-t a folytatáshoz...")
+    
+    def wu_menu():
+        while True:
+            print_header()
+            status = api.check_wu_status()
+            print(f"""
+  🔄 WINDOWS UPDATE BEÁLLÍTÁSOK
+  
+  Jelenlegi állapot: {status}
+
+    1. WU driver letiltás
+    2. WU driver engedélyezés + reset
+    3. WU szolgáltatások újraindítása
+    
+    0. Vissza a főmenübe
+""")
+            choice = input("Választás: ").strip()
+            
+            if choice == '0':
+                break
+            elif choice == '1':
+                api.disable_wu_drivers()
+                input("\nNyomj ENTER-t a folytatáshoz...")
+            elif choice == '2':
+                api.enable_wu_drivers()
+                input("\nNyomj ENTER-t a folytatáshoz...")
+            elif choice == '3':
+                api.restart_wu_services()
+                input("\nNyomj ENTER-t a folytatáshoz...")
+    
+    def target_menu():
+        print("\n⚙️  CÉL OS VÁLTÁSA")
+        print("-" * 40)
+        print("Jelenlegi:", api.target_os_path or "Jelenlegi rendszer (online)")
+        print()
+        path = input("Új cél OS path (üres = visszaállítás jelenlegire): ").strip()
+        
+        if not path:
+            api.target_os_path = None
             print("✅ Visszaállítva: jelenlegi rendszer")
-            return True
+        elif os.path.isdir(os.path.join(path, 'Windows')):
+            api.target_os_path = path
+            print(f"✅ Cél OS: {api.target_os_path}")
+        else:
+            print(f"❌ Nem található Windows mappa: {path}")
+        
+        input("\nNyomj ENTER-t a folytatáshoz...")
     
-    # Interaktív menü
+    # FŐCIKLUS
     while True:
-        print("\n" + "=" * 40)
-        if target_os:
-            print(f"  [Offline mód: {target_os}]")
-        print("  1. Third-party driverek listázása")
-        print("  2. ÖSSZES driver listázása (veszélyes!)")
-        print("  3. Driver(ek) törlése")
-        print("  4. Driverek mentése (export)")
-        print("  5. Cél OS váltása (offline)")
-        print("  6. Hardver újraszkennelés")
-        print("  0. Kilépés")
-        print("=" * 40)
+        print_header()
+        main_menu()
         
         try:
             choice = input("Választás: ").strip()
         except (EOFError, KeyboardInterrupt):
             break
         
-        if choice == '1':
-            list_drivers(all_drivers=False)
-        
-        elif choice == '2':
-            list_drivers(all_drivers=True)
-        
-        elif choice == '3':
-            all_mode = input("Összes driver mód? (i/n): ").strip().lower() == 'i'
-            drivers = list_drivers(all_drivers=all_mode)
-            if not drivers:
-                continue
-            
-            sel = input("Törlendő sorszámok (pl: 1,3,5 vagy 'mind'): ").strip()
-            
-            if sel.lower() == 'mind':
-                to_delete = drivers
-            else:
-                indices = [int(x.strip())-1 for x in sel.split(',') if x.strip().isdigit()]
-                to_delete = [drivers[i] for i in indices if 0 <= i < len(drivers)]
-            
-            if to_delete:
-                confirm = input(f"Biztosan törölsz {len(to_delete)} drivert? (i/n): ").strip().lower()
-                if confirm == 'i':
-                    delete_drivers(to_delete)
-        
-        elif choice == '4':
-            path = input("Mentés helye (mappa): ").strip()
-            if path:
-                export_drivers(path)
-        
-        elif choice == '5':
-            path = input("Cél OS path (üres = jelenlegi): ").strip()
-            set_target(path if path else None)
-        
-        elif choice == '6':
-            if target_os:
-                print("❌ Offline módban nem elérhető.")
-            else:
-                print("🔄 Hardver újraszkennelés...")
-                res = run_cmd(['pnputil', '/scan-devices'])
-                if res.returncode == 0:
-                    print("✅ Kész!")
-                else:
-                    print(f"❌ Hiba: {res.stderr}")
-        
-        elif choice == '0':
-            print("Viszlát!")
+        if choice == '0':
+            print("\nViszlát! 👋")
             break
-        
+        elif choice == '1':
+            drivers_menu()
+        elif choice == '2':
+            backup_menu()
+        elif choice == '3':
+            wu_menu()
+        elif choice == '4':
+            print_header()
+            api.autofix()
+            input("\nNyomj ENTER-t a folytatáshoz...")
+        elif choice == '5':
+            target_menu()
         else:
             print("❌ Érvénytelen választás!")
 
