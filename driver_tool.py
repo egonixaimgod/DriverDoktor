@@ -16,6 +16,19 @@ import winreg
 import queue
 from datetime import datetime
 
+# Teljes értékű Software Rendering bekapcsolása az egész alkalmazásra
+# Ez megakadályozza, hogy a WebView2 összeomoljon (fehér képernyő) amikor a videókártya drivert töröljük
+os.environ['WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS'] = (
+    '--disable-gpu '
+    '--disable-gpu-compositing '
+    '--disable-gpu-vsync '
+    '--disable-accelerated-2d-canvas '
+    '--disable-accelerated-video-decode '
+    '--use-gl=swiftshader '
+    '--disable-d3d11 '
+    '--disable-features=D3D11,Vulkan '
+)
+
 try:
     import webview
 except ImportError:
@@ -275,18 +288,6 @@ window.update = update;
 
 def run_progress_window(log_path):
     """Külön processben futtatandó progress ablak (software rendering)."""
-    # Software rendering bekapcsolása MIELŐTT a webview betöltődne
-    os.environ['WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS'] = (
-        '--disable-gpu '
-        '--disable-gpu-compositing '
-        '--disable-gpu-vsync '
-        '--disable-accelerated-2d-canvas '
-        '--disable-accelerated-video-decode '
-        '--use-gl=swiftshader '
-        '--disable-d3d11 '
-        '--disable-features=D3D11,Vulkan '
-        '--in-process-gpu '
-    )
     
     class ProgressApi:
         def __init__(self):

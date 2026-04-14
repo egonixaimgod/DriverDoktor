@@ -65,15 +65,15 @@ A legerőteljesebb funkció — egyetlen gombnyomással:
 ## 📥 Telepítés
 
 ### Futtatható verzió (ajánlott)
-1. Töltsd le a legújabb `.exe` fájlt a [Releases](https://github.com/egonixaimgod/Driver_pucolo_szerviztool/releases) oldalról
+1. Töltsd le a legújabb `.exe` fájlt a [Releases](https://github.com/egonixaimgod/DriverDoktor/releases) oldalról
 2. Futtasd rendszergazdaként
 3. Nincs szükség telepítésre!
 
 ### Forráskódból futtatás
 ```bash
 # Klónozás
-git clone https://github.com/egonixaimgod/Driver_pucolo_szerviztool.git
-cd Driver_pucolo_szerviztool
+git clone https://github.com/egonixaimgod/DriverDoktor.git
+cd DriverDoktor
 
 # Függőségek telepítése
 pip install pywebview
