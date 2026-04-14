@@ -1,4 +1,4 @@
-BUILD_NUMBER = 75
+BUILD_NUMBER = 76
 
 import os
 import sys
@@ -697,6 +697,85 @@ class DriverToolApi:
 
         logging.debug(f"[DRIVERS] _get_offline_drivers: {len(valid_drivers)} valid driver")
         return valid_drivers
+
+    # ================================================================
+    # BCD REPAIR (boot loader javítás offline restore után)
+    # ================================================================
+    def _repair_bcd(self, target_drive):
+        """BCD újraépítése offline restore után - megakadályozza a boot hibákat."""
+        logging.info(f"[BCD] BCD javítás indítása: {target_drive}")
+        self.emit('task_progress', {'task': 'restore', 'log': '\n--- BOOT LOADER (BCD) JAVÍTÁS ---'})
+        
+        target_drive = target_drive.rstrip('\\') + '\\'
+        windows_path = os.path.join(target_drive, 'Windows')
+        
+        if not os.path.exists(windows_path):
+            self.emit('task_progress', {'task': 'restore', 'log': f'⚠️ Windows mappa nem található: {windows_path}'})
+            return False
+        
+        # 1. EFI partíció keresése (UEFI rendszereknél)
+        self.emit('task_progress', {'task': 'restore', 'log': 'EFI partíció keresése...'})
+        
+        efi_letter = None
+        try:
+            # Diskpart-tal megkeressük az EFI partíciót
+            diskpart_script = 'list volume\n'
+            res = self._run(['diskpart'], input=diskpart_script, text=True, timeout=30)
+            
+            if res.returncode == 0 and res.stdout:
+                lines = res.stdout.splitlines()
+                for line in lines:
+                    # FAT32 partíció ~100-550MB (EFI)
+                    if 'FAT32' in line.upper():
+                        parts = line.split()
+                        for i, p in enumerate(parts):
+                            if p.upper() == 'FAT32' and i >= 2:
+                                # Volume szám és betűjel
+                                vol_letter = parts[2] if len(parts) > 2 else None
+                                if vol_letter and len(vol_letter) == 1 and vol_letter.isalpha():
+                                    efi_letter = vol_letter + ':'
+                                    break
+                        if efi_letter:
+                            break
+        except Exception as e:
+            logging.warning(f"[BCD] Diskpart hiba: {e}")
+        
+        # 2. bcdboot futtatása
+        success = False
+        
+        if efi_letter:
+            # UEFI mód - EFI partícióra
+            self.emit('task_progress', {'task': 'restore', 'log': f'EFI partíció: {efi_letter}'})
+            self.emit('task_progress', {'task': 'restore', 'log': f'bcdboot {target_drive}Windows /s {efi_letter} /f UEFI'})
+            res = self._run(['bcdboot', f'{target_drive}Windows', '/s', efi_letter, '/f', 'UEFI'])
+            if res.returncode == 0:
+                success = True
+                self.emit('task_progress', {'task': 'restore', 'log': '✅ BCD sikeresen újraépítve (UEFI)!'})
+            else:
+                self.emit('task_progress', {'task': 'restore', 'log': f'⚠️ UEFI bcdboot hiba: {res.stderr[:200] if res.stderr else res.stdout[:200]}'})
+        
+        if not success:
+            # BIOS/Legacy mód vagy UEFI fallback - célmeghajtóra
+            self.emit('task_progress', {'task': 'restore', 'log': f'bcdboot {target_drive}Windows /s {target_drive} /f ALL'})
+            res = self._run(['bcdboot', f'{target_drive}Windows', '/s', target_drive, '/f', 'ALL'])
+            if res.returncode == 0:
+                success = True
+                self.emit('task_progress', {'task': 'restore', 'log': '✅ BCD sikeresen újraépítve (ALL)!'})
+            else:
+                self.emit('task_progress', {'task': 'restore', 'log': f'⚠️ bcdboot hiba: {res.stderr[:200] if res.stderr else res.stdout[:200]}'})
+        
+        # 3. bootrec parancsok (ha van)
+        if not success:
+            self.emit('task_progress', {'task': 'restore', 'log': 'bootrec parancsok futtatása...'})
+            for cmd in ['/fixmbr', '/fixboot', '/rebuildbcd']:
+                res = self._run(['bootrec', cmd])
+                if res.returncode == 0:
+                    self.emit('task_progress', {'task': 'restore', 'log': f'  bootrec {cmd}: ✅'})
+                else:
+                    self.emit('task_progress', {'task': 'restore', 'log': f'  bootrec {cmd}: ⚠️ (nem elérhető)'})
+        
+        logging.info(f"[BCD] Javítás befejezve, success={success}")
+        return success
 
     # ================================================================
     # DRIVER DELETION
@@ -2322,8 +2401,11 @@ try {
                     time.sleep(3.5)
                     self.emit('task_progress', {'task': 'restore', 'log': '✅ Scan kész!'})
             else:
+                # === BCD JAVÍTÁS (boot loader) ===
+                self._repair_bcd(norm_target)
+                
                 # Automata PnP rescan beállítása az asztal betöltésére
-                self.emit('task_progress', {'task': 'restore', 'log': 'Első bejelentkezési rescan script beállítása...'})
+                self.emit('task_progress', {'task': 'restore', 'log': '\nElső bejelentkezési rescan script beállítása...'})
                 startup_dir = os.path.join(target, "ProgramData", "Microsoft", "Windows", "Start Menu", "Programs", "Startup")
                 os.makedirs(startup_dir, exist_ok=True)
                 bat_path = os.path.join(startup_dir, "auto_pnputil_scan.bat")
@@ -2733,9 +2815,49 @@ class CliApi:
             else:
                 print(f"⚠️  Részleges siker vagy hiba. Néhány inbox driver nem telepíthető DISM-mel.")
                 print(res.stdout[:300] if res.stdout else "")
+            
+            # === BCD JAVÍTÁS (boot loader) ===
+            self._repair_bcd_cli(target)
         
         return True
     
+    def _repair_bcd_cli(self, target_drive):
+        """BCD újraépítése CLI módban."""
+        print("\n" + "-" * 50)
+        print("🔧 BOOT LOADER (BCD) JAVÍTÁS")
+        print("-" * 50)
+        
+        target_drive = target_drive.rstrip('\\') + '\\'
+        windows_path = os.path.join(target_drive, 'Windows')
+        
+        if not os.path.exists(windows_path):
+            print(f"⚠️  Windows mappa nem található: {windows_path}")
+            return False
+        
+        # 1. Próbáljuk a bcdboot ALL módban (működik UEFI és BIOS-on is)
+        print(f"1/2 bcdboot {target_drive}Windows /s {target_drive} /f ALL")
+        res = self._run(['bcdboot', f'{target_drive}Windows', '/s', target_drive, '/f', 'ALL'])
+        
+        if res.returncode == 0:
+            print("✅ BCD sikeresen újraépítve!")
+            return True
+        else:
+            print(f"⚠️  bcdboot hiba, bootrec parancsok futtatása...")
+        
+        # 2. Fallback: bootrec parancsok
+        print("2/2 bootrec parancsok...")
+        for cmd in ['/fixmbr', '/fixboot', '/rebuildbcd']:
+            print(f"  bootrec {cmd}... ", end="", flush=True)
+            res = self._run(['bootrec', cmd])
+            if res.returncode == 0:
+                print("✅")
+            else:
+                print("⚠️")
+        
+        print("-" * 50)
+        print("✅ BCD javítás befejezve!")
+        return True
+
     def extract_wim(self, wim_path, dest_folder):
         """WIM-ből gyári driverek kinyerése."""
         print(f"\n📀 WIM driver kinyerés...")
