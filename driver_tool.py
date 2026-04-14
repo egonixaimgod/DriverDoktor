@@ -65,6 +65,10 @@ class DriverToolApi:
         self._si = subprocess.STARTUPINFO()
         self._si.dwFlags |= subprocess.STARTF_USESHOWWINDOW
         self._nw = subprocess.CREATE_NO_WINDOW
+        # Autofix külön progress ablak
+        self._autofix_log_path = None
+        self._autofix_log_file = None
+        self._autofix_console_proc = None
         logging.info(f"[INIT] sys_drive={self.sys_drive}")
         logging.info("[INIT] DriverToolApi kész.")
 
@@ -96,6 +100,21 @@ class DriverToolApi:
                 logging.debug(f"[EMIT:{event}] data={data}")
         except Exception as e:
             logging.warning(f"[EMIT] Logging hiba: {e}")
+
+        # Autofix külön konzol ablakba írás (ha fut)
+        if self._autofix_log_file and event in ('task_start', 'task_progress', 'task_complete'):
+            try:
+                if isinstance(data, dict):
+                    line = data.get('log') or data.get('status') or data.get('phase') or ''
+                    counter = data.get('counter', '')
+                    if line:
+                        self._autofix_log_file.write(f"{line}\n")
+                        self._autofix_log_file.flush()
+                    elif counter:
+                        self._autofix_log_file.write(f"[{counter}]\n")
+                        self._autofix_log_file.flush()
+            except Exception:
+                pass
 
         # Ablak cím frissítése autofix progress közben (backup megoldás ha a modal eltűnik)
         if self._window and event in ('task_start', 'task_progress', 'task_complete'):
@@ -1038,12 +1057,72 @@ try {
     # ================================================================
     # AUTOFIX
     # ================================================================
+    def _open_autofix_console(self):
+        """Nyit egy külön konzol ablakot az autofix progress megjelenítésére."""
+        try:
+            self._autofix_log_path = os.path.join(os.environ.get('TEMP', 'C:\\Temp'), 'DriverDoktor_autofix_progress.txt')
+            # Töröljük a régi fájlt ha van
+            if os.path.exists(self._autofix_log_path):
+                os.remove(self._autofix_log_path)
+            # Megnyitjuk írásra
+            self._autofix_log_file = open(self._autofix_log_path, 'w', encoding='utf-8', buffering=1)
+            self._autofix_log_file.write("=" * 60 + "\n")
+            self._autofix_log_file.write("  DRIVERDOKTOR - 1 KATTINTÁSOS DRIVER FIX\n")
+            self._autofix_log_file.write("  Ez az ablak mutatja a folyamatot realtime.\n")
+            self._autofix_log_file.write("  NE ZÁRD BE amíg a folyamat fut!\n")
+            self._autofix_log_file.write("=" * 60 + "\n\n")
+            self._autofix_log_file.flush()
+            # PowerShell ablak ami figyeli a fájlt realtime
+            ps_cmd = f'''
+                $host.UI.RawUI.WindowTitle = 'DriverDoktor - Autofix Progress'
+                $host.UI.RawUI.BackgroundColor = 'Black'
+                $host.UI.RawUI.ForegroundColor = 'Green'
+                Clear-Host
+                Get-Content -Path '{self._autofix_log_path}' -Wait -Encoding UTF8
+            '''
+            self._autofix_console_proc = subprocess.Popen(
+                ['powershell', '-NoProfile', '-ExecutionPolicy', 'Bypass', '-Command', ps_cmd],
+                creationflags=subprocess.CREATE_NEW_CONSOLE
+            )
+            logging.info(f"[AUTOFIX] Konzol ablak megnyitva, log: {self._autofix_log_path}")
+        except Exception as e:
+            logging.error(f"[AUTOFIX] Konzol ablak nyitási hiba: {e}")
+            self._autofix_log_file = None
+            self._autofix_console_proc = None
+
+    def _close_autofix_console(self):
+        """Bezárja az autofix konzol ablakot."""
+        try:
+            if self._autofix_log_file:
+                self._autofix_log_file.write("\n" + "=" * 60 + "\n")
+                self._autofix_log_file.write("  FOLYAMAT BEFEJEZVE!\n")
+                self._autofix_log_file.write("  Ez az ablak 10 másodperc múlva bezárul.\n")
+                self._autofix_log_file.write("=" * 60 + "\n")
+                self._autofix_log_file.close()
+                self._autofix_log_file = None
+            # Várunk 10 mp-et majd bezárjuk a konzolt
+            def close_later():
+                time.sleep(10)
+                if self._autofix_console_proc:
+                    try:
+                        self._autofix_console_proc.terminate()
+                    except Exception:
+                        pass
+                    self._autofix_console_proc = None
+            threading.Thread(target=close_later, daemon=True).start()
+        except Exception as e:
+            logging.error(f"[AUTOFIX] Konzol bezárási hiba: {e}")
+
     def start_autofix(self):
         logging.info("[API] start_autofix() - 1 KATTINTÁSOS DRIVER FIX INDÍTVA!")
         logging.info("=" * 60)
         logging.info("[AUTOFIX] TELJES DRIVER ÚJRATELEPÍTÉS INDÍTÁSA")
         logging.info("=" * 60)
         self._cancel_flag = False  # Reset cancel flag
+        
+        # Külön konzol ablak megnyitása a progress megjelenítésére
+        self._open_autofix_console()
+        
         def worker():
             overall_start = time.time()
 
@@ -1057,6 +1136,7 @@ try {
                     logging.warning("[AUTOFIX] Felhasználó megszakította!")
                     self.emit('task_progress', {'task': 'autofix', 'log': '\n❗ Megszakítva a felhasználó által!'})
                     self.emit('task_complete', {'task': 'autofix', 'status': '❗ Megszakítva!', 'counter': 'Megszakítva'})
+                    self._close_autofix_console()
                     return True
                 return False
 
@@ -1274,11 +1354,13 @@ try {
 
                 self.emit('task_progress', {'task': 'autofix', 'log': '🔄 Újraindítás MOST!'})
                 self.emit('task_complete', {'task': 'autofix', 'status': '🔄 Újraindítás...', 'counter': 'Reboot'})
+                self._close_autofix_console()
                 self._run(['shutdown', '/r', '/t', '0', '/f'])
             else:
                 self.emit('task_progress', {'task': 'autofix', 'phase': '✅ KÉSZ',
                                             'log': f'\n{"=" * 50}\nNem történt változás - újraindítás nem szükséges.\n\n⚡ Teljes idő: {elapsed()}'})
                 self.emit('task_complete', {'task': 'autofix', 'status': '✅ Kész (nincs változás)', 'counter': 'Kész'})
+                self._close_autofix_console()
 
         self._safe_thread('autofix', worker)
 
@@ -2068,20 +2150,7 @@ if __name__ == "__main__":
     logging.info(f"Futtatasi konyvtar: {os.getcwd()}")
     logging.info("=" * 50)
 
-    # WebView2 software rendering - GPU driver törlés/telepítéskor is működik az ablak
-    # SwiftShader = teljes software OpenGL, D3D11 kikapcsolva, hardware overlay kikapcsolva
-    os.environ['WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS'] = (
-        '--disable-gpu '
-        '--disable-gpu-compositing '
-        '--disable-gpu-vsync '
-        '--disable-accelerated-2d-canvas '
-        '--disable-accelerated-video-decode '
-        '--use-gl=swiftshader '
-        '--disable-d3d11 '
-        '--disable-features=D3D11,Vulkan '
-        '--in-process-gpu '
-    )
-    logging.info("[WEBVIEW] Teljes software rendering mód bekapcsolva (SwiftShader + D3D11 off)")
+    # Hardware rendering (gyors) - az autofix progress külön ablakban jelenik meg
 
     api = DriverToolApi()
     html_path = resource_path('ui.html')
