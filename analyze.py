@@ -1,1 +1,0 @@
-﻿import ast; c=open("driver_tool.py", encoding="utf-8").read(); tree=ast.parse(c); [print(f"Line {n.lineno}: except Exception pass") for n in ast.walk(tree) if isinstance(n, ast.ExceptHandler) and isinstance(n.type, ast.Name) and n.type.id=="Exception" and "pass" in [type(s).__name__ for s in n.body]]
