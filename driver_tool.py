@@ -2049,9 +2049,20 @@ if __name__ == "__main__":
     logging.info(f"Futtatasi konyvtar: {os.getcwd()}")
     logging.info("=" * 50)
 
-    # WebView2 software rendering - GPU driver törléskor is működik az ablak
-    os.environ['WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS'] = '--disable-gpu --disable-gpu-compositing'
-    logging.info("[WEBVIEW] Software rendering mód bekapcsolva (GPU-független)")
+    # WebView2 software rendering - GPU driver törlés/telepítéskor is működik az ablak
+    # SwiftShader = teljes software OpenGL, D3D11 kikapcsolva, hardware overlay kikapcsolva
+    os.environ['WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS'] = (
+        '--disable-gpu '
+        '--disable-gpu-compositing '
+        '--disable-gpu-vsync '
+        '--disable-accelerated-2d-canvas '
+        '--disable-accelerated-video-decode '
+        '--use-gl=swiftshader '
+        '--disable-d3d11 '
+        '--disable-features=D3D11,Vulkan '
+        '--in-process-gpu '
+    )
+    logging.info("[WEBVIEW] Teljes software rendering mód bekapcsolva (SwiftShader + D3D11 off)")
 
     api = DriverToolApi()
     html_path = resource_path('ui.html')
