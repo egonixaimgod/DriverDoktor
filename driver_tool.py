@@ -1,4 +1,4 @@
-BUILD_NUMBER = 74
+BUILD_NUMBER = 75
 
 import os
 import sys
@@ -3365,7 +3365,112 @@ if __name__ == "__main__":
         logging.info(f"[INIT] WebView2 Runtime OK: v{wv2_info}")
     else:
         logging.warning(f"[INIT] WebView2 nem megfelelő: {wv2_info}")
-        logging.info("[INIT] GUI nem indítható - EGYBŐL CLI mód!")
+        logging.info("[INIT] WebView2 telepítés felajánlása...")
+        
+        # MessageBox: telepítsük?
+        MB_YESNO = 0x4
+        MB_ICONQUESTION = 0x20
+        MB_TOPMOST = 0x40000
+        IDYES = 6
+        
+        result = ctypes.windll.user32.MessageBoxW(
+            None,
+            "A WebView2 Runtime hiányzik vagy túl régi!\n\n"
+            "A DriverDoktor GUI-hoz WebView2 v109+ szükséges.\n\n"
+            "Telepítsem automatikusan?\n"
+            "(~2MB letöltés, pár másodperc)",
+            "DriverDoktor - WebView2 telepítés",
+            MB_YESNO | MB_ICONQUESTION | MB_TOPMOST
+        )
+        
+        if result == IDYES:
+            logging.info("[INIT] Felhasználó elfogadta a WebView2 telepítést")
+            
+            # Progress MessageBox (nem blokkoló)
+            import urllib.request
+            import tempfile
+            
+            try:
+                # Letöltés
+                logging.info("[INIT] WebView2 Bootstrapper letöltése...")
+                bootstrapper_url = "https://go.microsoft.com/fwlink/p/?LinkId=2124703"
+                temp_dir = tempfile.gettempdir()
+                bootstrapper_path = os.path.join(temp_dir, "MicrosoftEdgeWebview2Setup.exe")
+                
+                # Progress ablak
+                ctypes.windll.user32.MessageBoxW(
+                    None,
+                    "WebView2 telepítése folyamatban...\n\n"
+                    "Ez pár másodpercet vesz igénybe.\n"
+                    "Kattints OK-ra és várd meg!",
+                    "DriverDoktor",
+                    0x40 | MB_TOPMOST  # MB_ICONINFORMATION
+                )
+                
+                urllib.request.urlretrieve(bootstrapper_url, bootstrapper_path)
+                logging.info(f"[INIT] Bootstrapper letöltve: {bootstrapper_path}")
+                
+                # Telepítés silent módban
+                logging.info("[INIT] WebView2 telepítés indítása (silent)...")
+                si = subprocess.STARTUPINFO()
+                si.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+                result = subprocess.run(
+                    [bootstrapper_path, '/silent', '/install'],
+                    capture_output=True,
+                    startupinfo=si,
+                    creationflags=subprocess.CREATE_NO_WINDOW,
+                    timeout=120
+                )
+                
+                logging.info(f"[INIT] WebView2 telepítés kész, returncode={result.returncode}")
+                
+                # Törlés
+                try:
+                    os.remove(bootstrapper_path)
+                except Exception:
+                    pass
+                
+                # Újraellenőrzés
+                wv2_ok2, wv2_info2 = check_webview2_runtime()
+                if wv2_ok2:
+                    logging.info(f"[INIT] WebView2 telepítés SIKERES! v{wv2_info2}")
+                    ctypes.windll.user32.MessageBoxW(
+                        None,
+                        f"WebView2 sikeresen telepítve!\n\nVerzió: {wv2_info2}\n\n"
+                        "A program most újraindul a GUI-val.",
+                        "DriverDoktor - Siker",
+                        0x40 | MB_TOPMOST
+                    )
+                    # Program újraindítása
+                    os.execv(sys.executable, [sys.executable] + sys.argv)
+                else:
+                    logging.error(f"[INIT] WebView2 telepítés után még mindig nem OK: {wv2_info2}")
+                    ctypes.windll.user32.MessageBoxW(
+                        None,
+                        "WebView2 telepítés sikertelen vagy újraindítás szükséges.\n\n"
+                        "Próbáld meg manuálisan:\n"
+                        "https://go.microsoft.com/fwlink/p/?LinkId=2124703\n\n"
+                        "Vagy használd a CLI módot.",
+                        "DriverDoktor - Hiba",
+                        0x10 | MB_TOPMOST  # MB_ICONERROR
+                    )
+                    
+            except Exception as e:
+                logging.error(f"[INIT] WebView2 telepítési hiba: {e}")
+                ctypes.windll.user32.MessageBoxW(
+                    None,
+                    f"Hiba a WebView2 telepítésekor:\n{e}\n\n"
+                    "Próbáld meg manuálisan:\n"
+                    "https://go.microsoft.com/fwlink/p/?LinkId=2124703\n\n"
+                    "Vagy használd a CLI módot.",
+                    "DriverDoktor - Hiba",
+                    0x10 | MB_TOPMOST
+                )
+        else:
+            logging.info("[INIT] Felhasználó elutasította a WebView2 telepítést")
+        
+        # CLI mód indítása
+        logging.info("[INIT] CLI mód indítása...")
         
         # Konzol ablak létrehozása (windowed exe-nél nincs)
         try:
@@ -3377,9 +3482,7 @@ if __name__ == "__main__":
             pass
         
         print("\n" + "=" * 60)
-        print("  ⚠️  WebView2 Runtime túl régi vagy hiányzik!")
-        print("  📋 CLI MÓD automatikusan aktiválva")
-        print("  💡 GUI-hoz frissítsd: https://go.microsoft.com/fwlink/p/?LinkId=2124703")
+        print("  📋 DRIVERDOKTOR - CLI MÓD")
         print("=" * 60)
         
         run_cli_mode()
