@@ -2366,8 +2366,23 @@ if __name__ == "__main__":
         api.set_window(window)
 
     try:
+        logging.info("[MAIN] webview.start() hívása...")
         webview.start(func=on_start, debug=False)
-    except Exception:
-        pass
+    except Exception as e:
+        logging.error(f"[MAIN] WebView indítási hiba: {e}")
+        logging.error("[MAIN] WinPE-ben a WebView2 Runtime szükséges!")
+        import traceback
+        logging.error(traceback.format_exc())
+        # Mutassunk hibaüzenetet
+        try:
+            import ctypes
+            ctypes.windll.user32.MessageBoxW(0, 
+                f"A DriverDoktor nem tudott elindulni!\n\n"
+                f"Hiba: {e}\n\n"
+                f"WinPE környezetben a WebView2 Runtime szükséges.\n"
+                f"Próbáld a normál Windows-ból futtatni.",
+                "DriverDoktor - Hiba", 0x10)
+        except:
+            pass
     finally:
         os._exit(0)
