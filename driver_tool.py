@@ -1,7 +1,4 @@
 import ctypes
-import ctypes
-BUILD_NUMBER = 78
-
 import os
 import sys
 import subprocess
@@ -16,6 +13,8 @@ import traceback
 import winreg
 import queue
 from datetime import datetime
+
+BUILD_NUMBER = 78
 
 # Teljes értékű Software Rendering bekapcsolása az egész alkalmazásra
 # Ez megakadályozza, hogy a WebView2 összeomoljon (fehér képernyő) amikor a videókártya drivert töröljük
@@ -510,7 +509,7 @@ class DriverToolApi:
 
     def reboot_system(self):
         logging.info("[API] reboot_system() - Felhasználó újraindítást kért")
-        self._run(['shutdown', '/r', '/t', '0', '/'])
+        self._run(['shutdown', '/r', '/t', '0', '/f'])
         return True
 
     def cancel_task(self):
@@ -835,7 +834,7 @@ class DriverToolApi:
         if efi_letter:
             # UEFI mód - a megtalált EFI partícióra
             self.emit('task_progress', {'task': 'restore', 'log': f'bcdboot {target_drive}Windows /s {efi_letter} /f UEFI'})
-            res = self._run(['bcdboot', f'{target_drive}Windows', '/s', efi_letter, '/', 'UEFI'])
+            res = self._run(['bcdboot', f'{target_drive}Windows', '/s', efi_letter, '/f', 'UEFI'])
             if res.returncode == 0:
                 success = True
                 self.emit('task_progress', {'task': 'restore', 'log': '✅ BCD sikeresen újraépítve (UEFI)!'})
@@ -856,7 +855,7 @@ class DriverToolApi:
         if not success:
             # BIOS/Legacy mód vagy UEFI fallback - a Windows meghajtóra /f ALL
             self.emit('task_progress', {'task': 'restore', 'log': f'bcdboot {target_drive}Windows /s {target_drive} /f ALL'})
-            res = self._run(['bcdboot', f'{target_drive}Windows', '/s', target_drive, '/', 'ALL'])
+            res = self._run(['bcdboot', f'{target_drive}Windows', '/s', target_drive, '/f', 'ALL'])
             if res.returncode == 0:
                 success = True
                 self.emit('task_progress', {'task': 'restore', 'log': '✅ BCD sikeresen újraépítve (ALL)!'})
@@ -990,7 +989,7 @@ class DriverToolApi:
                 if reboot and success > 0:
                     self.emit('task_progress', {'task': 'delete', 'log': '\n🔄 Újraindítás 5 másodperc múlva...'})
                     time.sleep(5)
-                    self._run(['shutdown', '/r', '/t', '0', '/'])
+                    self._run(['shutdown', '/r', '/t', '0', '/f'])
 
         self._safe_thread('delete', worker)
 
@@ -1681,7 +1680,7 @@ try {
                 logging.error(f"[AUTOFIX] winreg hiba: {e}")
                 self.emit('task_progress', {'task': 'autofix', 'log': f'  ⚠ winreg hiba: {e}'})
             self._run(['reg', 'add', r'HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\DriverSearching',
-                       '/v', 'SearchOrderConfig', '/t', 'REG_DWORD', '/d', '0', '/'])
+                       '/v', 'SearchOrderConfig', '/t', 'REG_DWORD', '/d', '0', '/f'])
 
             self._run('net stop wuauserv & net start wuauserv', shell=True)
             logging.info("[AUTOFIX] WU szolgáltatás újraindítva")
@@ -1929,7 +1928,7 @@ try {
             except Exception as e:
                 self.emit('task_progress', {'task': 'disable_wu', 'log': f'⚠ {e}'})
             self._run(['reg', 'add', r'HKLM\SOFTWARE\Policies\Microsoft\Windows\WindowsUpdate',
-                       '/v', 'ExcludeWUDriversInQualityUpdate', '/t', 'REG_DWORD', '/d', '1', '/'])
+                       '/v', 'ExcludeWUDriversInQualityUpdate', '/t', 'REG_DWORD', '/d', '1', '/f'])
             try:
                 with winreg.CreateKeyEx(winreg.HKEY_LOCAL_MACHINE, r"SOFTWARE\Microsoft\Windows\CurrentVersion\DriverSearching", 0, winreg.KEY_WRITE) as key:
                     winreg.SetValueEx(key, "SearchOrderConfig", 0, winreg.REG_DWORD, 0)
@@ -1937,7 +1936,7 @@ try {
             except Exception as e:
                 self.emit('task_progress', {'task': 'disable_wu', 'log': f'⚠ {e}'})
             self._run(['reg', 'add', r'HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\DriverSearching',
-                       '/v', 'SearchOrderConfig', '/t', 'REG_DWORD', '/d', '0', '/'])
+                       '/v', 'SearchOrderConfig', '/t', 'REG_DWORD', '/d', '0', '/f'])
             self._run('net stop wuauserv & net start wuauserv', shell=True)
             self.emit('task_progress', {'task': 'disable_wu', 'log': '✅ WU szolgáltatás újraindítva'})
             self.emit('task_complete', {'task': 'disable_wu', 'status': '✅ WU driver letiltás kész!'})
@@ -1982,9 +1981,9 @@ try {
                 self.emit('task_progress', {'task': 'enable_wu', 'log': f'⚠ {e}'})
 
             self._run(['reg', 'add', r'HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\DriverSearching',
-                       '/v', 'SearchOrderConfig', '/t', 'REG_DWORD', '/d', '1', '/'])
+                       '/v', 'SearchOrderConfig', '/t', 'REG_DWORD', '/d', '1', '/f'])
             self._run(['reg', 'delete', r'HKLM\SOFTWARE\Policies\Microsoft\Windows\WindowsUpdate',
-                       '/v', 'ExcludeWUDriversInQualityUpdate', '/'])
+                       '/v', 'ExcludeWUDriversInQualityUpdate', '/f'])
 
             # Stop services
             logging.info("[WU_ENABLE] Szolgáltatások leállítása...")
@@ -2238,7 +2237,7 @@ try {
                 logging.warning(f"[RESTORE_POINT] Enable-ComputerRestore hiba: {enable_out}")
                 # Try via registry + vssadmin as fallback
                 self.emit('task_progress', {'task': 'rp', 'log': f'⚠ Enable-ComputerRestore hiba: {enable_out}\nRegistry + vssadmin fallback...'})
-                self._run(['reg', 'add', r'HKLM\SOFTWARE\Microsoft\Windows NT\CurrentVersion\SystemRestore', '/v', 'DisableSR', '/t', 'REG_DWORD', '/d', '0', '/'])
+                self._run(['reg', 'add', r'HKLM\SOFTWARE\Microsoft\Windows NT\CurrentVersion\SystemRestore', '/v', 'DisableSR', '/t', 'REG_DWORD', '/d', '0', '/f'])
                 self._run(['vssadmin', 'resize', 'shadowstorage', f'/for={os.environ.get("SystemDrive", "C:")}', f'/on={os.environ.get("SystemDrive", "C:")}', '/maxsize=5%'])
                 # Retry enable
                 enable_res2 = self._run(["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", enable_ps], encoding='utf-8')
@@ -2414,7 +2413,7 @@ try {
         
         if efi_letter:
             self.emit('task_progress', {'task': task_name, 'log': f'bcdboot {target_drive}Windows /s {efi_letter} /f UEFI'})
-            res = self._run(['bcdboot', f'{target_drive}Windows', '/s', efi_letter, '/', 'UEFI'])
+            res = self._run(['bcdboot', f'{target_drive}Windows', '/s', efi_letter, '/f', 'UEFI'])
             if res.returncode == 0:
                 success = True
                 self.emit('task_progress', {'task': task_name, 'log': '✅ BCD sikeresen újraépítve (UEFI)!'})
@@ -2431,7 +2430,7 @@ try {
         
         if not success:
             self.emit('task_progress', {'task': task_name, 'log': f'bcdboot {target_drive}Windows /s {target_drive} /f ALL'})
-            res = self._run(['bcdboot', f'{target_drive}Windows', '/s', target_drive, '/', 'ALL'])
+            res = self._run(['bcdboot', f'{target_drive}Windows', '/s', target_drive, '/f', 'ALL'])
             if res.returncode == 0:
                 success = True
                 self.emit('task_progress', {'task': task_name, 'log': '✅ BCD sikeresen újraépítve (ALL)!'})
@@ -3298,7 +3297,7 @@ class CliApi:
         
         if efi_letter:
             print(f"bcdboot {target_drive}Windows /s {efi_letter} /f UEFI")
-            res = self._run(['bcdboot', f'{target_drive}Windows', '/s', efi_letter, '/', 'UEFI'])
+            res = self._run(['bcdboot', f'{target_drive}Windows', '/s', efi_letter, '/f', 'UEFI'])
             if res.returncode == 0:
                 success = True
                 print("✅ BCD sikeresen újraépítve (UEFI)!")
@@ -3315,7 +3314,7 @@ class CliApi:
         
         if not success:
             print(f"bcdboot {target_drive}Windows /s {target_drive} /f ALL")
-            res = self._run(['bcdboot', f'{target_drive}Windows', '/s', target_drive, '/', 'ALL'])
+            res = self._run(['bcdboot', f'{target_drive}Windows', '/s', target_drive, '/f', 'ALL'])
             if res.returncode == 0:
                 success = True
                 print("✅ BCD sikeresen újraépítve (ALL)!")
@@ -3491,7 +3490,7 @@ class CliApi:
             print(f"  ⚠️  {e}")
         
         self._run(['reg', 'add', r'HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\DriverSearching',
-                   '/v', 'SearchOrderConfig', '/t', 'REG_DWORD', '/d', '0', '/'])
+                   '/v', 'SearchOrderConfig', '/t', 'REG_DWORD', '/d', '0', '/f'])
         
         print("  🔄 WU szolgáltatás újraindítása...")
         self._run('net stop wuauserv & net start wuauserv', shell=True)
@@ -3722,7 +3721,7 @@ try {
                     print(f"\r   {i} másodperc...", end="", flush=True)
                     time.sleep(1)
                 print("\n🔄 Újraindítás MOST!")
-                self._run(['shutdown', '/r', '/t', '0', '/'])
+                self._run(['shutdown', '/r', '/t', '0', '/f'])
             except KeyboardInterrupt:
                 print("\n❌ Újraindítás megszakítva.")
         else:
