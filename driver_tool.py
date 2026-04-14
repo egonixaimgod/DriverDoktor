@@ -506,6 +506,16 @@ class DriverToolApi:
     # ================================================================
     # GENERAL
     # ================================================================
+
+    def js_log(self, level, msg):
+        # UI-bol jovo nyers JavaScript logok kozvetitess
+        level = str(level).upper()
+        if level == 'ERROR': log_lvl = logging.ERROR
+        elif level == 'WARN' or level == 'WARNING': log_lvl = logging.WARNING
+        elif level == 'DEBUG': log_lvl = logging.DEBUG
+        else: log_lvl = logging.INFO
+        logging.log(log_lvl, f"[JS_UI] {msg}")
+
     def get_init_data(self):
         logging.info(f"[API] get_init_data() hívás - build={BUILD_NUMBER}, target={self.target_os_path}")
         return {'build': BUILD_NUMBER, 'sys_drive': self.sys_drive, 'target_os': self.target_os_path}
