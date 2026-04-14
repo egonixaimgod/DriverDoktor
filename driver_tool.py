@@ -386,7 +386,6 @@ class DriverToolApi:
         logging.info("[INIT] DriverToolApi kész.")
 
     def set_window(self, window):
-        global _webview_ready, _webview_error
         logging.info("[WINDOW] WebView ablak beállítása...")
         self._window = window
         # Wait for WebView2 DOM to be ready (max 12s, watchdog: 15s)
@@ -2243,7 +2242,7 @@ try {
 
             # 1) Enable System Restore on C: (force enable even if disabled)
             logging.info("[RESTORE_POINT] Rendszervédelem engedélyezése...")
-            enable_ps = '[Console]::OutputEncoding = [System.Text.Encoding]::UTF8; try { Enable-ComputerRestore -Drive "C:\\" -ErrorAction Stop; Write-Output "OK" } catch { Write-Output "FAIL: $($_.Exception.Message)" }'
+            enable_ps = '[Console]::OutputEncoding = [System.Text.Encoding]::UTF8; try { Enable-ComputerRestore -Drive "$($env:SystemDrive)\\" -ErrorAction Stop; Write-Output "OK" } catch { Write-Output "FAIL: $($_.Exception.Message)" }'
             enable_res = self._run(["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", enable_ps], encoding='utf-8')
             enable_out = (enable_res.stdout or '').strip()
             if 'FAIL' in enable_out:
@@ -2251,7 +2250,7 @@ try {
                 # Try via registry + vssadmin as fallback
                 self.emit('task_progress', {'task': 'rp', 'log': f'⚠ Enable-ComputerRestore hiba: {enable_out}\nRegistry + vssadmin fallback...'})
                 self._run(['reg', 'add', r'HKLM\SOFTWARE\Microsoft\Windows NT\CurrentVersion\SystemRestore', '/v', 'DisableSR', '/t', 'REG_DWORD', '/d', '0', '/f'])
-                self._run(['vssadmin', 'resize', 'shadowstorage', '/for=C:', '/on=C:', '/maxsize=5%'])
+                self._run(['vssadmin', 'resize', 'shadowstorage', f'/for={os.environ.get("SystemDrive", "C:")}', f'/on={os.environ.get("SystemDrive", "C:")}', '/maxsize=5%'])
                 # Retry enable
                 enable_res2 = self._run(["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", enable_ps], encoding='utf-8')
                 enable_out2 = (enable_res2.stdout or '').strip()
@@ -3408,7 +3407,7 @@ class CliApi:
         
         # Enable System Restore
         print("1/2 Rendszervédelem engedélyezése...")
-        self._run(["powershell", "-NoProfile", "-Command", 'Enable-ComputerRestore -Drive "C:\\" -ErrorAction SilentlyContinue'])
+        self._run(["powershell", "-NoProfile", "-Command", 'Enable-ComputerRestore -Drive "$($env:SystemDrive)\\" -ErrorAction SilentlyContinue'])
         self._run(['reg', 'add', r'HKLM\SOFTWARE\Microsoft\Windows NT\CurrentVersion\SystemRestore',
                    '/v', 'SystemRestorePointCreationFrequency', '/t', 'REG_DWORD', '/d', '0', '/f'])
         
@@ -3960,6 +3959,19 @@ def run_cli_mode():
 # MAIN
 # ================================================================
 if __name__ == "__main__":
+    import multiprocessing
+    multiprocessing.freeze_support()
+    
+    if "--cli" in sys.argv:
+        if getattr(sys, "frozen", False):
+            import ctypes
+            # Attach to the parent console if running from cmd in windowed mode
+            if ctypes.windll.kernel32.AttachConsole(-1):
+                import io
+                sys.stdout = open("CONOUT$", "w", encoding="utf-8")
+                sys.stderr = open("CONOUT$", "w", encoding="utf-8")
+                sys.stdin = open("CONIN$", "r", encoding="utf-8")
+
     # Ha --progress argumentummal indítottuk, csak a progress ablakot nyitjuk meg
     if len(sys.argv) >= 3 and sys.argv[1] == '--progress':
         log_path = sys.argv[2]
@@ -3994,7 +4006,6 @@ if __name__ == "__main__":
         logging.basicConfig(level=logging.DEBUG)
 
     def global_exception_handler(exc_type, exc_value, exc_traceback):
-        global _webview_error
         err_str = str(exc_value)
         logging.exception("FATÁLIS HIBA:", exc_info=(exc_type, exc_value, exc_traceback))
         # WebView2 hibák detektálása
@@ -4004,7 +4015,6 @@ if __name__ == "__main__":
     sys.excepthook = global_exception_handler
 
     def thread_exception_handler(args):
-        global _webview_error
         err_str = str(args.exc_value)
         logging.exception("HÁTTÉRSZÁL HIBA:", exc_info=(args.exc_type, args.exc_value, args.exc_traceback))
         if 'WebView2' in err_str or 'ICoreWebView2' in err_str or '.NET' in err_str:
@@ -4166,7 +4176,6 @@ if __name__ == "__main__":
 
     # Watchdog: ha 15mp alatt nem indul el a GUI, bezárja az ablakot és CLI-re vált
     def webview_watchdog():
-        global _webview_ready, _webview_error
         TIMEOUT = 15  # seconds
         start = time.time()
         while time.time() - start < TIMEOUT:
