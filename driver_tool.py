@@ -97,6 +97,25 @@ class DriverToolApi:
         except Exception as e:
             logging.warning(f"[EMIT] Logging hiba: {e}")
 
+        # Ablak cím frissítése autofix progress közben (backup megoldás ha a modal eltűnik)
+        if self._window and event in ('task_start', 'task_progress', 'task_complete'):
+            try:
+                if event == 'task_start':
+                    title = data.get('title', 'Folyamat...') if isinstance(data, dict) else 'Folyamat...'
+                    self._window.set_title(f"DriverDoktor - {title}")
+                elif event == 'task_progress' and isinstance(data, dict):
+                    counter = data.get('counter', '')
+                    status = data.get('status', '')
+                    phase = data.get('phase', '')
+                    if counter:
+                        self._window.set_title(f"DriverDoktor - [{counter}] {status or phase}")
+                    elif status:
+                        self._window.set_title(f"DriverDoktor - {status}")
+                elif event == 'task_complete':
+                    self._window.set_title('DriverDoktor')
+            except Exception:
+                pass  # Ne akadjon el ha a title frissítés nem sikerül
+
         if self._window:
             try:
                 payload = json.dumps({"event": event, "data": data}, ensure_ascii=False, default=str)
