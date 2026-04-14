@@ -1,4 +1,4 @@
-BUILD_NUMBER = 68
+BUILD_NUMBER = 71
 
 import os
 import sys
@@ -33,6 +33,118 @@ except AttributeError:
 # WebView2 init state (watchdog)
 _webview_ready = threading.Event()
 _webview_error = threading.Event()
+
+# WebView2 minimum verzió ellenőrzés (ICoreWebView2Environment10 interface min v109 kell)
+MIN_WEBVIEW2_MAJOR = 109
+
+def check_webview2_runtime():
+    """
+    Ellenőrzi, hogy a WebView2 Runtime telepítve van-e és megfelelő verzió-e.
+    Visszatérési értékek:
+        (True, verzió_string) - OK
+        (False, hibaüzenet) - Hiba
+    """
+    version = None
+    
+    # 1. Önálló WebView2 Runtime telepítések (EdgeUpdate registry)
+    edgeupdate_paths = [
+        (winreg.HKEY_LOCAL_MACHINE, r"SOFTWARE\WOW6432Node\Microsoft\EdgeUpdate\Clients\{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}"),
+        (winreg.HKEY_LOCAL_MACHINE, r"SOFTWARE\Microsoft\EdgeUpdate\Clients\{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}"),
+        (winreg.HKEY_CURRENT_USER, r"SOFTWARE\Microsoft\EdgeUpdate\Clients\{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}"),
+    ]
+    for hive, path in edgeupdate_paths:
+        try:
+            with winreg.OpenKey(hive, path) as key:
+                version, _ = winreg.QueryValueEx(key, "pv")
+                if version and version != "0.0.0.0":
+                    break
+        except (FileNotFoundError, OSError):
+            continue
+    
+    # 2. Edge beépített WebView2 (Windows 11 / Edge-be integrált)
+    if not version:
+        edge_webview_paths = [
+            (winreg.HKEY_LOCAL_MACHINE, r"SOFTWARE\WOW6432Node\Microsoft\EdgeWebView\BLBeacon"),
+            (winreg.HKEY_LOCAL_MACHINE, r"SOFTWARE\Microsoft\EdgeWebView\BLBeacon"),
+            (winreg.HKEY_CURRENT_USER, r"SOFTWARE\Microsoft\EdgeWebView\BLBeacon"),
+        ]
+        for hive, path in edge_webview_paths:
+            try:
+                with winreg.OpenKey(hive, path) as key:
+                    version, _ = winreg.QueryValueEx(key, "version")
+                    if version:
+                        break
+            except (FileNotFoundError, OSError):
+                continue
+    
+    # 3. Edge böngésző verzió (fallback - ha WebView2 nincs külön regisztrálva)
+    if not version:
+        edge_paths = [
+            (winreg.HKEY_LOCAL_MACHINE, r"SOFTWARE\WOW6432Node\Microsoft\Edge\BLBeacon"),
+            (winreg.HKEY_LOCAL_MACHINE, r"SOFTWARE\Microsoft\Edge\BLBeacon"),
+            (winreg.HKEY_CURRENT_USER, r"SOFTWARE\Microsoft\Edge\BLBeacon"),
+        ]
+        for hive, path in edge_paths:
+            try:
+                with winreg.OpenKey(hive, path) as key:
+                    version, _ = winreg.QueryValueEx(key, "version")
+                    if version:
+                        break
+            except (FileNotFoundError, OSError):
+                continue
+    
+    # 4. Utolsó esély: GetAvailableCoreWebView2BrowserVersionString (ha van WebView2Loader.dll)
+    if not version:
+        try:
+            import ctypes
+            wv2_loader = ctypes.windll.LoadLibrary("WebView2Loader.dll")
+            buf = ctypes.create_unicode_buffer(256)
+            hr = wv2_loader.GetAvailableCoreWebView2BrowserVersionString(None, ctypes.byref(buf))
+            if hr == 0 and buf.value:
+                version = buf.value
+        except Exception:
+            pass
+    
+    if not version:
+        return (False, "WebView2 Runtime nem található!\n\n"
+                       "A program működéséhez telepíteni kell:\n"
+                       "https://go.microsoft.com/fwlink/p/?LinkId=2124703\n\n"
+                       "(Evergreen Bootstrapper)")
+    
+    # Verzió parsing: pl. "109.0.1518.61" -> 109
+    try:
+        major = int(version.split('.')[0])
+    except (ValueError, IndexError):
+        major = 0
+    
+    if major < MIN_WEBVIEW2_MAJOR:
+        return (False, f"WebView2 Runtime túl régi! (v{version})\n\n"
+                       f"Minimum v{MIN_WEBVIEW2_MAJOR}.x szükséges.\n\n"
+                       "Frissítsd itt:\n"
+                       "https://go.microsoft.com/fwlink/p/?LinkId=2124703")
+    
+    return (True, version)
+
+
+def show_webview2_error(message):
+    """MessageBox megjelenítése WebView2 hibáról, majd program kilépés."""
+    try:
+        import webbrowser
+        MB_OK = 0x0
+        MB_ICONERROR = 0x10
+        MB_TOPMOST = 0x40000
+        result = ctypes.windll.user32.MessageBoxW(
+            None,
+            message + "\n\nMegnyissam a letöltési oldalt?",
+            "DriverDoktor - WebView2 hiba",
+            0x4 | MB_ICONERROR | MB_TOPMOST  # MB_YESNO
+        )
+        if result == 6:  # IDYES
+            webbrowser.open("https://go.microsoft.com/fwlink/p/?LinkId=2124703")
+    except Exception:
+        pass
+    sys.exit(1)
+
 
 # Suppress noisy PIL/Pillow debug logging
 logging.getLogger('PIL').setLevel(logging.WARNING)
@@ -273,17 +385,17 @@ class DriverToolApi:
         global _webview_ready, _webview_error
         logging.info("[WINDOW] WebView ablak beállítása...")
         self._window = window
-        # Wait for WebView2 DOM to be ready
+        # Wait for WebView2 DOM to be ready (max 12s, watchdog: 15s)
         dom_ready = False
-        for i in range(50):
+        for i in range(120):  # 120 * 0.1s = 12s
             try:
                 if self._window and self._window.evaluate_js('1+1') == 2:
-                    logging.info(f"[WINDOW] WebView2 DOM kész ({i+1} próba után)")
+                    logging.info(f"[WINDOW] WebView2 DOM kész ({i+1} próba után, {(i+1)*0.1:.1f}s)")
                     dom_ready = True
                     _webview_ready.set()
                     break
             except Exception as e:
-                if i == 49:
+                if i == 119:
                     logging.warning(f"[WINDOW] WebView2 DOM nem reagál: {e}")
             time.sleep(0.1)
         if not dom_ready:
@@ -333,17 +445,20 @@ class DriverToolApi:
                 pass  # Ne akadjon el ha a title frissítés nem sikerül
 
         if self._window:
+            payload = None
             try:
                 payload = json.dumps({"event": event, "data": data}, ensure_ascii=False, default=str)
                 self._window.evaluate_js(f'window.handlePyEvent({payload})')
             except Exception as e:
-                if 'NoneType' in str(e):
+                if 'NoneType' in str(e) and payload:
                     logging.warning(f"[EMIT:{event}] Window None, újrapróbálás...")
                     time.sleep(0.5)
                     try:
                         self._window.evaluate_js(f'window.handlePyEvent({payload})')
                     except Exception as e2:
                         logging.error(f"[EMIT:{event}] Újrapróbálás sikertelen: {e2}")
+                elif payload is None:
+                    logging.error(f"[EMIT:{event}] JSON serializálási hiba: {e}")
                 else:
                     logging.error(f"[EMIT:{event}] Hiba: {e}")
 
@@ -403,10 +518,10 @@ class DriverToolApi:
 
     def _check_cancel(self):
         """Ellenőrzi, hogy a felhasználó megszakította-e a műveletet."""
-        cancelled = getattr(self, '_cancel_flag', False)
-        if cancelled:
+        if self._cancel_flag:
             logging.info("[CANCEL] Megszakítás flag aktiv!")
-        return cancelled
+            return True
+        return False
 
     def change_target_os(self):
         logging.info("[API] change_target_os() hívás")
@@ -600,7 +715,7 @@ class DriverToolApi:
 
             cancelled = False
             for i, pub in enumerate(published_names):
-                if getattr(self, '_cancel_flag', False):
+                if self._cancel_flag:
                     self.emit('task_progress', {'task': 'delete', 'log': '❗ Törlés megszakítva a felhasználó által!'})
                     self.emit('task_progress', {'status': '❗ Megszakítva!', 'counter': f'{i} / {total}'})
                     cancelled = True
@@ -656,7 +771,7 @@ class DriverToolApi:
                                     try:
                                         os.remove(fpath)
                                         found_any = True
-                                    except:
+                                    except OSError:
                                         self._run(f'del /f /q "{fpath}"', shell=True)
                                         found_any = True
 
@@ -1117,6 +1232,7 @@ try {
             for line in process.stdout:
                 if self._check_cancel():
                     process.terminate()
+                    process.wait()  # Prevent zombie process
                     self.emit('task_progress', {'task': 'wu_install', 'log': '\n❗ Megszakítva!'})
                     self.emit('task_complete', {'task': 'wu_install', 'status': '❗ Megszakítva!', 'success': success, 'fail': fail})
                     return
@@ -1301,6 +1417,7 @@ try {
                 if hasattr(self, '_autofix_window_proc') and self._autofix_window_proc:
                     try:
                         self._autofix_window_proc.terminate()
+                        self._autofix_window_proc.wait()  # Prevent zombie process
                     except Exception:
                         pass
                     self._autofix_window_proc = None
@@ -1500,6 +1617,7 @@ try {
             for line in process.stdout:
                 if self._check_cancel():
                     process.terminate()
+                    process.wait()  # Prevent zombie process
                     self.emit('task_progress', {'task': 'autofix', 'log': '\n❗ Megszakítva!'})
                     self.emit('task_complete', {'task': 'autofix', 'status': '❗ Megszakítva!', 'counter': 'Megszakítva'})
                     return
@@ -1796,6 +1914,7 @@ try {
             for line in process.stdout:
                 if self._check_cancel():
                     process.terminate()
+                    process.wait()  # Prevent zombie process
                     cancelled = True
                     break
                 line = line.strip()
@@ -2012,13 +2131,13 @@ try {
                 else:
                     self.emit('task_progress', {'task': 'restore', 'log': f'  ⚠️ Robocopy hiba ({res.returncode}), végső tartalék: mappánkénti jogszerzés (lassabb)...'})
                     for root, _, files in os.walk(src):
-                        if getattr(self, '_cancel_flag', False): return
+                        if self._cancel_flag: return
                         rel = os.path.relpath(root, src)
                         target_dir = os.path.join(dst, rel) if rel != '.' else dst
                         os.makedirs(target_dir, exist_ok=True)
 
                         for f in files:
-                            if getattr(self, '_cancel_flag', False): return
+                            if self._cancel_flag: return
                             sfile = os.path.join(root, f)
                             dfile = os.path.join(target_dir, f)
                             if os.path.exists(dfile):
@@ -2584,6 +2703,14 @@ if __name__ == "__main__":
     logging.info("DriverDoktor ELINDITVA")
     logging.info(f"Futtatasi konyvtar: {os.getcwd()}")
     logging.info("=" * 50)
+
+    # WebView2 Runtime verzió ellenőrzés induláskor
+    wv2_ok, wv2_info = check_webview2_runtime()
+    if wv2_ok:
+        logging.info(f"[INIT] WebView2 Runtime OK: v{wv2_info}")
+    else:
+        logging.error(f"[INIT] WebView2 Runtime hiba: {wv2_info}")
+        show_webview2_error(wv2_info)
 
     # Hardware rendering (gyors) - az autofix progress külön ablakban jelenik meg
 
