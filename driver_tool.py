@@ -14,7 +14,7 @@ import winreg
 import queue
 from datetime import datetime
 
-BUILD_NUMBER = 78
+BUILD_NUMBER = 79
 
 # Teljes értékű Software Rendering bekapcsolása az egész alkalmazásra
 # Ez megakadályozza, hogy a WebView2 összeomoljon (fehér képernyő) amikor a videókártya drivert töröljük
@@ -866,14 +866,15 @@ class DriverToolApi:
                 logging.debug(e)
         
         if not success:
-            # BIOS/Legacy mód vagy UEFI fallback - a Windows meghajtóra /f ALL
-            self.emit('task_progress', {'task': 'restore', 'log': f'bcdboot {target_drive}Windows /s {target_drive} /f ALL'})
-            res = self._run(['bcdboot', f'{target_drive}Windows', '/s', target_drive, '/f', 'ALL'])
+            # Fallback: bcdboot /s nélkül - automatikusan megkeresi a system partíciót
+            self.emit('task_progress', {'task': 'restore', 'log': f'bcdboot {target_drive}Windows /f ALL'})
+            res = self._run(['bcdboot', f'{target_drive}Windows', '/f', 'ALL'])
             if res.returncode == 0:
                 success = True
                 self.emit('task_progress', {'task': 'restore', 'log': '✅ BCD sikeresen újraépítve (ALL)!'})
             else:
-                self.emit('task_progress', {'task': 'restore', 'log': f'⚠️ bcdboot hiba: {res.stderr[:200] if res.stderr else res.stdout[:200]}'})
+                err_msg = res.stderr.strip() if res.stderr else res.stdout.strip() if res.stdout else f'Exit code: {res.returncode}'
+                self.emit('task_progress', {'task': 'restore', 'log': f'⚠️ bcdboot hiba (0x{res.returncode:X}): {err_msg[:300]}'})
         
         # 3. bootrec parancsok (ha még mindig nem sikerült)
         if not success:
@@ -2441,13 +2442,15 @@ try {
                 logging.debug(e)
         
         if not success:
-            self.emit('task_progress', {'task': task_name, 'log': f'bcdboot {target_drive}Windows /s {target_drive} /f ALL'})
-            res = self._run(['bcdboot', f'{target_drive}Windows', '/s', target_drive, '/f', 'ALL'])
+            # Fallback: bcdboot /s nélkül - automatikusan megkeresi a system partíciót
+            self.emit('task_progress', {'task': task_name, 'log': f'bcdboot {target_drive}Windows /f ALL'})
+            res = self._run(['bcdboot', f'{target_drive}Windows', '/f', 'ALL'])
             if res.returncode == 0:
                 success = True
                 self.emit('task_progress', {'task': task_name, 'log': '✅ BCD sikeresen újraépítve (ALL)!'})
             else:
-                self.emit('task_progress', {'task': task_name, 'log': f'⚠️ bcdboot hiba: {res.stderr[:200] if res.stderr else res.stdout[:200]}'})
+                err_msg = res.stderr.strip() if res.stderr else res.stdout.strip() if res.stdout else f'Exit code: {res.returncode}'
+                self.emit('task_progress', {'task': task_name, 'log': f'⚠️ bcdboot hiba (0x{res.returncode:X}): {err_msg[:300]}'})
         
         if not success:
             self.emit('task_progress', {'task': task_name, 'log': 'bootrec parancsok futtatása...'})
@@ -3342,13 +3345,14 @@ class CliApi:
                 logging.debug(e)
         
         if not success:
-            print(f"bcdboot {target_drive}Windows /s {target_drive} /f ALL")
-            res = self._run(['bcdboot', f'{target_drive}Windows', '/s', target_drive, '/f', 'ALL'])
+            # Fallback: /s nélkül
+            print(f"bcdboot {target_drive}Windows /f ALL")
+            res = self._run(['bcdboot', f'{target_drive}Windows', '/f', 'ALL'])
             if res.returncode == 0:
                 success = True
                 print("✅ BCD sikeresen újraépítve (ALL)!")
             else:
-                print("⚠️  bcdboot hiba, bootrec parancsok...")
+                print(f"⚠️  bcdboot hiba (0x{res.returncode:X}), bootrec parancsok...")
         
         if not success:
             print("bootrec parancsok...")
