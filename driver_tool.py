@@ -743,7 +743,7 @@ class DriverToolApi:
             diskpart_list = (
                 'list volume\n'
             )
-            res = self._run(['diskpart'], input=diskpart_list, text=True, timeout=30)
+            res = self._run(['diskpart'], input=diskpart_list, timeout=30)
             
             if res.returncode == 0 and res.stdout:
                 lines = res.stdout.splitlines()
@@ -771,7 +771,7 @@ class DriverToolApi:
                         f'select volume {target_volume}\n'
                         'detail volume\n'
                     )
-                    res2 = self._run(['diskpart'], input=diskpart_detail, text=True, timeout=30)
+                    res2 = self._run(['diskpart'], input=diskpart_detail, timeout=30)
                     
                     if res2.returncode == 0 and res2.stdout:
                         for line in res2.stdout.splitlines():
@@ -793,7 +793,7 @@ class DriverToolApi:
                             f'select disk {disk_number}\n'
                             'list partition\n'
                         )
-                        res3 = self._run(['diskpart'], input=diskpart_efi, text=True, timeout=30)
+                        res3 = self._run(['diskpart'], input=diskpart_efi, timeout=30)
                         
                         efi_partition = None
                         if res3.returncode == 0 and res3.stdout:
@@ -833,7 +833,7 @@ class DriverToolApi:
                                     f'select partition {efi_partition}\n'
                                     f'assign letter={free_letter}\n'
                                 )
-                                res4 = self._run(['diskpart'], input=diskpart_assign, text=True, timeout=30)
+                                res4 = self._run(['diskpart'], input=diskpart_assign, timeout=30)
                                 if res4.returncode == 0:
                                     efi_letter = free_letter + ':'
                                     self.emit('task_progress', {'task': 'restore', 'log': f'EFI betűjel hozzárendelve: {efi_letter}'})
@@ -861,7 +861,7 @@ class DriverToolApi:
                     f'select partition {efi_partition}\n'
                     f'remove letter={efi_letter[0]}\n'
                 )
-                self._run(['diskpart'], input=diskpart_remove, text=True, timeout=30)
+                self._run(['diskpart'], input=diskpart_remove, timeout=30)
             except Exception as e:
                 logging.debug(e)
         
@@ -2339,7 +2339,7 @@ try {
         
         try:
             # Volume-ok listázása
-            res = self._run(['diskpart'], input='list volume\n', text=True, timeout=30)
+            res = self._run(['diskpart'], input='list volume\n', timeout=30)
             
             if res.returncode == 0 and res.stdout:
                 lines = res.stdout.splitlines()
@@ -2361,7 +2361,7 @@ try {
                     self.emit('task_progress', {'task': task_name, 'log': f'Windows volume: {target_volume}'})
                     
                     # Disk azonosítása
-                    res2 = self._run(['diskpart'], input=f'select volume {target_volume}\ndetail volume\n', text=True, timeout=30)
+                    res2 = self._run(['diskpart'], input=f'select volume {target_volume}\ndetail volume\n', timeout=30)
                     
                     if res2.returncode == 0 and res2.stdout:
                         for line in res2.stdout.splitlines():
@@ -2378,7 +2378,7 @@ try {
                         self.emit('task_progress', {'task': task_name, 'log': f'Lemez: Disk {disk_number}'})
                         
                         # EFI partíció keresése ezen a lemezen
-                        res3 = self._run(['diskpart'], input=f'select disk {disk_number}\nlist partition\n', text=True, timeout=30)
+                        res3 = self._run(['diskpart'], input=f'select disk {disk_number}\nlist partition\n', timeout=30)
                         
                         if res3.returncode == 0 and res3.stdout:
                             for line in res3.stdout.splitlines():
@@ -2412,7 +2412,7 @@ try {
                             if free_letter:
                                 res4 = self._run(['diskpart'], 
                                     input=f'select disk {disk_number}\nselect partition {efi_partition}\nassign letter={free_letter}\n',
-                                    text=True, timeout=30)
+                                    timeout=30)
                                 if res4.returncode == 0:
                                     efi_letter = free_letter + ':'
                                     self.emit('task_progress', {'task': task_name, 'log': f'EFI betűjel hozzárendelve: {efi_letter}'})
@@ -2436,7 +2436,7 @@ try {
             try:
                 self._run(['diskpart'], 
                     input=f'select disk {disk_number}\nselect partition {efi_partition}\nremove letter={efi_letter[0]}\n',
-                    text=True, timeout=30)
+                    timeout=30)
             except Exception as e:
                 logging.debug(e)
         
@@ -3241,7 +3241,7 @@ class CliApi:
         
         try:
             # Volume-ok listázása
-            res = self._run(['diskpart'], input='list volume\n', text=True, timeout=30)
+            res = self._run(['diskpart'], input='list volume\n', timeout=30)
             
             if res.returncode == 0 and res.stdout:
                 lines = res.stdout.splitlines()
@@ -3263,7 +3263,7 @@ class CliApi:
                     print(f"Windows volume: {target_volume}")
                     
                     # Disk azonosítása
-                    res2 = self._run(['diskpart'], input=f'select volume {target_volume}\ndetail volume\n', text=True, timeout=30)
+                    res2 = self._run(['diskpart'], input=f'select volume {target_volume}\ndetail volume\n', timeout=30)
                     
                     if res2.returncode == 0 and res2.stdout:
                         for line in res2.stdout.splitlines():
@@ -3280,7 +3280,7 @@ class CliApi:
                         print(f"Lemez: Disk {disk_number}")
                         
                         # EFI partíció keresése ezen a lemezen
-                        res3 = self._run(['diskpart'], input=f'select disk {disk_number}\nlist partition\n', text=True, timeout=30)
+                        res3 = self._run(['diskpart'], input=f'select disk {disk_number}\nlist partition\n', timeout=30)
                         
                         if res3.returncode == 0 and res3.stdout:
                             for line in res3.stdout.splitlines():
@@ -3314,7 +3314,7 @@ class CliApi:
                             if free_letter:
                                 res4 = self._run(['diskpart'], 
                                     input=f'select disk {disk_number}\nselect partition {efi_partition}\nassign letter={free_letter}\n',
-                                    text=True, timeout=30)
+                                    timeout=30)
                                 if res4.returncode == 0:
                                     efi_letter = free_letter + ':'
                                     print(f"EFI betűjel: {efi_letter}")
@@ -3337,7 +3337,7 @@ class CliApi:
             try:
                 self._run(['diskpart'], 
                     input=f'select disk {disk_number}\nselect partition {efi_partition}\nremove letter={efi_letter[0]}\n',
-                    text=True, timeout=30)
+                    timeout=30)
             except Exception as e:
                 logging.debug(e)
         
