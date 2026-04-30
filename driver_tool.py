@@ -14,20 +14,7 @@ import winreg
 import queue
 from datetime import datetime
 
-BUILD_NUMBER = 79
-
-# Teljes értékű Software Rendering bekapcsolása az egész alkalmazásra
-# Ez megakadályozza, hogy a WebView2 összeomoljon (fehér képernyő) amikor a videókártya drivert töröljük
-os.environ['WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS'] = (
-    '--disable-gpu '
-    '--disable-gpu-compositing '
-    '--disable-gpu-vsync '
-    '--disable-accelerated-2d-canvas '
-    '--disable-accelerated-video-decode '
-    '--use-gl=swiftshader '
-    '--disable-d3d11 '
-    '--disable-features=D3D11,Vulkan '
-)
+BUILD_NUMBER = 81
 
 try:
     import webview
@@ -162,185 +149,6 @@ logging.getLogger('PIL').setLevel(logging.WARNING)
 logging.getLogger('PIL.PngImagePlugin').setLevel(logging.WARNING)
 
 
-# ================================================================
-# PROGRESS ABLAK HTML (software rendering-hez)
-# ================================================================
-PROGRESS_HTML = '''<!DOCTYPE html>
-<html lang="hu">
-<head>
-<meta charset="UTF-8">
-<title>DriverDoktor - Progress</title>
-<style>
-*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
-:root{
-  --bg-primary:#0d1a14;--bg-secondary:#152820;
-  --glass:rgba(20,60,40,0.45);--glass-border:rgba(50,255,120,0.35);
-  --accent:#3dff6e;--accent2:#00ff88;--accent-glow:rgba(61,255,110,0.6);
-  --green:#3dff6e;--red:#ff6b5b;--yellow:#ffe066;
-  --text:rgba(255,255,255,1);--text2:rgba(220,255,230,0.9);--text3:rgba(180,220,195,0.7);
-  --r:14px;--r-sm:8px;--t:0.25s ease;
-  --font:-apple-system,BlinkMacSystemFont,'Segoe UI',system-ui,sans-serif;
-  --mono:'Cascadia Code','Fira Code','Consolas',monospace;
-}
-html,body{height:100%;overflow:hidden;font-family:var(--font);color:var(--text);font-size:13px;line-height:1.5}
-body{
-  background:linear-gradient(145deg,#0a1510 0%,#0d1f18 25%,#102a1f 50%,#0d2218 75%,#0a1812 100%);
-  display:flex;align-items:center;justify-content:center;padding:20px;
-}
-body::before{content:'';position:fixed;width:600px;height:600px;background:radial-gradient(circle,rgba(50,255,120,0.12) 0%,transparent 60%);top:-200px;right:-150px;pointer-events:none}
-body::after{content:'';position:fixed;width:500px;height:500px;background:radial-gradient(circle,rgba(0,255,150,0.08) 0%,transparent 60%);bottom:-150px;left:-100px;pointer-events:none}
-.modal-box{
-  width:100%;max-width:700px;max-height:95vh;display:flex;flex-direction:column;
-  background:rgba(15,35,28,0.98);backdrop-filter:blur(40px);
-  border:2px solid rgba(50,255,120,0.35);border-radius:18px;
-  box-shadow:0 30px 90px rgba(0,0,0,0.6),0 0 40px rgba(50,255,120,0.15);
-  overflow:hidden;
-}
-.modal-header{padding:20px 24px;border-bottom:1px solid var(--glass-border);display:flex;align-items:center;gap:10px;background:rgba(20,50,38,0.5)}
-.modal-header h3{flex:1;font-size:16px;font-weight:700}
-.modal-phase{color:var(--accent);font-size:14px;font-weight:700}
-.modal-body{padding:18px 24px;flex:1;overflow-y:auto;display:flex;flex-direction:column;gap:14px}
-.modal-counter{text-align:center;font-size:18px;font-weight:700;color:var(--green)}
-.modal-status{color:var(--text2);font-size:14px;text-align:center}
-.modal-time{color:var(--text3);font-size:12px;text-align:center;margin-top:4px}
-.progress{height:10px;background:rgba(50,255,120,0.15);border-radius:5px;overflow:hidden;width:100%;border:1px solid rgba(50,255,120,0.2);margin:10px 0}
-.progress-fill{height:100%;background:linear-gradient(90deg,#2dd45a,var(--green));border-radius:5px;transition:width 0.4s ease;box-shadow:0 0 12px var(--accent-glow);width:0%}
-.progress-indeterminate .progress-fill{width:30%!important;animation:indeterminate 1.5s ease-in-out infinite}
-@keyframes indeterminate{0%{margin-left:-30%}100%{margin-left:100%}}
-.modal-log{
-  flex:1;min-height:200px;max-height:400px;overflow-y:auto;
-  background:rgba(5,15,12,0.8);border-radius:var(--r-sm);padding:14px;
-  font-family:var(--mono);font-size:12px;color:var(--accent);line-height:1.8;
-  white-space:pre-wrap;word-break:break-all;
-  scrollbar-width:thin;scrollbar-color:rgba(50,255,120,0.3) transparent;
-  border:1px solid rgba(50,255,120,0.2);
-}
-.modal-log::-webkit-scrollbar{width:6px}
-.modal-log::-webkit-scrollbar-thumb{background:rgba(50,255,120,0.3);border-radius:3px}
-.footer-info{
-  padding:12px 24px;border-top:1px solid var(--glass-border);
-  text-align:center;color:var(--text3);font-size:11px;
-  background:rgba(20,50,38,0.3);
-}
-</style>
-</head>
-<body>
-<div class="modal-box">
-  <div class="modal-header">
-    <h3 id="title">⚡ 1 Kattintásos Driver Fix</h3>
-    <span class="modal-phase" id="phase"></span>
-  </div>
-  <div class="modal-body">
-    <div class="modal-counter" id="counter">Inicializálás...</div>
-    <div class="progress" id="progress-bar">
-      <div class="progress-fill" id="progress-fill"></div>
-    </div>
-    <div class="modal-status" id="status">Várakozás...</div>
-    <div class="modal-time" id="time"></div>
-    <pre class="modal-log" id="log"></pre>
-  </div>
-  <div class="footer-info">
-    🖥️ Ez az ablak software renderinggel fut - GPU driver változások nem befolyásolják
-  </div>
-</div>
-<script>
-let startTime = Date.now();
-let timerInterval = setInterval(() => {
-  const s = Math.floor((Date.now() - startTime) / 1000);
-  const m = Math.floor(s / 60);
-  document.getElementById('time').textContent = '⏱ ' + (m > 0 ? m + ':' + String(s%60).padStart(2,'0') : s + ' mp');
-}, 1000);
-
-function update(data) {
-  if (data.title) document.getElementById('title').textContent = data.title;
-  if (data.phase) document.getElementById('phase').textContent = data.phase;
-  if (data.counter) document.getElementById('counter').textContent = data.counter;
-  if (data.status) document.getElementById('status').textContent = data.status;
-  if (data.log) {
-    const el = document.getElementById('log');
-    el.textContent += data.log + '\\n';
-    el.scrollTop = el.scrollHeight;
-  }
-  if (data.indeterminate) {
-    document.getElementById('progress-bar').classList.add('progress-indeterminate');
-    document.getElementById('progress-fill').style.width = '30%';
-  } else if (data.total && data.total > 0) {
-    document.getElementById('progress-bar').classList.remove('progress-indeterminate');
-    const pct = Math.min(100, (data.current || 0) / data.total * 100);
-    document.getElementById('progress-fill').style.width = pct + '%';
-  }
-  if (data.complete) {
-    clearInterval(timerInterval);
-    const s = Math.floor((Date.now() - startTime) / 1000);
-    const m = Math.floor(s / 60);
-    document.getElementById('time').textContent = 'Teljes idő: ' + (m > 0 ? m + ' perc ' + (s%60) + ' mp' : s + ' mp');
-    document.getElementById('progress-bar').classList.remove('progress-indeterminate');
-    document.getElementById('progress-fill').style.width = '100%';
-  }
-}
-window.update = update;
-</script>
-</body>
-</html>'''
-
-
-def run_progress_window(log_path):
-    """Külön processben futtatandó progress ablak (software rendering)."""
-    
-    class ProgressApi:
-        def __init__(self):
-            self._window = None
-            self._log_path = log_path
-            self._last_pos = 0
-            self._running = True
-
-        def set_window(self, window):
-            self._window = window
-            threading.Thread(target=self._watch_file, daemon=True).start()
-
-        def _watch_file(self):
-            while self._running:
-                try:
-                    if os.path.exists(self._log_path):
-                        with open(self._log_path, 'r', encoding='utf-8') as f:
-                            f.seek(self._last_pos)
-                            new_content = f.read()
-                            self._last_pos = f.tell()
-                            if new_content.strip():
-                                for line in new_content.strip().split('\n'):
-                                    if line.startswith('{'):
-                                        try:
-                                            data = json.loads(line)
-                                            if self._window:
-                                                self._window.evaluate_js(f'window.update({json.dumps(data)})')
-                                        except json.JSONDecodeError:
-                                            pass
-                except Exception as e:
-                    logging.debug(e)
-                time.sleep(0.1)
-
-        def stop(self):
-            self._running = False
-
-    api = ProgressApi()
-    window = webview.create_window(
-        'DriverDoktor - Autofix Progress',
-        html=PROGRESS_HTML,
-        width=750,
-        height=600,
-        min_size=(600, 500),
-        on_top=True,
-    )
-    
-    def on_start():
-        api.set_window(window)
-    
-    def on_closing():
-        api.stop()
-        return True
-    
-    window.events.closing += on_closing
-    webview.start(func=on_start, debug=False)
 
 
 def is_admin():
@@ -373,10 +181,6 @@ class DriverToolApi:
         self._si = subprocess.STARTUPINFO()
         self._si.dwFlags |= subprocess.STARTF_USESHOWWINDOW
         self._nw = subprocess.CREATE_NO_WINDOW
-        # Autofix külön progress ablak
-        self._autofix_log_path = None
-        self._autofix_log_file = None
-        self._autofix_window_proc = None
         logging.info(f"[INIT] sys_drive={self.sys_drive}")
         logging.info("[INIT] DriverToolApi kész.")
 
@@ -414,33 +218,6 @@ class DriverToolApi:
                 logging.debug(f"[EMIT:{event}] data={data}")
         except Exception as e:
             logging.warning(f"[EMIT] Logging hiba: {e}")
-
-        # Autofix progress ablakba írás (ha fut)
-        if self._autofix_log_file and event in ('task_start', 'task_progress', 'task_complete'):
-            try:
-                if isinstance(data, dict):
-                    self._write_progress(data)
-            except Exception as e:
-                logging.debug(e)
-
-        # Ablak cím frissítése autofix progress közben (backup megoldás ha a modal eltűnik)
-        if self._window and event in ('task_start', 'task_progress', 'task_complete'):
-            try:
-                if event == 'task_start':
-                    title = data.get('title', 'Folyamat...') if isinstance(data, dict) else 'Folyamat...'
-                    self._window.set_title(f"DriverDoktor - {title}")
-                elif event == 'task_progress' and isinstance(data, dict):
-                    counter = data.get('counter', '')
-                    status = data.get('status', '')
-                    phase = data.get('phase', '')
-                    if counter:
-                        self._window.set_title(f"DriverDoktor - [{counter}] {status or phase}")
-                    elif status:
-                        self._window.set_title(f"DriverDoktor - {status}")
-                elif event == 'task_complete':
-                    self._window.set_title('DriverDoktor')
-            except Exception as e:
-                logging.debug(e)  # Ne akadjon el ha a title frissítés nem sikerül
 
         if self._window:
             payload = None
@@ -607,8 +384,8 @@ class DriverToolApi:
         threading.Thread(target=worker, daemon=True).start()
 
     def _get_third_party_drivers(self):
-        logging.debug("[DRIVERS] pnputil /enum-drivers futtatása...")
-        res = self._run(['pnputil', '/enum-drivers'])
+        logging.debug("[DRIVERS] dism /English /Online /Get-Drivers futtatása...")
+        res = self._run(['dism', '/English', '/Online', '/Get-Drivers'])
         drivers = []
         current = {}
         for line in res.stdout.splitlines():
@@ -621,15 +398,15 @@ class DriverToolApi:
             parts = line.split(":", 1)
             if len(parts) == 2:
                 key, val = parts[0].strip(), parts[1].strip()
-                if "Published Name" in key or "Közzétett név" in key:
+                if "Published Name" in key:
                     current["published"] = val
-                elif "Original Name" in key or "Eredeti név" in key:
+                elif "Original File Name" in key:
                     current["original"] = val
-                elif "Provider Name" in key or "Szolgáltató neve" in key:
+                elif "Provider Name" in key:
                     current["provider"] = val
-                elif "Class Name" in key or "Osztály neve" in key:
+                elif "Class Name" in key:
                     current["class"] = val
-                elif "Driver Version" in key or "Illesztőprogram verziója" in key:
+                elif "Date and Version" in key:
                     current["version"] = val
         if current and "published" in current:
             drivers.append(current)
@@ -669,7 +446,7 @@ class DriverToolApi:
 
     def _get_offline_drivers(self, all_drivers=False):
         logging.debug(f"[DRIVERS] _get_offline_drivers(all_drivers={all_drivers})")
-        cmd = ['dism', f'/Image:{self.target_os_path}', '/Get-Drivers']
+        cmd = ['dism', '/English', f'/Image:{self.target_os_path}', '/Get-Drivers']
         if all_drivers:
             cmd.append('/all')
         res = self._run(cmd)
@@ -685,15 +462,15 @@ class DriverToolApi:
             parts = line.split(":", 1)
             if len(parts) == 2:
                 key, val = parts[0].strip(), parts[1].strip()
-                if "Published Name" in key or "Közzétett név" in key or "Published name" in key:
+                if "Published Name" in key:
                     current["published"] = val
-                elif "Original File Name" in key or "Eredeti fájlnév" in key or "Original name" in key:
+                elif "Original File Name" in key:
                     current["original"] = val
-                elif "Provider Name" in key or "Szolgáltató neve" in key or "Provider" in key:
+                elif "Provider Name" in key:
                     current["provider"] = val
-                elif "Class Name" in key or "Osztálynév" in key:
+                elif "Class Name" in key:
                     current["class"] = val
-                elif "Date and Version" in key or "Dátum és verzió" in key:
+                elif "Date and Version" in key:
                     current["version"] = val
         if current and "published" in current:
             drivers.append(current)
@@ -723,160 +500,25 @@ class DriverToolApi:
         self.emit('task_progress', {'task': 'restore', 'log': '\n--- BOOT LOADER (BCD) JAVÍTÁS ---'})
         
         target_drive = target_drive.rstrip('\\') + '\\'
-        target_letter = target_drive[0].upper()
         windows_path = os.path.join(target_drive, 'Windows')
         
         if not os.path.exists(windows_path):
             self.emit('task_progress', {'task': 'restore', 'log': f'⚠️ Windows mappa nem található: {windows_path}'})
             return False
-        
-        self.emit('task_progress', {'task': 'restore', 'log': f'Cél Windows meghajtó: {target_drive}'})
-        
-        # 1. Megkeressük melyik DISK-en van a Windows partíció
-        self.emit('task_progress', {'task': 'restore', 'log': 'A Windows meghajtó lemezének azonosítása...'})
-        
-        disk_number = None
-        efi_letter = None
-        
-        try:
-            # Diskpart script: volume-ok listázása
-            diskpart_list = (
-                'list volume\n'
-            )
-            res = self._run(['diskpart'], input=diskpart_list, timeout=30)
             
-            if res.returncode == 0 and res.stdout:
-                lines = res.stdout.splitlines()
-                target_volume = None
-                
-                # Megkeressük a Windows volume számát
-                for line in lines:
-                    parts = line.split()
-                    if len(parts) >= 3:
-                        # Volume X  Ltr  Label  Fs  Type  Size  Status
-                        # Volume 2   D           NTFS  Partition  100GB  Healthy
-                        for i, p in enumerate(parts):
-                            if p.upper() == target_letter and i >= 1:
-                                try:
-                                    target_volume = int(parts[1])
-                                except (ValueError, IndexError):
-                                    pass
-                                break
-                
-                if target_volume is not None:
-                    self.emit('task_progress', {'task': 'restore', 'log': f'Windows volume: {target_volume}'})
-                    
-                    # Megkeressük melyik disk-en van
-                    diskpart_detail = (
-                        f'select volume {target_volume}\n'
-                        'detail volume\n'
-                    )
-                    res2 = self._run(['diskpart'], input=diskpart_detail, timeout=30)
-                    
-                    if res2.returncode == 0 and res2.stdout:
-                        for line in res2.stdout.splitlines():
-                            if 'Disk' in line and '#' not in line:
-                                # "Disk 0" vagy "Lemez 0"
-                                parts = line.split()
-                                for i, p in enumerate(parts):
-                                    if p.isdigit():
-                                        disk_number = int(p)
-                                        break
-                                if disk_number is not None:
-                                    break
-                    
-                    if disk_number is not None:
-                        self.emit('task_progress', {'task': 'restore', 'log': f'Lemez: Disk {disk_number}'})
-                        
-                        # EFI partíció keresése EZEN a lemezen
-                        diskpart_efi = (
-                            f'select disk {disk_number}\n'
-                            'list partition\n'
-                        )
-                        res3 = self._run(['diskpart'], input=diskpart_efi, timeout=30)
-                        
-                        efi_partition = None
-                        if res3.returncode == 0 and res3.stdout:
-                            for line in res3.stdout.splitlines():
-                                line_upper = line.upper()
-                                # EFI/System típusú partíció keresése
-                                if 'SYSTEM' in line_upper or 'EFI' in line_upper:
-                                    parts = line.split()
-                                    for i, p in enumerate(parts):
-                                        if p.isdigit() and i >= 1:
-                                            efi_partition = int(p)
-                                            break
-                                    if efi_partition:
-                                        break
-                        
-                        if efi_partition:
-                            self.emit('task_progress', {'task': 'restore', 'log': f'EFI partíció: Partition {efi_partition}'})
-                            
-                            # EFI partícióhoz betűjel rendelése
-                            # Keresünk egy szabad betűjelet
-                            used_letters = set()
-                            for line in lines:
-                                parts = line.split()
-                                for p in parts:
-                                    if len(p) == 1 and p.isalpha():
-                                        used_letters.add(p.upper())
-                            
-                            free_letter = None
-                            for c in 'STUVWXYZ':
-                                if c not in used_letters:
-                                    free_letter = c
-                                    break
-                            
-                            if free_letter:
-                                diskpart_assign = (
-                                    f'select disk {disk_number}\n'
-                                    f'select partition {efi_partition}\n'
-                                    f'assign letter={free_letter}\n'
-                                )
-                                res4 = self._run(['diskpart'], input=diskpart_assign, timeout=30)
-                                if res4.returncode == 0:
-                                    efi_letter = free_letter + ':'
-                                    self.emit('task_progress', {'task': 'restore', 'log': f'EFI betűjel hozzárendelve: {efi_letter}'})
-        except Exception as e:
-            logging.warning(f"[BCD] Diskpart hiba: {e}")
-            self.emit('task_progress', {'task': 'restore', 'log': f'⚠️ Lemez azonosítási hiba: {e}'})
-        
-        # 2. bcdboot futtatása
         success = False
         
-        if efi_letter:
-            # UEFI mód - a megtalált EFI partícióra
-            self.emit('task_progress', {'task': 'restore', 'log': f'bcdboot {target_drive}Windows /s {efi_letter} /f UEFI'})
-            res = self._run(['bcdboot', f'{target_drive}Windows', '/s', efi_letter, '/f', 'UEFI'])
-            if res.returncode == 0:
-                success = True
-                self.emit('task_progress', {'task': 'restore', 'log': '✅ BCD sikeresen újraépítve (UEFI)!'})
-            else:
-                self.emit('task_progress', {'task': 'restore', 'log': '⚠️ UEFI bcdboot hiba, fallback...'})
+        # 1. Próbáljuk a legegyszerűbb módszert (ALL)
+        self.emit('task_progress', {'task': 'restore', 'log': f'bcdboot {target_drive}Windows /f ALL'})
+        res = self._run(['bcdboot', f'{target_drive}Windows', '/f', 'ALL'])
+        if res.returncode == 0:
+            success = True
+            self.emit('task_progress', {'task': 'restore', 'log': '✅ BCD sikeresen újraépítve (ALL)!'})
+        else:
+            err_msg = res.stderr.strip() if res.stderr else res.stdout.strip() if res.stdout else f'Exit code: {res.returncode}'
+            self.emit('task_progress', {'task': 'restore', 'log': f'⚠️ bcdboot hiba (0x{res.returncode:X}): {err_msg[:300]}'})
             
-            # EFI betűjel eltávolítása
-            try:
-                diskpart_remove = (
-                    f'select disk {disk_number}\n'
-                    f'select partition {efi_partition}\n'
-                    f'remove letter={efi_letter[0]}\n'
-                )
-                self._run(['diskpart'], input=diskpart_remove, timeout=30)
-            except Exception as e:
-                logging.debug(e)
-        
-        if not success:
-            # Fallback: bcdboot /s nélkül - automatikusan megkeresi a system partíciót
-            self.emit('task_progress', {'task': 'restore', 'log': f'bcdboot {target_drive}Windows /f ALL'})
-            res = self._run(['bcdboot', f'{target_drive}Windows', '/f', 'ALL'])
-            if res.returncode == 0:
-                success = True
-                self.emit('task_progress', {'task': 'restore', 'log': '✅ BCD sikeresen újraépítve (ALL)!'})
-            else:
-                err_msg = res.stderr.strip() if res.stderr else res.stdout.strip() if res.stdout else f'Exit code: {res.returncode}'
-                self.emit('task_progress', {'task': 'restore', 'log': f'⚠️ bcdboot hiba (0x{res.returncode:X}): {err_msg[:300]}'})
-        
-        # 3. bootrec parancsok (ha még mindig nem sikerült)
+        # 2. bootrec parancsok (ha a bcdboot nem sikerült teljesen)
         if not success:
             self.emit('task_progress', {'task': 'restore', 'log': 'bootrec parancsok futtatása...'})
             for cmd in ['/fixmbr', '/fixboot', '/rebuildbcd']:
@@ -1567,324 +1209,6 @@ try {
                                         'status': f'Kész! Sikeres: {success}, Sikertelen: {fail}' + (f', Kihagyott: {skipped}' if skipped else '')})
 
         self._safe_thread('wu_install', worker)
-
-    # ================================================================
-    # AUTOFIX
-    # ================================================================
-    def _open_autofix_progress_window(self):
-        """Nyit egy külön WebView2 progress ablakot software renderinggel."""
-        try:
-            self._autofix_log_path = os.path.join(os.environ.get('TEMP', 'C:\\Temp'), 'DriverDoktor_autofix_progress.jsonl')
-            # Töröljük a régi fájlt ha van
-            if os.path.exists(self._autofix_log_path):
-                os.remove(self._autofix_log_path)
-            
-            # Megnyitjuk a log fájlt írásra ELŐSZÖR (mielőtt a subprocess elindul)
-            self._autofix_log_file = open(self._autofix_log_path, 'w', encoding='utf-8', buffering=1)
-            logging.info(f"[AUTOFIX] Progress log létrehozva: {self._autofix_log_path}")
-            
-            # Az exe önmagát hívja meg --progress argumentummal
-            # Ez mind frozen, mind dev módban működik
-            self._autofix_window_proc = subprocess.Popen(
-                [sys.executable, '--progress', self._autofix_log_path],
-                creationflags=subprocess.CREATE_NO_WINDOW
-            )
-            logging.info(f"[AUTOFIX] Progress ablak indítva: {sys.executable} --progress")
-        except Exception as e:
-            logging.error(f"[AUTOFIX] Progress ablak nyitási hiba: {e}")
-            self._autofix_log_file = None
-            self._autofix_window_proc = None
-
-    def _close_autofix_progress_window(self):
-        """Bezárja az autofix progress ablakot."""
-        try:
-            if self._autofix_log_file:
-                # Küldünk egy complete jelzést
-                self._autofix_log_file.write(json.dumps({'complete': True}) + '\n')
-                self._autofix_log_file.flush()
-                time.sleep(0.5)
-                self._autofix_log_file.close()
-                self._autofix_log_file = None
-            
-            # 10 mp múlva bezárjuk az ablakot
-            def close_later():
-                time.sleep(10)
-                if hasattr(self, '_autofix_window_proc') and self._autofix_window_proc:
-                    try:
-                        self._autofix_window_proc.terminate()
-                        self._autofix_window_proc.wait()  # Prevent zombie process
-                    except Exception as e:
-                        logging.debug(e)
-                    self._autofix_window_proc = None
-            threading.Thread(target=close_later, daemon=True).start()
-        except Exception as e:
-            logging.error(f"[AUTOFIX] Progress ablak bezárási hiba: {e}")
-
-    def _write_progress(self, data):
-        """Ír a progress ablaknak JSON formátumban."""
-        if self._autofix_log_file:
-            try:
-                self._autofix_log_file.write(json.dumps(data, ensure_ascii=False) + '\n')
-                self._autofix_log_file.flush()
-            except Exception as e:
-                logging.debug(e)
-
-    def start_autofix(self):
-        logging.info("[API] start_autofix() - 1 KATTINTÁSOS DRIVER FIX INDÍTVA!")
-        
-        if self.target_os_path:
-            self.emit('toast', {'message': '❌ Hiba: Az 1 Kattintásos Fix (Autofix) csak Élő (Online) rendszeren futtatható!', 'type': 'error'})
-            self.emit('task_error', {'task': 'autofix', 'error': 'Ezt a funkciót nem használhatod Offline módban!'})
-            return
-
-        logging.info("=" * 60)
-        logging.info("[AUTOFIX] TELJES DRIVER ÚJRATELEPÍTÉS INDÍTÁSA")
-        logging.info("=" * 60)
-        self._cancel_flag = False  # Reset cancel flag
-        
-        # Külön WebView2 progress ablak megnyitása (software rendering)
-        self._open_autofix_progress_window()
-        
-        def worker():
-            overall_start = time.time()
-
-            def elapsed():
-                s = int(time.time() - overall_start)
-                m, sec = divmod(s, 60)
-                return f"{m:02d}:{sec:02d}"
-
-            def check_cancel():
-                if self._check_cancel():
-                    logging.warning("[AUTOFIX] Felhasználó megszakította!")
-                    self.emit('task_progress', {'task': 'autofix', 'log': '\n❗ Megszakítva a felhasználó által!'})
-                    self.emit('task_complete', {'task': 'autofix', 'status': '❗ Megszakítva!', 'counter': 'Megszakítva'})
-                    self._close_autofix_progress_window()
-                    return True
-                return False
-
-            self.emit('task_start', {'task': 'autofix', 'title': '⚡ 1 Kattintásos Driver Fix'})
-
-            # PHASE 1: Disable WU drivers
-            logging.info("[AUTOFIX] FÁZIS 1: WU driver letiltása...")
-            self.emit('task_progress', {'task': 'autofix', 'phase': '⛔ 1. FÁZIS: WU letiltás',
-                                        'log': '=' * 50 + '\nFÁZIS 1: WU driver keresés letiltása...',
-                                        'current': 0, 'total': 4})
-            try:
-                key_path = r"SOFTWARE\Policies\Microsoft\Windows\WindowsUpdate"
-                logging.debug(f"[AUTOFIX] Registry írás: {key_path}")
-                with winreg.CreateKeyEx(winreg.HKEY_LOCAL_MACHINE, key_path, 0, winreg.KEY_WRITE) as key:
-                    winreg.SetValueEx(key, "ExcludeWUDriversInQualityUpdate", 0, winreg.REG_DWORD, 1)
-                logging.info("[AUTOFIX] ExcludeWUDriversInQualityUpdate = 1")
-                self.emit('task_progress', {'task': 'autofix', 'log': '  ✅ ExcludeWUDriversInQualityUpdate = 1'})
-            except Exception as e:
-                logging.error(f"[AUTOFIX] winreg hiba: {e}")
-                self.emit('task_progress', {'task': 'autofix', 'log': f'  ⚠ winreg hiba: {e}'})
-            self._run(['reg', 'add', r'HKLM\SOFTWARE\Policies\Microsoft\Windows\WindowsUpdate',
-                       '/v', 'ExcludeWUDriversInQualityUpdate', '/t', 'REG_DWORD', '/d', '1', '/f'])
-
-            try:
-                key_path2 = r"SOFTWARE\Microsoft\Windows\CurrentVersion\DriverSearching"
-                logging.debug(f"[AUTOFIX] Registry írás: {key_path2}")
-                with winreg.CreateKeyEx(winreg.HKEY_LOCAL_MACHINE, key_path2, 0, winreg.KEY_WRITE) as key:
-                    winreg.SetValueEx(key, "SearchOrderConfig", 0, winreg.REG_DWORD, 0)
-                logging.info("[AUTOFIX] SearchOrderConfig = 0")
-                self.emit('task_progress', {'task': 'autofix', 'log': '  ✅ SearchOrderConfig = 0'})
-            except Exception as e:
-                logging.error(f"[AUTOFIX] winreg hiba: {e}")
-                self.emit('task_progress', {'task': 'autofix', 'log': f'  ⚠ winreg hiba: {e}'})
-            self._run(['reg', 'add', r'HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\DriverSearching',
-                       '/v', 'SearchOrderConfig', '/t', 'REG_DWORD', '/d', '0', '/f'])
-
-            self._run('net stop wuauserv & net start wuauserv', shell=True)
-            logging.info("[AUTOFIX] WU szolgáltatás újraindítva")
-            self.emit('task_progress', {'task': 'autofix', 'log': '  ✅ WU szolgáltatás újraindítva\n\n✅ WU letiltás kész!\n',
-                                        'current': 4, 'total': 4})
-            
-            if check_cancel(): return
-
-            # PHASE 2: Delete third-party drivers
-            self.emit('task_progress', {'task': 'autofix', 'phase': '🔴 2. FÁZIS: Driver törlés',
-                                        'log': '=' * 50 + '\nFÁZIS 2: Third-party driverek törlése...'})
-            drivers = self._get_third_party_drivers()
-            del_total = len(drivers)
-            self.emit('task_progress', {'task': 'autofix', 'log': f'Talált: {del_total} db', 'total': max(del_total, 1), 'current': 0})
-            del_success = 0
-            del_fail = 0
-            display_driver_deleted = False
-            for i, drv in enumerate(drivers):
-                if check_cancel(): return
-                pub = drv.get("published", "?")
-                prov = drv.get("provider", "")
-                drv_class = drv.get("class", "").lower()
-                self.emit('task_progress', {'task': 'autofix', 'status': f'Törlés: {pub}', 'log': f'  🗑 {pub} [{prov}]'})
-                try:
-                    res = self._run(['pnputil', '/delete-driver', pub, '/uninstall', '/force'])
-                    if res.returncode == 0 or any(k in res.stdout for k in ["Deleted", "törölve", "successfully"]):
-                        del_success += 1
-                        self.emit('task_progress', {'task': 'autofix', 'log': '    ✅ törölve'})
-                        # Track display driver deletion for window recovery
-                        if 'display' in drv_class or 'video' in drv_class or 'nvidia' in prov.lower() or 'amd' in prov.lower() or 'intel' in prov.lower():
-                            display_driver_deleted = True
-                            logging.info(f"[AUTOFIX] Display driver törölve: {pub} ({prov})")
-                    else:
-                        del_fail += 1
-                        self.emit('task_progress', {'task': 'autofix', 'log': '    ❌ sikertelen'})
-                except Exception as e:
-                    del_fail += 1
-                    self.emit('task_progress', {'task': 'autofix', 'log': f'    ❌ hiba: {e}'})
-                self.emit('task_progress', {'task': 'autofix', 'current': i + 1, 'total': del_total,
-                                            'counter': f'{i+1}/{del_total} (✅{del_success} ❌{del_fail})'})
-
-            self.emit('task_progress', {'task': 'autofix', 'log': f'\n--- Törlés kész. Sikeres: {del_success}, Sikertelen: {del_fail} ---\n'})
-            
-            # Display driver recovery: if GPU driver was deleted, try to recover the window
-            if display_driver_deleted:
-                logging.info("[AUTOFIX] Display driver törölve - ablak helyreállítás...")
-                self.emit('task_progress', {'task': 'autofix', 'log': '🖥️ Videókártya driver törölve - ablak helyreállítás...'})
-                time.sleep(3)  # Wait for Basic Display Adapter to initialize
-                try:
-                    if self._window:
-                        # Try to recover WebView2 rendering by reloading
-                        html_path = resource_path('ui.html')
-                        self._window.load_url(f'file:///{html_path}')
-                        time.sleep(2)
-                        # Re-send current state to UI
-                        self.emit('task_progress', {'task': 'autofix', 'phase': '🔴 2. FÁZIS: Driver törlés',
-                                                    'log': '✅ Ablak helyreállítva! Folytatás...',
-                                                    'current': del_total, 'total': del_total})
-                        logging.info("[AUTOFIX] Ablak helyreállítás sikeres!")
-                except Exception as e:
-                    logging.warning(f"[AUTOFIX] Ablak helyreállítás sikertelen: {e}")
-
-            if check_cancel(): return
-
-            # PHASE 3: Hardware rescan
-            self.emit('task_progress', {'task': 'autofix', 'phase': '🟡 3. FÁZIS: Hardver scan',
-                                        'log': '=' * 50 + '\nFÁZIS 3: pnputil /scan-devices...', 'indeterminate': True})
-            try:
-                self._run(['pnputil', '/scan-devices'], timeout=120)
-                time.sleep(5)
-                self.emit('task_progress', {'task': 'autofix', 'log': '✅ Hardver scan kész!'})
-            except Exception:
-                self.emit('task_progress', {'task': 'autofix', 'log': '⚠ Scan timeout/hiba — folytatás...'})
-
-            if check_cancel(): return
-
-            # PHASE 4+5: WU search & install (single PS process)
-            self.emit('task_progress', {'task': 'autofix', 'phase': '🟠 4. FÁZIS: Driver keresés + telepítés (WU szerverekről)',
-                                        'log': '=' * 50 + '\nFÁZIS 4: Driver keresés és telepítés WU szerverekről...\n', 'indeterminate': True})
-
-            ps_script = r"""
-[Console]::OutputEncoding = [System.Text.Encoding]::UTF8
-try {
-    $Session = New-Object -ComObject Microsoft.Update.Session
-    $Searcher = $Session.CreateUpdateSearcher()
-    try { $SM = New-Object -ComObject Microsoft.Update.ServiceManager; $SM.AddService2("7971f918-a847-4430-9279-4a52d1efe18d", 7, "") | Out-Null } catch {}
-    $Searcher.ServerSelection = 3; $Searcher.ServiceID = "7971f918-a847-4430-9279-4a52d1efe18d"
-    Write-Output "SEARCH: Driver frissítések keresése..."
-    $Result = $Searcher.Search("IsInstalled=0 and Type='Driver'")
-    if ($Result.Updates.Count -eq 0) { Write-Output "EMPTY: Nincs elérhető driver."; return }
-    $ToInstall = New-Object -ComObject Microsoft.Update.UpdateColl
-    foreach ($U in $Result.Updates) {
-        if (-not $U.EulaAccepted) { $U.AcceptEula() }
-        $ToInstall.Add($U) | Out-Null; Write-Output "FOUND: $($U.Title)"
-    }
-    $total = $ToInstall.Count; Write-Output "TOTAL: $total"
-    $s = 0; $f = 0
-    for ($i = 0; $i -lt $total; $i++) {
-        $U = $ToInstall.Item($i); $t = $U.Title; $idx = $i + 1
-        Write-Output "DLONE: $idx/$total $t"
-        $SC = New-Object -ComObject Microsoft.Update.UpdateColl; $SC.Add($U) | Out-Null
-        $DL = $Session.CreateUpdateDownloader(); $DL.Updates = $SC
-        try { $DR = $DL.Download() } catch { Write-Output "FAIL: [LETÖLTÉS] $t"; $f++; continue }
-        if ($DR.ResultCode -ne 2 -and $DR.ResultCode -ne 3) { Write-Output "FAIL: [DL kód=$($DR.ResultCode)] $t"; $f++; continue }
-        Write-Output "INSTONE: $idx/$total $t"
-        $Inst = $Session.CreateUpdateInstaller(); $Inst.Updates = $SC
-        try { $IR = $Inst.Install() } catch { Write-Output "FAIL: [TELEPÍTÉS] $t"; $f++; continue }
-        $rc = $IR.GetUpdateResult(0).ResultCode
-        switch ($rc) { 2 { Write-Output "OK: $t"; $s++ } 3 { Write-Output "OK: $t"; $s++ } default { Write-Output "FAIL: [kód=$rc] $t"; $f++ } }
-    }
-    Write-Output "DONE: Sikeres=$s, Sikertelen=$f"
-} catch { Write-Output "ERROR: $($_.Exception.Message)" }
-"""
-            install_success = 0
-            install_fail = 0
-            install_total = 0
-            process = subprocess.Popen(
-                ["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", ps_script],
-                stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, encoding='utf-8', errors='replace',
-                startupinfo=self._si, creationflags=self._nw)
-
-            for line in process.stdout:
-                if self._check_cancel():
-                    process.terminate()
-                    process.wait()  # Prevent zombie process
-                    self.emit('task_progress', {'task': 'autofix', 'log': '\n❗ Megszakítva!'})
-                    self.emit('task_complete', {'task': 'autofix', 'status': '❗ Megszakítva!', 'counter': 'Megszakítva'})
-                    return
-                line = line.strip()
-                if not line:
-                    continue
-                if line.startswith("SEARCH:"):
-                    self.emit('task_progress', {'task': 'autofix', 'status': line.split(":", 1)[1].strip(), 'log': line})
-                elif line.startswith("FOUND:"):
-                    self.emit('task_progress', {'task': 'autofix', 'log': f'  📦 {line[6:].strip()}'})
-                elif line.startswith("TOTAL:"):
-                    m = re.search(r'(\d+)', line)
-                    if m: install_total = int(m.group(1))
-                    self.emit('task_progress', {'task': 'autofix', 'phase': f'🟢 5. FÁZIS: {install_total} driver telepítése (WU szerverekről)',
-                                                'total': max(install_total, 1), 'current': 0, 'log': f'\nÖsszesen {install_total} driver telepítése WU szerverekről...'})
-                elif line.startswith("DLONE:"):
-                    self.emit('task_progress', {'task': 'autofix', 'status': f'⬇ {line[6:].strip()}', 'log': f'  ⬇ {line[6:].strip()}'})
-                elif line.startswith("INSTONE:"):
-                    self.emit('task_progress', {'task': 'autofix', 'status': f'⚙ {line[8:].strip()}', 'log': f'  ⚙ {line[8:].strip()}'})
-                elif line.startswith("OK:"):
-                    install_success += 1
-                    done = install_success + install_fail
-                    self.emit('task_progress', {'task': 'autofix', 'log': f'  ✅ {line[3:].strip()}',
-                                                'current': done, 'total': max(install_total, 1), 'counter': f'{done}/{install_total} (✅{install_success} ❌{install_fail})'})
-                elif line.startswith("FAIL:"):
-                    install_fail += 1
-                    done = install_success + install_fail
-                    self.emit('task_progress', {'task': 'autofix', 'log': f'  ❌ {line[5:].strip()}',
-                                                'current': done, 'total': max(install_total, 1), 'counter': f'{done}/{install_total} (✅{install_success} ❌{install_fail})'})
-                elif line.startswith("DONE:"):
-                    self.emit('task_progress', {'task': 'autofix', 'log': f'\n--- {line[5:].strip()} ---'})
-                elif line.startswith("EMPTY:"):
-                    self.emit('task_progress', {'task': 'autofix', 'log': line[6:].strip()})
-                elif line.startswith("ERROR:"):
-                    self.emit('task_progress', {'task': 'autofix', 'log': f'❌ HIBA: {line[6:].strip()}'})
-                else:
-                    self.emit('task_progress', {'task': 'autofix', 'log': line})
-            process.wait()
-
-            if install_success > 0:
-                self.emit('task_progress', {'task': 'autofix', 'log': '\nEszközök újraszkennelése...'})
-                self._run(['pnputil', '/scan-devices'])
-                self.emit('task_progress', {'task': 'autofix', 'log': '✅ Eszközök frissítve!'})
-
-            if check_cancel(): return
-
-            # PHASE 6: Reboot (only if changes were made)
-            changes_made = (del_success > 0) or (install_success > 0)
-            if changes_made:
-                self.emit('task_progress', {'task': 'autofix', 'phase': '🔵 6. FÁZIS: Befejezve, újraindításra várva',
-                                            'log': f'\n{"=" * 50}\nDriverek sikeresen frissítve!\n\n⚡ Teljes idő: {elapsed()}'})
-                self.emit('task_progress', {'task': 'autofix', 'log': '🔄 Várakozás a felhasználó döntésére az újraindításról...'})
-                self.emit('task_complete', {'task': 'autofix', 'status': '✅ Újraindítás szükséges', 'counter': 'Keresés...'})
-                self._close_autofix_progress_window()
-
-                # Front-end ask_reboot modal
-                time.sleep(1)
-                self.emit('ask_reboot', {})
-                
-            else:
-                self.emit('task_progress', {'task': 'autofix', 'phase': '✅ KÉSZ',
-                                            'log': f'\n{"=" * 50}\nNem történt változás - újraindítás nem szükséges.\n\n⚡ Teljes idő: {elapsed()}'})
-                self.emit('task_complete', {'task': 'autofix', 'status': '✅ Kész (nincs változás)', 'counter': 'Kész'})
-                self._close_autofix_progress_window()
-
-        self._safe_thread('autofix', worker)
 
     # ================================================================
     # WU MANAGEMENT

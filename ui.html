@@ -149,13 +149,6 @@ td input[type="checkbox"]{accent-color:var(--accent);width:16px;height:16px}
 .card-title{font-size:15px;font-weight:700;display:flex;align-items:center;gap:8px;color:var(--text)}
 .card-desc{font-size:12px;color:var(--text2);line-height:1.7}
 
-/* Autofix */
-.autofix-hero{text-align:center;padding:45px 25px}
-.autofix-hero h2{font-size:24px;margin-bottom:18px;background:linear-gradient(135deg,var(--accent),#00ff99);-webkit-background-clip:text;-webkit-text-fill-color:transparent;text-shadow:none}
-.autofix-steps{text-align:left;max-width:520px;margin:0 auto 32px;line-height:2.2;color:var(--text2);font-size:14px}
-.autofix-steps span{color:var(--green);font-weight:700}
-.autofix-warn{color:var(--yellow);font-size:13px;margin-bottom:24px;font-weight:600}
-
 /* WU Status */
 .wu-status{font-size:16px;font-weight:700;text-align:center;padding:18px;border-radius:var(--r-sm);margin-bottom:18px}
 .wu-status.enabled{background:rgba(61,255,110,0.2);color:var(--green);border:2px solid rgba(61,255,110,0.4)}
@@ -213,7 +206,6 @@ td input[type="checkbox"]{accent-color:var(--accent);width:16px;height:16px}
     <button class="nav-btn" onclick="switchView('backup')" data-view="backup"><span class="icon">💾</span>Mentés és Visszaállítás</button>
     <button class="nav-btn" onclick="switchView('wu')" data-view="wu"><span class="icon">🔄</span>Windows Update</button>
     <button class="nav-btn" onclick="switchView('hw')" data-view="hw"><span class="icon">🖥️</span>Hardver Info & Telepítés</button>
-    <button class="nav-btn" onclick="switchView('autofix')" data-view="autofix"><span class="icon">⚡</span>1 Kattintásos Driver Fix</button>
     <div class="sidebar-bottom" id="build-label">Build ---</div>
   </nav>
 
@@ -324,27 +316,6 @@ td input[type="checkbox"]{accent-color:var(--accent);width:16px;height:16px}
           <div class="hw-tree" id="hw-tree"></div>
         </div>
       </div>
-
-      <!-- VIEW: Autofix -->
-      <div class="view" id="view-autofix">
-        <div class="panel glass">
-          <div class="autofix-hero">
-            <h2>⚡ 1 Kattintásos Automatikus Driver Fix</h2>
-            <div class="autofix-steps">
-              <span>1️⃣</span> Windows Update driver keresés LETILTÁSA (registry + policy)<br>
-              <span>2️⃣</span> Összes third-party driver TÖRLÉSE<br>
-              <span>3️⃣</span> Hardver újraszkennelés (Windows alap driverek visszaállása)<br>
-              <span>4️⃣</span> Windows Update szervereiről az összes elérhető driver LETÖLTÉSE és TELEPÍTÉSE<br>
-              <span>5️⃣</span> Automatikus ÚJRAINDÍTÁS
-            </div>
-            <div class="autofix-warn">⚠️ A folyamat közben NE használd a gépet! A képernyő villoghat!<br>⏱️ Becsült idő: 5-15 perc</div>
-            <button class="btn btn-big btn-primary" onclick="startAutofix()" id="btn-autofix">⚡ INDÍTÁS: Teljes Driver Újratelepítés ⚡</button>
-          </div>
-        </div>
-      </div>
-    </div>
-  </div>
-</div>
 
 <!-- Progress Modal -->
 <div class="modal-overlay" id="modal-progress">
@@ -780,22 +751,6 @@ async function installSelectedHw() {
   }
 }
 
-/* ========== AUTOFIX ========== */
-async function startAutofix() {
-  const ok = await showConfirm('⚡ 1 Kattintásos Driver Fix',
-    'Ez a művelet:\n\n1. LETILTJA a WU automatikus driver keresést\n2. TÖRLI az összes third-party drivert\n3. Újraszkennel minden hardvert\n4. Windows Update szervereiről TELEPÍTI az összes elérhető drivert\n5. Automatikusan ÚJRAINDÍTJA a gépet\n\n⚠️ A folyamat közben NE használd a gépet!\n\nBiztosan elindítod?');
-  if (!ok) return;
-  const btn = document.getElementById('btn-autofix');
-  btn.disabled = true;
-  btn.textContent = '⏳ Folyamatban...';
-  try {
-    await api().start_autofix();
-  } catch (e) {
-    btn.disabled = false;
-    btn.textContent = '⚡ INDÍTÁS: Teljes Driver Újratelepítés ⚡';
-    toast('Autofix hiba: ' + e, 'error');
-  }
-}
 
 /* ========== WU MANAGEMENT ========== */
 async function checkWuStatus() {
@@ -919,18 +874,10 @@ function showProgressModal(title, phase) {
   document.getElementById('mp-progress-fill').style.width = '0%';
   document.getElementById('mp-progress').classList.remove('progress-indeterminate');
   
-  if (currentTask === 'autofix') {
-    document.getElementById('mp-log').style.display = 'none';
-    document.getElementById('mp-progress').style.display = 'none';
-    document.getElementById('mp-counter').style.display = 'none';
-    document.getElementById('mp-time').style.display = 'none';
-    document.getElementById('mp-status').innerHTML = '<br><br><span style="font-size:16px;color:var(--green)">⚡ A folyamat részletei a külső, biztonságos ablakban láthatóak.</span><br><br>Ezt a főablakot addig zároltuk, amíg a folyamat be nem fejeződik.';
-  } else {
-    document.getElementById('mp-log').style.display = 'block';
+  document.getElementById('mp-log').style.display = 'block';
     document.getElementById('mp-progress').style.display = 'block';
     document.getElementById('mp-counter').style.display = 'block';
     document.getElementById('mp-time').style.display = 'block';
-  }
 
   // Reset button states
   const closeBtn = document.getElementById('mp-close-btn');
@@ -952,8 +899,6 @@ function showProgressModal(title, phase) {
 function updateProgressModal(data) {
   if (data.phase) document.getElementById('mp-phase').textContent = data.phase;
   if (data.title) document.getElementById('mp-title').textContent = data.title;
-  
-  if (currentTask === 'autofix') return;
   
   if (data.status) document.getElementById('mp-status').textContent = data.status;
   if (data.counter) document.getElementById('mp-counter').textContent = data.counter;
