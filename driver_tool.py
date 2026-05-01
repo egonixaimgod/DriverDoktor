@@ -14,7 +14,7 @@ import winreg
 import queue
 from datetime import datetime
 
-BUILD_NUMBER = 82
+BUILD_NUMBER = 83
 
 try:
     import webview
@@ -1291,8 +1291,15 @@ try {
                     self.emit('task_progress', {'task': 'autofix', 'log': f'{total} db third-party driver eltávolítása...\n'})
                     for i, drv in enumerate(drivers):
                         if self._cancel_flag: raise Exception("Magyar_Megszakit_Flag")
-                        name = drv.get('published_name', '')
+                        
+                        name = drv.get('published', '')
                         if not name: continue
+                        
+                        # KIVÉTEL: Kijelző/Videókártya driverek átugrása, különben kifagy/kifehéredik a WebView2 UI
+                        if drv.get('class', '').lower() == 'display':
+                            self.emit('task_progress', {'task': 'autofix', 'log': f'⏭️ Átugrás ({i+1}/{total}): {name} (Vizuális motor védelme: Display driver)', 'current': i+1, 'total': total})
+                            continue
+                            
                         self.emit('task_progress', {'task': 'autofix', 'log': f'🗑 Törlés ({i+1}/{total}): {name}', 'current': i+1, 'total': total})
                         self._run(['pnputil', '/delete-driver', name, '/uninstall', '/force'])
                     self.emit('task_progress', {'task': 'autofix', 'log': '✅ Driverek eltávolítva.\n'})
@@ -1350,7 +1357,7 @@ try {
                     logging.error(f"[AUTOFIX] Hiba: {e}")
                     self.emit('task_error', {'task': 'autofix', 'error': str(e)})
                     
-        self._safe_thread('autofix', worker)()
+        self._safe_thread('autofix', worker)
 
     def disable_wu(self):
         logging.info("[API] disable_wu()")
