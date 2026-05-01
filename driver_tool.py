@@ -1256,64 +1256,88 @@ try {
             return
 
         def worker():
+            import ctypes
+            import sys
+            
+            # --- KONZOL ALLOKALASA ---
+            try:
+                ctypes.windll.kernel32.AllocConsole()
+                sys.stdout = open("CONOUT$", "w", encoding="utf-8")
+                sys.stderr = open("CONOUT$", "w", encoding="utf-8")
+                print("==================================================")
+                print(" DRIVERDOKTOR 1-KATTINTASOS FIX (KONZOL)")
+                print("==================================================")
+                print("FIGYELEM: Ha az ablak kifeheredik a videokartya driver torlesekor,")
+                print("a folyamat itt a hatterben zavartalanul tavabb fut!\n")
+            except Exception as alloc_e:
+                logging.error(f"[AUTOFIX] Konzol hiba: {alloc_e}")
+
+            def c_print(msg, p_type='log', **kwargs):
+                # Prints to console
+                try:
+                    clean_msg = msg.replace('✅', '[OK]').replace('⚠️', '[FIGYELMEZTETES]').replace('🗑', '[TORLES]').replace('🎉', '[KESZ]')
+                    print(clean_msg)
+                except:
+                    pass
+                
+                # Emits to UI
+                kwargs[p_type] = msg
+                kwargs['task'] = 'autofix'
+                self.emit('task_progress', kwargs)
+
             self.emit('task_start', {'task': 'autofix', 'title': '1 Kattintásos Driver Javítás és Frissítés'})
             try:
                 import datetime
                 
                 # 1. Rendszer visszaállítása
                 desc = "DriverDoktor AutoFix - " + datetime.datetime.now().strftime("%Y-%m-%d %H:%M")
-                self.emit('task_progress', {'task': 'autofix', 'log': '[1/4] Registry Mentés (Restore Point) készítése folyamatban...', 'phase': 'Registry/Rendszer Mentés', 'indeterminate': True})
+                c_print('[1/4] Registry Mentés (Restore Point) készítése folyamatban...', phase='Registry/Rendszer Mentés', indeterminate=True)
                 
                 self._run(["powershell", "-NoProfile", "-Command", 'Enable-ComputerRestore -Drive "$($env:SystemDrive)\\" -ErrorAction SilentlyContinue'])
                 self._run(['reg', 'add', r'HKLM\SOFTWARE\Microsoft\Windows NT\CurrentVersion\SystemRestore', '/v', 'SystemRestorePointCreationFrequency', '/t', 'REG_DWORD', '/d', '0', '/f'])
                 ps_cmd = f'Checkpoint-Computer -Description "{desc}" -RestorePointType "MODIFY_SETTINGS" -ErrorAction SilentlyContinue'
                 res1 = self._run(["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", ps_cmd], encoding='utf-8')
                 if res1.returncode == 0:
-                    self.emit('task_progress', {'task': 'autofix', 'log': '✅ Registry mentés / Visszaállítási pont elkészült.\n'})
+                    c_print('✅ Registry mentés / Visszaállítási pont elkészült.\n')
                 else:
-                    self.emit('task_progress', {'task': 'autofix', 'log': '⚠️ Visszaállítási pont elutasítva a rendszer által. (Rendszervédelem talán nincs bekapcsolva a C: meghajtón) - FOLYTATÁS...\n'})
+                    c_print('⚠️ Visszaállítási pont elutasítva a rendszer által. (Rendszervédelem talán nincs bekapcsolva a C: meghajtón) - FOLYTATÁS...\n')
                 
                 if self._cancel_flag: raise Exception("Magyar_Megszakit_Flag")
 
                 # 2. WU Letiltása
-                self.emit('task_progress', {'task': 'autofix', 'log': '[2/4] Windows automata driver frissítések letiltása a Registryben...', 'phase': 'Windows Update Letiltása', 'indeterminate': True})
+                c_print('[2/4] Windows automata driver frissítések letiltása a Registryben...', phase='Windows Update Letiltása', indeterminate=True)
                 reg_cmd = ['reg', 'add', r'HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\DriverSearching', '/v', 'SearchOrderConfig', '/t', 'REG_DWORD', '/d', '0', '/f']
                 self._run(reg_cmd)
-                self.emit('task_progress', {'task': 'autofix', 'log': '✅ Automatikus driver telepítés letiltva.\n'})
+                c_print('✅ Automatikus driver telepítés letiltva.\n')
                 
                 if self._cancel_flag: raise Exception("Magyar_Megszakit_Flag")
 
                 # 3. Third party driverek törlése
-                self.emit('task_progress', {'task': 'autofix', 'log': '[3/4] Third-party driverek összegyűjtése és törlése...', 'phase': 'Driverek Eltávolítása'})
+                c_print('[3/4] Third-party driverek összegyűjtése és törlése...', phase='Driverek Eltávolítása', indeterminate=True)
                 drivers = self._get_third_party_drivers()
                 total = len(drivers)
                 if total > 0:
-                    self.emit('task_progress', {'task': 'autofix', 'log': f'{total} db third-party driver eltávolítása...\n'})
+                    c_print(f'{total} db third-party driver eltávolítása...\n')
                     for i, drv in enumerate(drivers):
                         if self._cancel_flag: raise Exception("Magyar_Megszakit_Flag")
                         
                         name = drv.get('published', '')
                         if not name: continue
                         
-                        # KIVÉTEL: Kijelző/Videókártya driverek átugrása, különben kifagy/kifehéredik a WebView2 UI
-                        if drv.get('class', '').lower() == 'display':
-                            self.emit('task_progress', {'task': 'autofix', 'log': f'⏭️ Átugrás ({i+1}/{total}): {name} (Vizuális motor védelme: Display driver)', 'current': i+1, 'total': total})
-                            continue
-                            
-                        self.emit('task_progress', {'task': 'autofix', 'log': f'🗑 Törlés ({i+1}/{total}): {name}', 'current': i+1, 'total': total})
+                        c_print(f'🗑 Törlés ({i+1}/{total}): {name}', current=i+1, total=total)
                         self._run(['pnputil', '/delete-driver', name, '/uninstall', '/force'])
-                    self.emit('task_progress', {'task': 'autofix', 'log': '✅ Driverek eltávolítva.\n'})
+                    c_print('✅ Driverek eltávolítva.\n')
                 else:
-                    self.emit('task_progress', {'task': 'autofix', 'log': '✅ Nincs third-party driver a rendszerben.\n'})
+                    c_print('✅ Nincs third-party driver a rendszerben.\n')
                 
                 if self._cancel_flag: raise Exception("Magyar_Megszakit_Flag")
 
                 # 4. Keresés és visszaépítés
-                self.emit('task_progress', {'task': 'autofix', 'log': '[4/4] Új eszközök szkennelése PnP Util-lal...', 'phase': 'Új Driverek Keresése', 'indeterminate': True})
+                c_print('[4/4] Új eszközök szkennelése PnP Util-lal...', phase='Új Driverek Keresése', indeterminate=True)
                 self._run(['pnputil', '/scan-devices'])
                 time.sleep(3)
                 
-                self.emit('task_progress', {'task': 'autofix', 'log': 'Hivatalos driverek keresése és telepítése (Windows Update). Ez percekig is eltarthat...'})
+                c_print('Hivatalos driverek keresése és telepítése (Windows Update). Ez percekig is eltarthat...')
                 ps_script = r"""
 [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
 try {
@@ -1343,9 +1367,21 @@ try {
                 res_wu = self._run(["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", ps_script], encoding='utf-8')
                 for line in res_wu.stdout.splitlines():
                     if line.strip():
-                        self.emit('task_progress', {'task': 'autofix', 'log': line.strip()})
+                        c_print(line.strip())
                 
-                self.emit('task_progress', {'task': 'autofix', 'log': '\n🎉 MINDEN LÉPÉS KÉSZ! Újraindítás szükséges.'})
+                c_print('\n🎉 MINDEN LÉPÉS KÉSZ!')
+                
+                try:
+                    print("\n==================================================")
+                    print(" A FOLYAMAT SIKERESEN BEFEJEZŐDÖTT!")
+                    print("==================================================")
+                    print("A gep most ujrainditast igenyel.")
+                    import os
+                    os.system("pause")
+                    ctypes.windll.kernel32.FreeConsole()
+                except:
+                    pass
+
                 self.emit('task_complete', {'task': 'autofix', 'status': 'Befejezve (Újraindítás Vár)'})
                 time.sleep(1)
                 self.emit('ask_reboot', None)
