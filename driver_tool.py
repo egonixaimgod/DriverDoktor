@@ -14,7 +14,7 @@ import winreg
 import queue
 from datetime import datetime
 
-BUILD_NUMBER = 81
+BUILD_NUMBER = 82
 
 try:
     import webview
@@ -1248,6 +1248,109 @@ try {
         except Exception as e:
             logging.error(f"[WU_STATUS] Hiba: {e}")
             return {'status': 'Ismeretlen', 'color': 'unknown'}
+
+    def run_autofix(self):
+        logging.info("[API] run_autofix() indítása")
+        if self.target_os_path:
+            self.emit('toast', {'message': 'Az 1 kattintásos fix csak az Élő (jelenlegi) rendszeren futtatható le biztonságosan!', 'type': 'error'})
+            return
+
+        def worker():
+            self.emit('task_start', {'task': 'autofix', 'title': '1 Kattintásos Driver Javítás és Frissítés'})
+            try:
+                import datetime
+                
+                # 1. Rendszer visszaállítása
+                desc = "DriverDoktor AutoFix - " + datetime.datetime.now().strftime("%Y-%m-%d %H:%M")
+                self.emit('task_progress', {'task': 'autofix', 'log': '[1/4] Registry Mentés (Restore Point) készítése folyamatban...', 'phase': 'Registry/Rendszer Mentés', 'indeterminate': True})
+                
+                self._run(["powershell", "-NoProfile", "-Command", 'Enable-ComputerRestore -Drive "$($env:SystemDrive)\\" -ErrorAction SilentlyContinue'])
+                self._run(['reg', 'add', r'HKLM\SOFTWARE\Microsoft\Windows NT\CurrentVersion\SystemRestore', '/v', 'SystemRestorePointCreationFrequency', '/t', 'REG_DWORD', '/d', '0', '/f'])
+                ps_cmd = f'Checkpoint-Computer -Description "{desc}" -RestorePointType "MODIFY_SETTINGS" -ErrorAction SilentlyContinue'
+                res1 = self._run(["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", ps_cmd], encoding='utf-8')
+                if res1.returncode == 0:
+                    self.emit('task_progress', {'task': 'autofix', 'log': '✅ Registry mentés / Visszaállítási pont elkészült.\n'})
+                else:
+                    self.emit('task_progress', {'task': 'autofix', 'log': '⚠️ Visszaállítási pont elutasítva a rendszer által. (Rendszervédelem talán nincs bekapcsolva a C: meghajtón) - FOLYTATÁS...\n'})
+                
+                if self._cancel_flag: raise Exception("Magyar_Megszakit_Flag")
+
+                # 2. WU Letiltása
+                self.emit('task_progress', {'task': 'autofix', 'log': '[2/4] Windows automata driver frissítések letiltása a Registryben...', 'phase': 'Windows Update Letiltása', 'indeterminate': True})
+                reg_cmd = ['reg', 'add', r'HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\DriverSearching', '/v', 'SearchOrderConfig', '/t', 'REG_DWORD', '/d', '0', '/f']
+                self._run(reg_cmd)
+                self.emit('task_progress', {'task': 'autofix', 'log': '✅ Automatikus driver telepítés letiltva.\n'})
+                
+                if self._cancel_flag: raise Exception("Magyar_Megszakit_Flag")
+
+                # 3. Third party driverek törlése
+                self.emit('task_progress', {'task': 'autofix', 'log': '[3/4] Third-party driverek összegyűjtése és törlése...', 'phase': 'Driverek Eltávolítása'})
+                drivers = self._get_third_party_drivers()
+                total = len(drivers)
+                if total > 0:
+                    self.emit('task_progress', {'task': 'autofix', 'log': f'{total} db third-party driver eltávolítása...\n'})
+                    for i, drv in enumerate(drivers):
+                        if self._cancel_flag: raise Exception("Magyar_Megszakit_Flag")
+                        name = drv.get('published_name', '')
+                        if not name: continue
+                        self.emit('task_progress', {'task': 'autofix', 'log': f'🗑 Törlés ({i+1}/{total}): {name}', 'current': i+1, 'total': total})
+                        self._run(['pnputil', '/delete-driver', name, '/uninstall', '/force'])
+                    self.emit('task_progress', {'task': 'autofix', 'log': '✅ Driverek eltávolítva.\n'})
+                else:
+                    self.emit('task_progress', {'task': 'autofix', 'log': '✅ Nincs third-party driver a rendszerben.\n'})
+                
+                if self._cancel_flag: raise Exception("Magyar_Megszakit_Flag")
+
+                # 4. Keresés és visszaépítés
+                self.emit('task_progress', {'task': 'autofix', 'log': '[4/4] Új eszközök szkennelése PnP Util-lal...', 'phase': 'Új Driverek Keresése', 'indeterminate': True})
+                self._run(['pnputil', '/scan-devices'])
+                time.sleep(3)
+                
+                self.emit('task_progress', {'task': 'autofix', 'log': 'Hivatalos driverek keresése és telepítése (Windows Update). Ez percekig is eltarthat...'})
+                ps_script = r"""
+[Console]::OutputEncoding = [System.Text.Encoding]::UTF8
+try {
+    $Session = New-Object -ComObject Microsoft.Update.Session
+    $Searcher = $Session.CreateUpdateSearcher()
+    try { $SM = New-Object -ComObject Microsoft.Update.ServiceManager; $SM.AddService2("7971f918-a847-4430-9279-4a52d1efe18d", 7, "") | Out-Null } catch {}
+    $Searcher.ServerSelection = 3
+    $Searcher.ServiceID = "7971f918-a847-4430-9279-4a52d1efe18d"
+    
+    Write-Output "Keresés folyamatban..."
+    $Result = $Searcher.Search("IsInstalled=0 and Type='Driver'")
+    if ($Result.Updates.Count -eq 0) { Write-Output "✅ Szerveren nincs újabb illesztőprogram ehhez a géphez."; return }
+    
+    Write-Output ("Letöltés indul: " + $Result.Updates.Count + " db...")
+    $Downloader = $Session.CreateUpdateDownloader()
+    $Downloader.Updates = $Result.Updates
+    $Downloader.Download()
+    
+    Write-Output "Telepítés indul..."
+    $Installer = $Session.CreateUpdateInstaller()
+    $Installer.Updates = $Result.Updates
+    $InstallResult = $Installer.Install()
+    
+    Write-Output ("✅ WU Telepítés befejezve! (Kód: " + $InstallResult.ResultCode + ")")
+} catch { Write-Output "⚠️ Nem sikerült a WU szinkronizálása $_" }
+"""
+                res_wu = self._run(["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", ps_script], encoding='utf-8')
+                for line in res_wu.stdout.splitlines():
+                    if line.strip():
+                        self.emit('task_progress', {'task': 'autofix', 'log': line.strip()})
+                
+                self.emit('task_progress', {'task': 'autofix', 'log': '\n🎉 MINDEN LÉPÉS KÉSZ! Újraindítás szükséges.'})
+                self.emit('task_complete', {'task': 'autofix', 'status': 'Befejezve (Újraindítás Vár)'})
+                time.sleep(1)
+                self.emit('ask_reboot', None)
+
+            except Exception as e:
+                if str(e) == "Magyar_Megszakit_Flag":
+                    self.emit('task_error', {'task': 'autofix', 'error': 'Felhasználó által megszakítva.'})
+                else:
+                    logging.error(f"[AUTOFIX] Hiba: {e}")
+                    self.emit('task_error', {'task': 'autofix', 'error': str(e)})
+                    
+        self._safe_thread('autofix', worker)()
 
     def disable_wu(self):
         logging.info("[API] disable_wu()")

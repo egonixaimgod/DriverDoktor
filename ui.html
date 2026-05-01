@@ -206,6 +206,7 @@ td input[type="checkbox"]{accent-color:var(--accent);width:16px;height:16px}
     <button class="nav-btn" onclick="switchView('backup')" data-view="backup"><span class="icon">💾</span>Mentés és Visszaállítás</button>
     <button class="nav-btn" onclick="switchView('wu')" data-view="wu"><span class="icon">🔄</span>Windows Update</button>
     <button class="nav-btn" onclick="switchView('hw')" data-view="hw"><span class="icon">🖥️</span>Hardver Info & Telepítés</button>
+    <button class="nav-btn" onclick="switchView('autofix')" data-view="autofix"><span class="icon">🚀</span>1 Kattintásos Fix</button>
     <div class="sidebar-bottom" id="build-label">Build ---</div>
   </nav>
 
@@ -314,6 +315,15 @@ td input[type="checkbox"]{accent-color:var(--accent);width:16px;height:16px}
             <div id="hw-status" style="color:var(--text2);font-size:12px;margin-top:6px"></div>
           </div>
           <div class="hw-tree" id="hw-tree"></div>
+        </div>
+      </div>
+
+      <!-- VIEW: AutoFix -->
+      <div class="view" id="view-autofix">
+        <div class="panel glass">
+          <div class="panel-title"><span class="emoji">🚀</span> 1 Kattintásos Driver Fix</div>
+          <p style="margin-bottom: 16px; color: var(--text3);">Ez a funkció automatikusan elkészíti a registry mentést (Restore Point), letiltja az automata WU driver frissítést, törli a third-party drivereket, majd frissíti őket a legújabbakra (automatikus letöltés WU-ról), és végül újraindítja a gépet.</p>
+          <button class="btn btn-big btn-primary" onclick="startAutoFix()" id="btn-autofix">🚀 FIX INDÍTÁSA</button>
         </div>
       </div>
 
@@ -765,6 +775,20 @@ function updateWuStatus(data) {
   const el = document.getElementById('wu-status');
   el.textContent = 'Állapot: ' + (data.status || 'Ismeretlen');
   el.className = 'wu-status ' + (data.color || 'unknown');
+}
+async function startAutoFix() {
+  const ok = await showConfirm('1 Kattintásos Driver Fix', 'Megerősíted a teljes automatikus javítás (visszaállítási pont, driver törlés és újratelepítés) indítását?');
+  if (ok) {
+    document.getElementById('btn-autofix').disabled = true;
+    document.getElementById('btn-autofix').textContent = '⏳ FOLYAMATBAN...';
+    try {
+      await api().run_autofix();
+    } catch (e) {
+      toast('Autofix hiba: ' + e, 'error');
+      document.getElementById('btn-autofix').disabled = false;
+      document.getElementById('btn-autofix').textContent = '🚀 FIX INDÍTÁSA';
+    }
+  }
 }
 async function disableWu() {
   try {
