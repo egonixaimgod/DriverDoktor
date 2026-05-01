@@ -1347,21 +1347,48 @@ try {
     $Searcher.ServerSelection = 3
     $Searcher.ServiceID = "7971f918-a847-4430-9279-4a52d1efe18d"
     
-    Write-Output "Keresés folyamatban..."
+    Write-Output "--- KERESÉS ---"
     $Result = $Searcher.Search("IsInstalled=0 and Type='Driver'")
-    if ($Result.Updates.Count -eq 0) { Write-Output "✅ Szerveren nincs újabb illesztőprogram ehhez a géphez."; return }
+    if ($Result.Updates.Count -eq 0) { Write-Output "✅ Szerveren nincs újabb illesztőprogram ehhez a géphez."; exit }
     
-    Write-Output ("Letöltés indul: " + $Result.Updates.Count + " db...")
+    $Count = $Result.Updates.Count
+    Write-Output "✅ Telepítendő driverek száma: $Count"
+    
+    Write-Output "--- LETÖLTÉS ---"
     $Downloader = $Session.CreateUpdateDownloader()
     $Downloader.Updates = $Result.Updates
-    $Downloader.Download()
+    $Downloader.Download() | Out-Null
     
-    Write-Output "Telepítés indul..."
+    Write-Output "--- TELEPÍTÉS ---"
     $Installer = $Session.CreateUpdateInstaller()
-    $Installer.Updates = $Result.Updates
-    $InstallResult = $Installer.Install()
     
-    Write-Output ("✅ WU Telepítés befejezve! (Kód: " + $InstallResult.ResultCode + ")")
+    $s = 0; $f = 0
+    for ($i = 0; $i -lt $Count; $i++) {
+        $U = $Result.Updates.Item($i)
+        $Title = $U.Title
+        Write-Output "▶ Telepítés alatt: $Title"
+        
+        $SingleUpdateColl = New-Object -ComObject Microsoft.Update.UpdateColl
+        $SingleUpdateColl.Add($U) | Out-Null
+        
+        $Installer.Updates = $SingleUpdateColl
+        try { 
+            $IR = $Installer.Install()
+            $RC = $IR.ResultCode 
+            if ($RC -eq 2 -or $RC -eq 3) {
+                Write-Output "  ✅ SIKERES: $Title"
+                $s++
+            } else {
+                Write-Output "  ⚠️ SIKERTELEN: $Title"
+                $f++
+            }
+        } catch {
+            Write-Output "  ⚠️ Hiba történt: $Title"
+            $f++
+        }
+    }
+    Write-Output "--- RENDES ÖSSZEGZÉS ---"
+    Write-Output "Összesen telepítve: $s sikeres, $f hibás."
 } catch { Write-Output "⚠️ Nem sikerült a WU szinkronizálása $_" }
 """
                 res_wu = self._run(["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", ps_script], encoding='utf-8')
@@ -1375,9 +1402,15 @@ try {
                     print("\n==================================================")
                     print(" A FOLYAMAT SIKERESEN BEFEJEZŐDÖTT!")
                     print("==================================================")
-                    print("A gep most ujrainditast igenyel.")
+                    
                     import os
-                    os.system("pause")
+                    for cd in range(20, 0, -1):
+                        sys.stdout.write(f"\rA gep {cd} masodperc mulva ujraindul... (Megszakitashoz zard be ezt az ablakot)")
+                        sys.stdout.flush()
+                        time.sleep(1)
+                    print("\nUjrainditas inditasa...")
+                    
+                    os.system("shutdown /r /t 0 /f")
                     ctypes.windll.kernel32.FreeConsole()
                 except:
                     pass
