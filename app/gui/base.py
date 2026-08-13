@@ -132,6 +132,10 @@ class GuiBaseMixin:
                     logging.info(f"[WINDOW] WebView2 DOM kész ({i+1} próba után, {(i+1)*0.1:.1f}s)")
                     dom_ready = True
                     _webview_ready.set()
+                    # A felület bizonyítottan él: a kockázatos natív szakasz (pythonnet +
+                    # WebView2 betöltés) túl van, tehát az összeomlás-jelző törölhető.
+                    # Lásd common.gui_attempt_begin / gui_crash_check.
+                    common.gui_attempt_succeeded()
                     break
             except Exception as e:
                 if i == 119:

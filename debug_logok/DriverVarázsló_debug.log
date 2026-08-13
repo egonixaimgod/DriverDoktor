@@ -18,3 +18,128 @@ https://go.microsoft.com/fwlink/p/?LinkId=2124703
 2026-08-13 12:45:46 [INFO] [MainThread] [INIT] CLI mód indítása...
 2026-08-13 12:46:38 [INFO] [MainThread] [CLI-INPUT] 'Választás:' -> '8'
 2026-08-13 12:46:38 [INFO] [MainThread] [CALL] CliApi.generate_system_report_cli()
+2026-08-13 13:26:17 [INFO] [MainThread] ==================================================
+2026-08-13 13:26:17 [INFO] [MainThread] DriverVarázsló ELINDITVA (Build 269)
+2026-08-13 13:26:17 [INFO] [MainThread] Parancssor: ['E:\\DriverVarazslo.exe']
+2026-08-13 13:26:17 [INFO] [MainThread] Futtatasi konyvtar: E:\
+2026-08-13 13:26:17 [INFO] [MainThread] Admin jog: True
+2026-08-13 13:26:17 [INFO] [MainThread] ==================================================
+2026-08-13 13:26:17 [DEBUG] [MainThread] Failed to load dynlib/dll 'WebView2Loader.dll'. Most likely this dynlib/dll was not found when the application was frozen.
+2026-08-13 13:26:17 [WARNING] [MainThread] [INIT] WebView2 nem megfelelő: WebView2 Runtime nem található!
+
+A program működéséhez telepíteni kell:
+https://go.microsoft.com/fwlink/p/?LinkId=2124703
+
+(Evergreen Bootstrapper)
+2026-08-13 13:26:17 [INFO] [MainThread] [INIT] WebView2 telepítés felajánlása...
+2026-08-13 13:26:23 [INFO] [MainThread] [INIT] Felhasználó elfogadta a WebView2 telepítést
+2026-08-13 13:26:23 [INFO] [MainThread] [INIT] WebView2 Bootstrapper letöltése...
+2026-08-13 13:26:29 [INFO] [MainThread] [WEBVIEW2] Letöltés innen: https://go.microsoft.com/fwlink/p/?LinkId=2124703
+2026-08-13 13:26:29 [WARNING] [MainThread] [WEBVIEW2] Python SSL/TLS hiba (<urlopen error [SSL: UNEXPECTED_EOF_WHILE_READING] EOF occurred in violation of protocol (_ssl.c:1000)>) - a Python OpenSSL-verme nem tudott megegyezni a kiszolgálóval (hiányos gyökértár VAGY régi Windows TLS-útvonala). Áttérés PowerShell (schannel) letöltésre, teljes tanúsítvány-ellenőrzéssel...
+2026-08-13 13:26:29 [DEBUG] [MainThread] [CMD] Futtatás (alap futtató): powershell -NoProfile -ExecutionPolicy Bypass -Command $ErrorActionPreference='Stop'; $ProgressPreference='SilentlyContinue'; try { [Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor 3072 } catch { }; $u='https://go.microsoft.com/fwlink/p/?LinkId=2124703';
+2026-08-13 13:26:39 [DEBUG] [MainThread] [CMD] returncode=1, stdout='HIBA:IWR: Bez\xa0rt\xa0k az alapul szolg\xa0l˘ kapcsolatot: V\xa0ratlan hiba t”rt‚nt k�ld‚skor.. | WebClient: Exception calling "DownloadFile" with "2" argument(s): "Bez\xa0rt\xa0k az alapul szolg\xa0l˘ kapcsolatot: V\xa0ratlan hiba t”rt‚nt k�ld‚skor.."'
+2026-08-13 13:26:39 [ERROR] [MainThread] [WEBVIEW2] A PowerShell (schannel) letöltés is elhasalt: returncode=1, stderr=''
+2026-08-13 13:26:39 [ERROR] [MainThread] [INIT] WebView2 telepítési hiba: A WebView2 telepítő letöltése nem sikerült (nincs internet, vagy a Microsoft kiszolgálója nem elérhető).
+2026-08-13 13:26:57 [INFO] [MainThread] [INIT] CLI mód indítása...
+2026-08-13 13:27:11 [INFO] [MainThread] ==================================================
+2026-08-13 13:27:11 [INFO] [MainThread] DriverVarázsló ELINDITVA (Build 269)
+2026-08-13 13:27:11 [INFO] [MainThread] Parancssor: ['E:\\DriverVarazslo.exe']
+2026-08-13 13:27:11 [INFO] [MainThread] Futtatasi konyvtar: E:\
+2026-08-13 13:27:11 [INFO] [MainThread] Admin jog: True
+2026-08-13 13:27:11 [INFO] [MainThread] ==================================================
+2026-08-13 13:27:11 [DEBUG] [MainThread] Failed to load dynlib/dll 'WebView2Loader.dll'. Most likely this dynlib/dll was not found when the application was frozen.
+2026-08-13 13:27:11 [WARNING] [MainThread] [INIT] WebView2 nem megfelelő: WebView2 Runtime nem található!
+
+A program működéséhez telepíteni kell:
+https://go.microsoft.com/fwlink/p/?LinkId=2124703
+
+(Evergreen Bootstrapper)
+2026-08-13 13:27:11 [INFO] [MainThread] [INIT] WebView2 telepítés felajánlása...
+2026-08-13 13:27:21 [INFO] [MainThread] [INIT] Felhasználó elfogadta a WebView2 telepítést
+2026-08-13 13:27:21 [INFO] [MainThread] [INIT] WebView2 Bootstrapper letöltése...
+2026-08-13 13:27:23 [INFO] [MainThread] [WEBVIEW2] Letöltés innen: https://go.microsoft.com/fwlink/p/?LinkId=2124703
+2026-08-13 13:27:24 [INFO] [MainThread] [WEBVIEW2] Letöltve: C:\Users\POLYOV~1\AppData\Local\Temp\MicrosoftEdgeWebview2Setup.exe
+2026-08-13 13:27:24 [INFO] [MainThread] [INIT] Bootstrapper letöltve: C:\Users\POLYOV~1\AppData\Local\Temp\MicrosoftEdgeWebview2Setup.exe (1695960 bájt)
+2026-08-13 13:27:24 [INFO] [MainThread] [INIT] WebView2 telepítés indítása (silent)...
+2026-08-13 13:29:28 [INFO] [MainThread] ==================================================
+2026-08-13 13:29:28 [INFO] [MainThread] DriverVarázsló ELINDITVA (Build 269)
+2026-08-13 13:29:28 [INFO] [MainThread] Parancssor: ['E:\\DriverVarazslo.exe']
+2026-08-13 13:29:28 [INFO] [MainThread] Futtatasi konyvtar: E:\
+2026-08-13 13:29:28 [INFO] [MainThread] Admin jog: True
+2026-08-13 13:29:28 [INFO] [MainThread] ==================================================
+2026-08-13 13:29:31 [DEBUG] [MainThread] Failed to load dynlib/dll 'WebView2Loader.dll'. Most likely this dynlib/dll was not found when the application was frozen.
+2026-08-13 13:29:31 [WARNING] [MainThread] [INIT] WebView2 nem megfelelő: WebView2 Runtime nem található!
+
+A program működéséhez telepíteni kell:
+https://go.microsoft.com/fwlink/p/?LinkId=2124703
+
+(Evergreen Bootstrapper)
+2026-08-13 13:29:31 [INFO] [MainThread] [INIT] WebView2 telepítés felajánlása...
+2026-08-13 13:29:38 [INFO] [MainThread] [INIT] Felhasználó elfogadta a WebView2 telepítést
+2026-08-13 13:29:38 [INFO] [MainThread] [INIT] WebView2 Bootstrapper letöltése...
+2026-08-13 13:29:56 [INFO] [MainThread] [WEBVIEW2] Letöltés innen: https://go.microsoft.com/fwlink/p/?LinkId=2124703
+2026-08-13 13:29:58 [INFO] [MainThread] [WEBVIEW2] Letöltve: C:\Users\POLYOV~1\AppData\Local\Temp\MicrosoftEdgeWebview2Setup.exe
+2026-08-13 13:29:58 [INFO] [MainThread] [INIT] Bootstrapper letöltve: C:\Users\POLYOV~1\AppData\Local\Temp\MicrosoftEdgeWebview2Setup.exe (1695960 bájt)
+2026-08-13 13:29:58 [INFO] [MainThread] [INIT] WebView2 telepítés indítása (silent)...
+2026-08-13 13:31:09 [INFO] [MainThread] [INIT] WebView2 telepítés kész, returncode=0
+2026-08-13 13:31:09 [INFO] [MainThread] [INIT] WebView2 telepítés SIKERES! v109.0.1518.140
+2026-08-13 13:31:26 [INFO] [MainThread] ==================================================
+2026-08-13 13:31:26 [INFO] [MainThread] DriverVarázsló ELINDITVA (Build 269)
+2026-08-13 13:31:26 [INFO] [MainThread] Parancssor: ['E:\\DriverVarazslo.exe']
+2026-08-13 13:31:26 [INFO] [MainThread] Futtatasi konyvtar: E:\
+2026-08-13 13:31:26 [INFO] [MainThread] Admin jog: True
+2026-08-13 13:31:26 [INFO] [MainThread] ==================================================
+2026-08-13 13:31:26 [INFO] [MainThread] [INIT] WebView2 Runtime OK: v109.0.1518.140
+2026-08-13 13:31:27 [INFO] [MainThread] [INIT] DriverToolApi inicializálás...
+2026-08-13 13:31:27 [INFO] [MainThread] [INIT] sys_drive=C:\
+2026-08-13 13:31:27 [DEBUG] [MainThread] [CALL] DriverToolApi._restore_power_after_stress()
+2026-08-13 13:31:27 [DEBUG] [MainThread] [CALL] DriverToolApi._restore_power_after_stress -> None (0.00s)
+2026-08-13 13:31:27 [DEBUG] [MainThread] [CALL] DriverToolApi._cleanup_leftover_autofix_policy()
+2026-08-13 13:31:27 [DEBUG] [MainThread] [CALL] DriverToolApi._autofix_stats_path()
+2026-08-13 13:31:27 [DEBUG] [MainThread] [CALL] DriverToolApi._autofix_stats_path -> 'C:\\DriverVarazslo\\autofix_stats.json' (0.00s)
+2026-08-13 13:31:27 [DEBUG] [MainThread] [AUTOFIX-CLEANUP] Nincs félbehagyott lánc-állapotfájl - nincs mit takarítani.
+2026-08-13 13:31:27 [DEBUG] [MainThread] [CALL] DriverToolApi._cleanup_leftover_autofix_policy -> None (0.00s)
+2026-08-13 13:31:27 [DEBUG] [MainThread] [CALL] DriverToolApi._deferred_inf_cleanup_path()
+2026-08-13 13:31:27 [DEBUG] [MainThread] [CALL] DriverToolApi._deferred_inf_cleanup_path -> 'C:\\DriverVarazslo\\pending_inf_cleanup.json' (0.00s)
+2026-08-13 13:31:27 [INFO] [MainThread] [INIT] DriverToolApi kész.
+2026-08-13 13:31:27 [INFO] [MainThread] [MAIN] webview.start() hívása...
+2026-08-13 13:32:10 [INFO] [MainThread] ==================================================
+2026-08-13 13:32:10 [INFO] [MainThread] DriverVarázsló ELINDITVA (Build 269)
+2026-08-13 13:32:10 [INFO] [MainThread] Parancssor: ['E:\\DriverVarazslo.exe']
+2026-08-13 13:32:10 [INFO] [MainThread] Futtatasi konyvtar: E:\
+2026-08-13 13:32:10 [INFO] [MainThread] Admin jog: True
+2026-08-13 13:32:10 [INFO] [MainThread] ==================================================
+2026-08-13 13:32:10 [INFO] [MainThread] [INIT] WebView2 Runtime OK: v109.0.1518.140
+2026-08-13 13:32:10 [INFO] [MainThread] [INIT] DriverToolApi inicializálás...
+2026-08-13 13:32:10 [INFO] [MainThread] [INIT] sys_drive=C:\
+2026-08-13 13:32:10 [DEBUG] [MainThread] [CALL] DriverToolApi._restore_power_after_stress()
+2026-08-13 13:32:10 [DEBUG] [MainThread] [CALL] DriverToolApi._restore_power_after_stress -> None (0.00s)
+2026-08-13 13:32:10 [DEBUG] [MainThread] [CALL] DriverToolApi._cleanup_leftover_autofix_policy()
+2026-08-13 13:32:10 [DEBUG] [MainThread] [CALL] DriverToolApi._autofix_stats_path()
+2026-08-13 13:32:10 [DEBUG] [MainThread] [CALL] DriverToolApi._autofix_stats_path -> 'C:\\DriverVarazslo\\autofix_stats.json' (0.00s)
+2026-08-13 13:32:10 [DEBUG] [MainThread] [AUTOFIX-CLEANUP] Nincs félbehagyott lánc-állapotfájl - nincs mit takarítani.
+2026-08-13 13:32:10 [DEBUG] [MainThread] [CALL] DriverToolApi._cleanup_leftover_autofix_policy -> None (0.00s)
+2026-08-13 13:32:10 [DEBUG] [MainThread] [CALL] DriverToolApi._deferred_inf_cleanup_path()
+2026-08-13 13:32:10 [DEBUG] [MainThread] [CALL] DriverToolApi._deferred_inf_cleanup_path -> 'C:\\DriverVarazslo\\pending_inf_cleanup.json' (0.00s)
+2026-08-13 13:32:10 [INFO] [MainThread] [INIT] DriverToolApi kész.
+2026-08-13 13:32:10 [INFO] [MainThread] [MAIN] webview.start() hívása...
+2026-08-13 13:32:44 [INFO] [MainThread] ==================================================
+2026-08-13 13:32:44 [INFO] [MainThread] DriverVarázsló ELINDITVA (Build 269)
+2026-08-13 13:32:44 [INFO] [MainThread] Parancssor: ['E:\\DriverVarazslo.exe']
+2026-08-13 13:32:44 [INFO] [MainThread] Futtatasi konyvtar: E:\
+2026-08-13 13:32:44 [INFO] [MainThread] Admin jog: True
+2026-08-13 13:32:44 [INFO] [MainThread] ==================================================
+2026-08-13 13:32:44 [INFO] [MainThread] [INIT] WebView2 Runtime OK: v109.0.1518.140
+2026-08-13 13:32:45 [INFO] [MainThread] [INIT] DriverToolApi inicializálás...
+2026-08-13 13:32:45 [INFO] [MainThread] [INIT] sys_drive=C:\
+2026-08-13 13:32:45 [DEBUG] [MainThread] [CALL] DriverToolApi._restore_power_after_stress()
+2026-08-13 13:32:45 [DEBUG] [MainThread] [CALL] DriverToolApi._restore_power_after_stress -> None (0.00s)
+2026-08-13 13:32:45 [DEBUG] [MainThread] [CALL] DriverToolApi._cleanup_leftover_autofix_policy()
+2026-08-13 13:32:45 [DEBUG] [MainThread] [CALL] DriverToolApi._autofix_stats_path()
+2026-08-13 13:32:45 [DEBUG] [MainThread] [CALL] DriverToolApi._autofix_stats_path -> 'C:\\DriverVarazslo\\autofix_stats.json' (0.00s)
+2026-08-13 13:32:45 [DEBUG] [MainThread] [AUTOFIX-CLEANUP] Nincs félbehagyott lánc-állapotfájl - nincs mit takarítani.
+2026-08-13 13:32:45 [DEBUG] [MainThread] [CALL] DriverToolApi._cleanup_leftover_autofix_policy -> None (0.00s)
+2026-08-13 13:32:45 [DEBUG] [MainThread] [CALL] DriverToolApi._deferred_inf_cleanup_path()
+2026-08-13 13:32:45 [DEBUG] [MainThread] [CALL] DriverToolApi._deferred_inf_cleanup_path -> 'C:\\DriverVarazslo\\pending_inf_cleanup.json' (0.00s)
+2026-08-13 13:32:45 [INFO] [MainThread] [INIT] DriverToolApi kész.
+2026-08-13 13:32:45 [INFO] [MainThread] [MAIN] webview.start() hívása...

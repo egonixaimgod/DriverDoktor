@@ -144,6 +144,237 @@ def check_webview2_runtime():
     return (True, version)
 
 
+def ensure_console():
+    """Konzolablak biztosítása, és a sys.stdout/stderr/stdin ráirányítása.
+
+    MIÉRT NEM ELÉG EGY sima print(): a program windowed (konzol nélküli) exe-ként épül
+    (DriverVarazslo.spec: console=False), és PyInstaller alatt ilyenkor a `sys.stdout`
+    ÉRTÉKE None - egy print() nem csak láthatatlan, hanem AttributeError-t dob. Ezért
+    minden konzolra író ág (CLI-fallback, WebView2-telepítés folyamatjelzése) ezen a
+    függvényen keresztül megy.
+
+    Ha a konzol semmiképp nem nyitható (pl. szolgáltatás-környezet), a kimenetet a
+    null-eszközre kötjük: a program ettől még fusson tovább - egy hiányzó folyamatjelző
+    soha nem érhet annyit, mint maga a művelet.
+
+    Visszatérés: True, ha van valódi (látható) konzol."""
+    try:
+        if not ctypes.windll.kernel32.GetConsoleWindow():
+            ctypes.windll.kernel32.AllocConsole()
+        if ctypes.windll.kernel32.GetConsoleWindow():
+            for name, mode, attr in (('CONIN$', 'r', 'stdin'), ('CONOUT$', 'w', 'stdout'),
+                                     ('CONOUT$', 'w', 'stderr')):
+                stream = getattr(sys, attr, None)
+                if stream is None or getattr(stream, 'closed', False):
+                    try:
+                        setattr(sys, attr, open(name, mode))
+                    except OSError as e:
+                        logging.debug(f"[CONSOLE] A(z) {attr} nem nyitható ({name}): {e}")
+            return True
+    except Exception as e:
+        logging.debug(f"[CONSOLE] Konzol nyitása sikertelen: {e}")
+    # Végső védőháló: legyen MIBE írni, különben a hívó print()-jei kivételt dobnának.
+    for attr in ('stdout', 'stderr'):
+        if getattr(sys, attr, None) is None:
+            try:
+                setattr(sys, attr, open(os.devnull, 'w'))
+            except OSError:
+                pass
+    return False
+
+
+# ============================================================================
+# RÉGI WINDOWS (7/8/8.1) TÁMOGATÁS: .NET-ellenőrzés és induláskori diagnosztika
+# ============================================================================
+# A pywebview Windows-os GUI-ja pythonnet-en (clr) keresztül .NET Framework-öt tölt be.
+# A pythonnet 3.x MINIMUM .NET Framework 4.7.2-t igényel - a Windows 8.1 viszont alapból
+# 4.5.1-et hoz, a Windows 7 SP1 pedig 3.5.1-et. Ha hiányzik, a betöltés NEM Python-kivétel:
+# a folyamat NATÍVAN esik szét, mielőtt bármilyen except ág lefutna. Terepen pontosan így
+# nézett ki (2026-08-13, Win 8.1, Build 269): a napló utolsó sora
+#     [MAIN] webview.start() hívása...
+# és utána SEMMI - se traceback, se pywebview-hibaüzenet, se ablak, háromszor egymás után.
+# Ezért ezt ELŐRE kell ellenőrizni: egy működő CLI + érthető üzenet mérhetetlenül többet ér,
+# mint egy néma, nyom nélkül eltűnő program.
+#
+# A Release-számok a Microsoft hivatalos táblázatából valók (HKLM\...\NDP\v4\Full\Release).
+DOTNET_RELEASE_MIN = 461808  # 4.7.2 - a pythonnet 3.x alsó határa
+DOTNET_RELEASE_NAMES = (
+    (533320, '4.8.1'), (528040, '4.8'), (461808, '4.7.2'), (461308, '4.7.1'),
+    (460798, '4.7'), (394802, '4.6.2'), (394254, '4.6.1'), (393295, '4.6'),
+    (379893, '4.5.2'), (378675, '4.5.1'), (378389, '4.5'),
+)
+
+
+def file_version(path):
+    """Egy fájl (DLL/EXE) verziója 'a.b.c.d' alakban, vagy None, ha nincs/nem olvasható.
+
+    Szándékosan ctypes-szal, nem PowerShell-hívással: ez induláskor fut, és egy
+    subprocess ott fél-egy másodpercet vinne el minden indulásból.
+
+    A VS_FIXEDFILEINFO struktúrát nem definiáljuk külön (app/win32.py), mert csak két
+    mezőjére van szükség, és azok fix eltolásban vannak a struktúra elején:
+    dwSignature(0), dwStrucVersion(4), dwFileVersionMS(8), dwFileVersionLS(12)."""
+    import struct as _struct
+    try:
+        if not path or not os.path.exists(path):
+            return None
+        size = ctypes.windll.version.GetFileVersionInfoSizeW(path, None)
+        if not size:
+            return None
+        buf = ctypes.create_string_buffer(size)
+        if not ctypes.windll.version.GetFileVersionInfoW(path, 0, size, buf):
+            return None
+        ptr = ctypes.c_void_p()
+        length = ctypes.c_uint()
+        if not ctypes.windll.version.VerQueryValueW(buf, '\\', ctypes.byref(ptr), ctypes.byref(length)):
+            return None
+        if length.value < 16:
+            return None
+        data = ctypes.string_at(ptr, length.value)
+        ms, ls = _struct.unpack_from('<II', data, 8)
+        return f"{ms >> 16}.{ms & 0xFFFF}.{ls >> 16}.{ls & 0xFFFF}"
+    except Exception as e:
+        logging.debug(f"[DIAG] Fájlverzió nem olvasható ({path}): {e}")
+        return None
+
+
+def check_dotnet_framework():
+    """A telepített .NET Framework 4.x állapota.
+
+    Visszatérés: (elég_új_e, release_szám_vagy_None, ember-olvasható_verzió).
+    Hiányzó kulcs esetén (Win7/8 alapállapot, ahol csak 3.5 van) (False, None, 'nincs 4.x')."""
+    release = None
+    for view in (winreg.KEY_WOW64_64KEY, 0):
+        try:
+            with winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE,
+                                r"SOFTWARE\Microsoft\NET Framework Setup\NDP\v4\Full",
+                                0, winreg.KEY_READ | view) as key:
+                release, _ = winreg.QueryValueEx(key, "Release")
+                if release:
+                    break
+        except (FileNotFoundError, OSError):
+            continue
+    if not release:
+        return (False, None, 'nincs 4.x')
+    name = next((n for r, n in DOTNET_RELEASE_NAMES if release >= r), f'ismeretlen ({release})')
+    return (release >= DOTNET_RELEASE_MIN, release, name)
+
+
+def windows_version():
+    """A futó Windows (fő.al.build, ember-olvasható név). A build a döntő: a
+    sys.getwindowsversion() a manifest miatt hazudhat a fő/alverzióban, a build nem.
+
+    MIÉRT KELL: a naplóból eddig SEHOL nem derült ki, milyen Windowson futunk - egy
+    Win7/8.1-es hibajelentésnél ez az első kérdés, és eddig csak találgatni lehetett."""
+    try:
+        v = sys.getwindowsversion()
+        major, minor, build = v.major, v.minor, v.build
+    except Exception:
+        return (0, 0, 0, 'ismeretlen')
+    names = {
+        (6, 1): 'Windows 7', (6, 2): 'Windows 8', (6, 3): 'Windows 8.1',
+    }
+    if major == 10:
+        name = 'Windows 11' if build >= 22000 else 'Windows 10'
+    else:
+        name = names.get((major, minor), f'Windows {major}.{minor}')
+    return (major, minor, build, name)
+
+
+def is_legacy_windows():
+    """Igaz, ha a futó rendszer Windows 8.1 vagy régebbi (build < 10240). Ezeken a
+    gépeken több olyan korlát van, amit a kódnak külön kezelnie kell (WebView2 max 109,
+    pnputil régi szintaxisa, PowerShell 2.0-4.0)."""
+    return windows_version()[2] < 10240
+
+
+# MEGJEGYZÉS: az induláskori környezet-riport NEM itt van, hanem az app/prereq.py-ban
+# (log_environment) - ott, ahol az előfeltételek felmérése és javítása is. Ez a modul csak
+# a nyers ellenőrzőket adja (check_dotnet_framework, windows_version, file_version), hogy ne
+# legyen két, majdnem azonos riport-implementáció - a duplikált logika, aminek az egyik
+# példánya lemarad egy javításról, ennek a projektnek a legrégebbi visszatérő hibája.
+
+
+# ============================================================================
+# GUI-ÖSSZEOMLÁS ŐR: egy némán elszálló felület ne tudja HASZNÁLHATATLANNÁ tenni a programot
+# ============================================================================
+# A grafikus felület elindítása az egyetlen pont, ahol a program NATÍVAN össze tud omlani:
+# a pywebview pythonnet-en át .NET-et tölt be, az pedig egy nem megfelelő környezetben
+# (régi .NET, a runtime-nál újabb WebView2 SDK) nem kivételt dob, hanem megöli a folyamatot.
+# Ilyenkor sem a sys.excepthook, sem a 60 mp-es webview-watchdog nem fut le - a felhasználó
+# annyit lát, hogy "elindítom és nem történik semmi". Terepen bizonyított (2026-08-13,
+# Win 8.1, Build 269): a napló utolsó sora háromszor egymás után a `webview.start() hívása...`.
+#
+# A megoldás nem az összeomlás megelőzése (azt nem tudjuk minden okra), hanem hogy CSAK
+# EGYSZER fordulhasson elő: a kísérlet előtt jelzőfájlt írunk, sikeres indulásnál töröljük.
+# Ha a következő induláskor a jelző még ott van, az előző kísérlet összeomlott -> egyből a
+# (működő) CLI-be megyünk, érthető magyarázattal.
+#
+# A jelző a KÖRNYEZET ujjlenyomatát is tárolja (WebView2 + .NET verzió): ha a felhasználó
+# telepít egy újabb .NET-et vagy WebView2-t, az ujjlenyomat megváltozik, és a program
+# magától újra megpróbálja a felületet - különben egy megjavított gép is örökre CLI-ben
+# ragadna. Kézi felülbírálás: --force-gui.
+GUI_CRASH_MARKER_FILE = 'gui_indulas.json'
+
+
+def _gui_marker_path():
+    return os.path.join(_app_data_dir(), GUI_CRASH_MARKER_FILE)
+
+
+def gui_env_signature(wv2_version=None, dotnet_release=None):
+    """A GUI indulását meghatározó környezet ujjlenyomata (WebView2 + .NET verzió)."""
+    return f"wv2={wv2_version or 'nincs'}|net={dotnet_release or 'nincs'}"
+
+
+def gui_crash_check(signature):
+    """Összeomlott-e az ELŐZŐ grafikus indítási kísérlet ugyanebben a környezetben?
+
+    Visszatérés: (összeomlott_e, a_jelzőben_tárolt_ujjlenyomat_vagy_None)."""
+    try:
+        path = _gui_marker_path()
+        if not os.path.exists(path):
+            return (False, None)
+        import json as _json
+        with open(path, 'r', encoding='utf-8') as f:
+            data = _json.load(f)
+        stored = data.get('env')
+        if stored != signature:
+            logging.info(f"[GUI-ŐR] Van korábbi sikertelen indítás-jelző, de a környezet "
+                         f"azóta megváltozott ({stored} -> {signature}) - újra megpróbáljuk a felületet.")
+            return (False, stored)
+        return (True, stored)
+    except Exception as e:
+        # Egy sérült/olvashatatlan jelző SOHA ne akadályozza a program indulását.
+        logging.debug(f"[GUI-ŐR] A jelzőfájl nem olvasható: {e}")
+        return (False, None)
+
+
+def gui_attempt_begin(signature):
+    """Jelzi, hogy MOST kezdődik egy grafikus indítási kísérlet. Ha a folyamat közben
+    natívan elszáll, ez a fájl marad utána - ebből tudja a következő indulás, hogy nem
+    szabad újra megpróbálni."""
+    try:
+        import json as _json
+        with open(_gui_marker_path(), 'w', encoding='utf-8') as f:
+            _json.dump({'env': signature, 'ts': time.strftime('%Y-%m-%d %H:%M:%S')}, f)
+        logging.debug(f"[GUI-ŐR] Indítási kísérlet jelölve ({signature}).")
+    except Exception as e:
+        logging.debug(f"[GUI-ŐR] A jelzőfájl nem írható: {e}")
+
+
+def gui_attempt_succeeded():
+    """A felület elindult - a jelző törlése. A DOM elkészültekor hívjuk
+    (app/gui/base.py: set_window), nem a program végén: az a pont bizonyítja, hogy a
+    kockázatos natív szakasz (pythonnet + WebView2 betöltés) túl van."""
+    try:
+        path = _gui_marker_path()
+        if os.path.exists(path):
+            os.remove(path)
+            logging.debug("[GUI-ŐR] A felület elindult - indítási jelző törölve.")
+    except Exception as e:
+        logging.debug(f"[GUI-ŐR] A jelzőfájl nem törölhető: {e}")
+
+
 def show_webview2_error(message):
     """MessageBox megjelenítése WebView2 hibáról, majd program kilépés."""
     try:
