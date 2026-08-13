@@ -5,6 +5,7 @@ app-adatmappa, webview-állapot eventek, BUILD_NUMBER hordozó és a hívás-log
 import ctypes
 import ctypes.wintypes
 import os
+import subprocess
 import sys
 import threading
 import time
@@ -305,6 +306,181 @@ def _app_data_dir():
     return path
 
 
+# A PowerShell (schannel) letöltési fallbackot kiváltó hibaszövegek. MIND TLS/tanúsítvány
+# jellegű: ilyenkor nem a hálózat rossz, hanem a PYTHON SSL-verme nem tud megegyezni a
+# túloldallal, miközben a rendszer sajátja (schannel) igen. Bármi más hiba (404, DNS,
+# időtúllépés) továbbra is azonnal száll - azon a PS sem segítene, csak lassítana.
+#
+# CERTIFICATE_VERIFY_FAILED: az eredeti eset - vadonatúj Windows hiányos gyökértár-ral.
+#
+# UNEXPECTED_EOF_WHILE_READING / EOF occurred: TEREPEN MÉRVE (2026-08-13, Windows 8.1,
+# Build 266) a WebView2 bootstrapper letöltésén:
+#     <urlopen error [SSL: UNEXPECTED_EOF_WHILE_READING] EOF occurred in violation of
+#      protocol (_ssl.c:1081)>
+# Ez az OpenSSL 3.x (Python 3.10+) szigorítása: az 1.1.1 még elnézte, ha a túloldal
+# "piszkosan" (close_notify nélkül) bontott, a 3.x viszont hibának veszi. Pont a RÉGI
+# gépek úton lévő eszközei (régi proxy/TLS-terminátor, régi middlebox) csinálják ezt,
+# vagyis ez a Win7/8/8.1-es gépek tipikus letöltési hibája - miközben ugyanaz az URL a
+# rendszer schannel-vermén (PowerShell) simán lejön.
+#
+# A többi tag a TLS-egyeztetés klasszikus bukásai (verzió/alert/handshake): ugyanaz az
+# ok-osztály, ugyanaz a helyes válasz.
+DOWNLOAD_PS_FALLBACK_ERRORS = (
+    'CERTIFICATE_VERIFY_FAILED',
+    'UNEXPECTED_EOF_WHILE_READING',
+    'EOF occurred in violation of protocol',
+    'WRONG_VERSION_NUMBER',
+    'SSLV3_ALERT',
+    'TLSV1_ALERT',
+    'SSLV3_ALERT_HANDSHAKE_FAILURE',
+    'handshake failure',
+    'SSLError',
+    'SSL:',
+)
+
+
+def _should_try_ps_download(err):
+    """Igaz, ha a Python-oldali letöltés olyan TLS/tanúsítvány-hibába futott, amire a
+    PowerShell (schannel) fallbacknek van esélye. Kis/nagybetű-független, mert a
+    hibaszövegek forrása (OpenSSL, urllib, ssl) nem egységes."""
+    text = str(err).lower()
+    return any(marker.lower() in text for marker in DOWNLOAD_PS_FALLBACK_ERRORS)
+
+
+def default_run(cmd, **kwargs):
+    """Minimál parancsfuttató azoknak a hívásoknak, ahol nincs kéznél API-példány (és így
+    annak `_run` metódusa sem): az auto-updater (app/update_core.py - modul-szintű
+    függvények) és a belépési pont WebView2-telepítője.
+
+    Ugyanaz a három lényegi beállítás, mint a két nagy `_run`-ban: rejtett ablak,
+    elkapott kimenet, DEVNULL stdin. A parancsot és az eredményt naplózza (Rule 0 -
+    minden subprocess hagyjon nyomot), és időtúllépésnél a megszokott
+    CMD_TIMEOUT_RETURNCODE-os CommandResult-tal tér vissza, nem kivétellel.
+
+    Létezésének oka: a letöltési fallback (download_with_cert_fallback) egy futtatót vár,
+    az updater viszont modul-szintű függvényekből hívja - enélkül minden hívási helyre
+    külön kis futtatót kellene írni, ami a projekt legrégebbi visszatérő hibája (a
+    duplikált logika egyik példánya lemarad)."""
+    si = subprocess.STARTUPINFO()
+    si.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+    cmd_str = cmd if isinstance(cmd, str) else ' '.join(str(c) for c in cmd)
+    logging.debug(f"[CMD] Futtatás (alap futtató): {cmd_str[:300]}")
+    kwargs.setdefault('stdin', subprocess.DEVNULL)
+    try:
+        res = subprocess.run(cmd, capture_output=True, text=True, errors='replace',
+                             startupinfo=si, creationflags=subprocess.CREATE_NO_WINDOW, **kwargs)
+        logging.debug(f"[CMD] returncode={res.returncode}, stdout={(res.stdout or '').strip()[:500]!r}")
+        if res.returncode != 0 and res.stderr:
+            logging.warning(f"[CMD] stderr: {res.stderr[:1000]}")
+        return res
+    except subprocess.TimeoutExpired:
+        logging.error(f"[CMD] IDŐTÚLLÉPÉS (limit={kwargs.get('timeout')}s): {cmd_str[:200]}")
+        return CommandResult(CMD_TIMEOUT_RETURNCODE, '', 'IDŐTÚLLÉPÉS')
+
+
+def fetch_text_with_cert_fallback(url, *, run_fn=None, timeout=30, ps_timeout=120,
+                                  log_tag='FETCH', encoding='utf-8'):
+    """Szöveges tartalom letöltése ugyanazzal a régi-Windows-barát letöltési lánccal,
+    amit a fájl-letöltés használ (Python -> PowerShell: Invoke-WebRequest/WebClient/
+    certutil). Ideiglenes fájlon keresztül megy, mert így NEM kell külön karbantartani
+    egy második letöltő-implementációt - a projekt egyik állandó hibaforrása pont az,
+    amikor két majdnem-azonos másolat közül csak az egyik kap javítást.
+
+    Az auto-updater használja: annak a BUILD_NUMBER-ellenőrzése eddig csupasz
+    urllib-hívás volt, tehát pontosan az a fajta TLS-hiba buktatta volna el egy régi
+    gépen, ami 2026-08-13-án a WebView2 telepítőt is elbuktatta - és ezzel a régi gép
+    soha nem értesült volna arról, hogy van újabb (épp a hibát javító) build."""
+    import tempfile
+    fd, tmp = tempfile.mkstemp(prefix='dv_fetch_', suffix='.tmp')
+    os.close(fd)
+    try:
+        download_with_cert_fallback(run_fn or default_run, url, tmp,
+                                    timeout=timeout, ps_timeout=ps_timeout, log_tag=log_tag)
+        with open(tmp, 'rb') as f:
+            return f.read().decode(encoding, errors='replace')
+    finally:
+        try:
+            os.remove(tmp)
+        except OSError as e:
+            logging.debug(f"[{log_tag}] Az ideiglenes fájl törlése nem sikerült ({tmp}): {e}")
+
+
+def _ps_download_script(url, dest):
+    """A PowerShell-oldali (schannel) letöltés scriptje. SZÁNDÉKOSAN a Windows 7 alap
+    PowerShell 2.0-jáig lefelé kompatibilis (a 8 3.0-t, a 8.1 4.0-t hozza) - és pont a
+    régi gépeken van a legnagyobb szükség erre az ágra.
+
+    HÁROM LETÖLTŐ ÁG, ebben a sorrendben, mindegyik a MÉRT okból:
+
+    1. `Invoke-WebRequest` (PowerShell 3.0+). A legjobb: rendes hibaüzenetek, HTTP-státusz.
+       Windows 7-en (PS 2.0, WMF-frissítés nélkül) NINCS - ezért van a létezés-vizsgálat,
+       enélkül "The term 'Invoke-WebRequest' is not recognized" lenne.
+
+    2. `System.Net.WebClient` (.NET 2.0 óta létezik, tehát PS 2.0-n is meghívható).
+
+    3. `certutil.exe -urlcache -split -f` - NATÍV, .NET-FÜGGETLEN. Ez nem elméleti
+       biztonsági háló: MÉRVE (2026-08-13, `powershell -Version 2` motor alatt) a .NET-es
+       ágak MINDEGYIKE elhasal ugyanazzal a hibával -
+           'A konfigurációs rendszer inicializálása sikertelen volt'
+       (a WebClient és a HttpWebRequest is, már a példányosításnál/hívásnál), miközben a
+       certutil ugyanott hibátlanul lehozta a teljes 1 695 960 bájtos fájlt. A certutil
+       Vista óta minden Windowson ott van, a rendszer schannel-vermét használja (tehát a
+       tanúsítvány-ellenőrzés TELJES értékű marad), és nem érdekli a .NET konfigurációja.
+       Megjegyzés a mérés olvasásához: a `-Version 2` motor a fejlesztőgépen a .NET 4-es
+       hoszt konfigjával fut, ezért nem állítható biztosra, hogy egy VALÓDI Win7-en is
+       bukna a WebClient - de a certutil-ág épp ezért van a lánc végén: nem kerül semmibe,
+       ha nem kell, és megment, ha kell.
+
+    Minden ág után MÉRET-ellenőrzés (nem csak Test-Path): egy megszakadt letöltés
+    0 bájtos fájlt hagy maga után, amit a következő ág "kész"-nek látna, a hívó pedig
+    sikeres letöltésnek - ez pontosan az a néma hamis siker, amit a projekt mindenhol
+    kerül. A csonkot ezért minden bukott ág után töröljük.
+
+    A TLS 1.2 (3072) bekapcsolása try/catch-ben van: a .NET 4.x ezeken a rendszereken
+    alapból TLS 1.0-t ajánl, amit a github.com és a Microsoft CDN-jei is elutasítanak -
+    enélkül az egész fallback értelmetlen lenne. A try azért kell, mert ha a gépen csak
+    .NET 4.0 van, az enum-érték ismeretlen, és a kivétel enélkül megölné a letöltést
+    AZELŐTT, hogy egyáltalán megpróbálta volna.
+
+    Explicit exit kód a végén: a `powershell -Command` egy nem-terminating hiba után is
+    0-val tér vissza, vagyis a hívó "sikeresnek" látná a semmit (ugyanaz a hibaosztály,
+    mint a Sumatra-nyomtatás esete)."""
+    u, d = _ps_quote(url), _ps_quote(dest)
+    return (
+        "$ErrorActionPreference='Stop'; $ProgressPreference='SilentlyContinue'; "
+        "try { [Net.ServicePointManager]::SecurityProtocol = "
+        "[Net.ServicePointManager]::SecurityProtocol -bor 3072 } catch { }; "
+        f"$u='{u}'; $d='{d}'; $err=''; "
+        # Egy ág akkor sikeres, ha a fájl LÉTEZIK ÉS NEM ÜRES. A csonkot töröljük, hogy a
+        # következő ág tiszta lappal induljon (és hogy a hívó Python-oldali méret-
+        # ellenőrzése se egy fél fájlt lásson).
+        "function Test-Dl { if ((Test-Path $d) -and ((Get-Item $d).Length -gt 0)) { return $true }; "
+        "  if (Test-Path $d) { Remove-Item $d -Force -ErrorAction SilentlyContinue }; return $false }; "
+        # 1) Invoke-WebRequest (PS 3.0+)
+        "if (Get-Command Invoke-WebRequest -ErrorAction SilentlyContinue) { "
+        "  try { Invoke-WebRequest -Uri $u -OutFile $d -UseBasicParsing } "
+        "  catch { $err = 'IWR: ' + $_.Exception.Message } "
+        "}; "
+        # 2) .NET WebClient (PS 2.0-n is)
+        "if (-not (Test-Dl)) { "
+        "  try { $wc = New-Object System.Net.WebClient; "
+        "        $wc.Headers.Add('User-Agent','Mozilla/5.0'); "
+        "        $wc.DownloadFile($u, $d) } "
+        "  catch { $err = $err + ' | WebClient: ' + $_.Exception.Message } "
+        "}; "
+        # 3) certutil (natív) - a natív parancs stderr-je Stop mellett terminating hibát
+        #    dobna, ezért erre az egy hívásra Continue-ra váltunk.
+        "if (-not (Test-Dl)) { "
+        "  $ErrorActionPreference='Continue'; "
+        "  try { $null = & certutil.exe -urlcache -split -f $u $d 2>&1 } "
+        "  catch { $err = $err + ' | certutil: ' + $_.Exception.Message }; "
+        "  $ErrorActionPreference='Stop' "
+        "}; "
+        "if (Test-Dl) { Write-Output ('OK meret=' + (Get-Item $d).Length); exit 0 } "
+        "else { Write-Output ('HIBA:' + $err); exit 1 }"
+    )
+
+
 def download_with_cert_fallback(run_fn, url, dest, *, timeout=60, ps_timeout=120,
                                 log_tag='DOWNLOAD', error_msg=None, progress_cb=None):
     """HTTPS letöltés a friss-Windows tanúsítvány-fallbackkel - KÖZÖS példány (korábban
@@ -316,11 +492,17 @@ def download_with_cert_fallback(run_fn, url, dest, *, timeout=60, ps_timeout=120
     PowerShell, .NET) váltják ki - a Python OpenSSL-je nem, ezért nála
     CERTIFICATE_VERIFY_FAILED lesz. Tipikus tünet: a github.com (Sectigo/USERTrust
     gyökér) elhasal, miközben a raw.githubusercontent.com (DigiCert gyökér) működik.
-    CSAK erre a hibára esünk vissza PowerShell Invoke-WebRequest-re (schannel): a
-    tanúsítvány-ellenőrzés ott is TELJES értékű (SEMMIT nem kapcsolunk ki!), és
-    mellékhatásként a hiányzó gyökér bekerül a Windows tárba, így a gép későbbi
-    Python-letöltései is meggyógyulnak. Ez a fallback NEM ellenőrzés-megkerülés, és
-    tilos azzá alakítani (admin-jogon futtatott payloadokat töltünk le vele).
+    CSAK TLS/tanúsítvány-jellegű hibára esünk vissza PowerShell Invoke-WebRequest-re
+    (schannel; a teljes listát lásd DOWNLOAD_PS_FALLBACK_ERRORS): a tanúsítvány-ellenőrzés
+    ott is TELJES értékű (SEMMIT nem kapcsolunk ki!), és mellékhatásként a hiányzó gyökér
+    bekerül a Windows tárba, így a gép későbbi Python-letöltései is meggyógyulnak. Ez a
+    fallback NEM ellenőrzés-megkerülés, és tilos azzá alakítani (admin-jogon futtatott
+    payloadokat töltünk le vele).
+
+    RÉGI WINDOWS (7/8/8.1): a fallback ott duplán fontos. Egyrészt az OpenSSL 3.x
+    szigorúbb, mint a rendszer schannel-je (lásd UNEXPECTED_EOF_WHILE_READING a
+    konstansnál), másrészt a PS-ág explicit TLS 1.2-re kapcsol - a .NET 4.x ezeken a
+    rendszereken alapból TLS 1.0-t ajánl, amit ma már szinte minden kiszolgáló elutasít.
 
     progress_cb: opcionális callback(letöltött_bájt, összes_bájt_vagy_None) - a Python-os
     letöltési ágon darabonként (256 KB) hívódik, hogy a hívó százalékos folyamatjelzőt
@@ -356,15 +538,29 @@ def download_with_cert_fallback(run_fn, url, dest, *, timeout=60, ps_timeout=120
                         progress_cb(done, total)
                     except Exception as cb_err:
                         logging.debug(f"[{log_tag}] progress_cb hiba (figyelmen kívül hagyva): {cb_err}")
-    except urllib.error.URLError as dl_err:
-        if 'CERTIFICATE_VERIFY_FAILED' not in str(dl_err):
+    except (urllib.error.URLError, ssl.SSLError) as dl_err:
+        # ssl.SSLError is elkapva: az urlopen a legtöbb TLS-hibát URLError-ba csomagolja,
+        # de nem mindet - és mindkettő OSError-leszármazott, tehát a szűk, konkrét
+        # kivételpár olvashatóbb, mint egy csupasz `except OSError`.
+        if not _should_try_ps_download(dl_err):
             raise
-        logging.warning(f"[{log_tag}] Python SSL tanúsítvány-hiba ({dl_err}) - friss Windows tanúsítvány-tár gyanú, áttérés PowerShell (schannel) letöltésre, teljes tanúsítvány-ellenőrzéssel...")
-        ps_cmd = ("$ProgressPreference='SilentlyContinue'; "
-                  "[Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor 3072; "
-                  f"Invoke-WebRequest -Uri '{_ps_quote(url)}' -OutFile '{_ps_quote(dest)}' -UseBasicParsing")
-        result = run_fn(['powershell', '-NoProfile', '-ExecutionPolicy', 'Bypass', '-Command', ps_cmd], timeout=ps_timeout)
+        logging.warning(f"[{log_tag}] Python SSL/TLS hiba ({dl_err}) - a Python OpenSSL-verme nem tudott megegyezni "
+                        f"a kiszolgálóval (hiányos gyökértár VAGY régi Windows TLS-útvonala). Áttérés PowerShell "
+                        f"(schannel) letöltésre, teljes tanúsítvány-ellenőrzéssel...")
+        # Törzs: a részleges (megszakadt) fájl útban lenne a második próbának - a
+        # stresstools.zip-nél terepen bizonyított, hogy a bennmaradt csonk pont azt a
+        # lemezhelyet eszi meg, ami az újrapróbálkozáshoz kellene.
+        try:
+            if os.path.exists(dest):
+                os.remove(dest)
+        except OSError as rm_err:
+            logging.debug(f"[{log_tag}] A félbemaradt fájl törlése nem sikerült: {rm_err}")
+        result = run_fn(['powershell', '-NoProfile', '-ExecutionPolicy', 'Bypass', '-Command',
+                         _ps_download_script(url, dest)], timeout=ps_timeout)
         if not result or result.returncode != 0 or not os.path.exists(dest):
+            rc = getattr(result, 'returncode', None)
+            err_txt = (getattr(result, 'stderr', '') or '')[:500]
+            logging.error(f"[{log_tag}] A PowerShell (schannel) letöltés is elhasalt: returncode={rc}, stderr={err_txt!r}")
             raise Exception(error_msg or "A letöltés sikertelen (nincs internet, vagy a GitHub nem elérhető).")
         logging.info(f"[{log_tag}] PowerShell (schannel) letöltés sikeres.")
     if not os.path.exists(dest) or os.path.getsize(dest) == 0:

@@ -33,6 +33,7 @@ def check_for_updates():
     Visszatérés: {'has_update': bool, 'new_version': int (csak ha van)}."""
     logging.info("[UPDATE] check_for_updates()")
     import urllib.request
+    import urllib.error
     import ssl
     ssl_ctx = ssl.create_default_context()
     for attempt in range(1, UPDATE_CHECK_ATTEMPTS + 1):
@@ -41,8 +42,24 @@ def check_for_updates():
             url = f"{_RAW_BASE}/driver_tool.py?t={int(time.time())}"
             logging.info(f"[UPDATE] Update ellenőrzése erről a címről ({attempt}/{UPDATE_CHECK_ATTEMPTS}. próbálkozás): {url}")
             req = urllib.request.Request(url, headers={'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)'})
-            with urllib.request.urlopen(req, context=ssl_ctx, timeout=10) as resp:
-                content = resp.read().decode('utf-8')
+            try:
+                with urllib.request.urlopen(req, context=ssl_ctx, timeout=10) as resp:
+                    content = resp.read().decode('utf-8')
+            except (urllib.error.URLError, ssl.SSLError) as ssl_err:
+                # RÉGI WINDOWS (7/8/8.1) MIATT KELL: a Python OpenSSL-verme itt olyan
+                # TLS-hibába futhat, amibe a rendszer schannel-je nem - terepen mérve
+                # (2026-08-13, Win 8.1) pontosan ez buktatta el a WebView2 telepítő
+                # letöltését ugyanezen a gépen ([SSL: UNEXPECTED_EOF_WHILE_READING]).
+                # Ha ezt itt nem kapjuk el, a régi gép SOHA nem értesül róla, hogy van
+                # újabb build - vagyis épp az a javítás nem jut el hozzá, ami a hibát
+                # orvosolná. A közös letöltő ilyenkor PowerShellre (schannel) vált,
+                # teljes tanúsítvány-ellenőrzéssel.
+                if not common._should_try_ps_download(ssl_err):
+                    raise
+                logging.warning(f"[UPDATE] Python SSL/TLS hiba ({ssl_err}) - áttérés a közös "
+                                f"letöltő PowerShell (schannel) ágára...")
+                content = common.fetch_text_with_cert_fallback(url, timeout=10, ps_timeout=120,
+                                                               log_tag='UPDATE')
             m = re.search(r'^BUILD_NUMBER\s*=\s*(\d+)', content, re.MULTILINE)
             if m:
                 new_build = int(m.group(1))
@@ -65,10 +82,6 @@ def stage_update(log):
     """Az új exe letöltése + a cserét végző .bat előkészítése. Visszatérés: a .bat
     útvonala (a futtatás a hívóé: launch_update_and_exit). Hibánál kivételt dob."""
     import tempfile
-    import urllib.request
-    import ssl
-    import shutil
-    ssl_ctx = ssl.create_default_context()
 
     exe_url = f"{_RAW_BASE}/dist/DriverVarazslo.exe?t={int(time.time())}"
     # WinPE-ben a %TEMP% az X: RAM-diskre mutat - a letöltött exe-t a valódi C: meghajtóra tesszük.
@@ -84,9 +97,15 @@ def stage_update(log):
     logging.info(f"[UPDATE] Cél fájl: {new_exe}")
     log('Új verzió letöltése GitHubról...')
 
-    req = urllib.request.Request(exe_url, headers={'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)'})
-    with urllib.request.urlopen(req, context=ssl_ctx, timeout=60) as resp, open(new_exe, 'wb') as f:
-        shutil.copyfileobj(resp, f)
+    # A KÖZÖS letöltő (Python -> PowerShell schannel fallback), nem csupasz urllib:
+    # ugyanaz az indok, mint a check_for_updates-nél - egy régi Windowson a Python
+    # TLS-verme elhasalhat ott, ahol a rendszeré nem, és akkor a frissítés magán a
+    # frissítendő gépen válik lehetetlenné. Az exe több MB, ezért bőven nagyobb
+    # időkorláttal (a bootstrapperhez képest is), lassú gépet/hálózatot feltételezve.
+    common.download_with_cert_fallback(
+        common.default_run, exe_url, new_exe,
+        timeout=120, ps_timeout=600, log_tag='UPDATE',
+        error_msg="A frissítés letöltése nem sikerült (nincs internet, vagy a GitHub nem elérhető).")
 
     downloaded_size = os.path.getsize(new_exe)
     logging.info(f"[UPDATE] EXE letöltve. Fájlméret: {downloaded_size} byte.")

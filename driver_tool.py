@@ -17,7 +17,7 @@ import threading
 import time
 import logging
 
-BUILD_NUMBER = 268
+BUILD_NUMBER = 269
 
 from app import common
 common.BUILD_NUMBER = BUILD_NUMBER
@@ -26,6 +26,8 @@ import webview
 
 from app.common import (
     check_webview2_runtime,
+    default_run,
+    download_with_cert_fallback,
     is_admin,
     resource_path,
     _app_data_dir,
@@ -205,7 +207,6 @@ if __name__ == "__main__":
             logging.info("[INIT] Felhasználó elfogadta a WebView2 telepítést")
 
             # Progress MessageBox (nem blokkoló)
-            import urllib.request
             import tempfile
 
             try:
@@ -225,22 +226,52 @@ if __name__ == "__main__":
                     0x40 | MB_TOPMOST  # MB_ICONINFORMATION
                 )
 
-                urllib.request.urlretrieve(bootstrapper_url, bootstrapper_path)
-                logging.info(f"[INIT] Bootstrapper letöltve: {bootstrapper_path}")
+                # A projekt KÖZÖS letöltője, a PowerShell (schannel) fallbackkel együtt -
+                # NEM a csupasz urllib.request.urlretrieve, ami korábban itt állt. Az a
+                # hívás kimaradt minden védelemből, és terepen (2026-08-13, Windows 8.1,
+                # Build 266) pontosan emiatt hasalt el:
+                #     [SSL: UNEXPECTED_EOF_WHILE_READING] EOF occurred in violation of protocol
+                # Vagyis a gépen a WebView2 hiánya miatt CLI-be esett a program, a GUI-t
+                # helyreállító telepítő pedig épp azon az egy letöltési úton jött, aminek
+                # nem volt fallbackje. Régi Windowson ez a szabály, nem a kivétel: az
+                # OpenSSL 3.x szigorúbb a rendszer schannel-jénél, és a .NET-oldali ág
+                # ráadásul explicit TLS 1.2-re kapcsol (lásd app/common.py).
+                # A futtató a közös `default_run` (app/common.py): itt még nem létezik a
+                # DriverToolApi._run, az api objektum csak jóval lentebb jön létre.
+                download_with_cert_fallback(
+                    default_run, bootstrapper_url, bootstrapper_path,
+                    timeout=90, ps_timeout=300, log_tag='WEBVIEW2',
+                    error_msg="A WebView2 telepítő letöltése nem sikerült (nincs internet, "
+                              "vagy a Microsoft kiszolgálója nem elérhető)."
+                )
+                logging.info(f"[INIT] Bootstrapper letöltve: {bootstrapper_path} "
+                             f"({os.path.getsize(bootstrapper_path)} bájt)")
 
-                # Telepítés silent módban
+                # Telepítés silent módban.
+                # Az időkorlát SZÁNDÉKOSAN nagy (10 perc), nem a korábbi 120 mp: a
+                # bootstrapper egy ~2 MB-os LETÖLTŐ, a tényleges runtime (~150 MB) csak
+                # ezután jön le - egy régi, gyenge gépen lassú neten ez bőven túlfut két
+                # percen. A régi korlátnál a TimeoutExpired a lenti `except`-be esett és
+                # "WebView2 telepítési hiba"-ként jelent meg, miközben a telepítő a
+                # háttérben simán befejezte volna a munkát.
                 logging.info("[INIT] WebView2 telepítés indítása (silent)...")
                 si = subprocess.STARTUPINFO()
                 si.dwFlags |= subprocess.STARTF_USESHOWWINDOW
-                result = subprocess.run(
-                    [bootstrapper_path, '/silent', '/install'],
-                    capture_output=True,
-                    startupinfo=si,
-                    creationflags=subprocess.CREATE_NO_WINDOW,
-                    timeout=120
-                )
-
-                logging.info(f"[INIT] WebView2 telepítés kész, returncode={result.returncode}")
+                try:
+                    result = subprocess.run(
+                        [bootstrapper_path, '/silent', '/install'],
+                        capture_output=True,
+                        startupinfo=si,
+                        creationflags=subprocess.CREATE_NO_WINDOW,
+                        timeout=600
+                    )
+                    logging.info(f"[INIT] WebView2 telepítés kész, returncode={result.returncode}")
+                except subprocess.TimeoutExpired:
+                    # Nem dobjuk tovább: a telepítő ilyenkor is előrehaladhatott, a lenti
+                    # újraellenőrzés (check_webview2_runtime) mondja meg a valóságot -
+                    # az a mérés, nem a kilépési kód.
+                    logging.warning("[INIT] A WebView2 telepítő 10 perc alatt sem tért vissza - "
+                                    "az eredményt a registry-ellenőrzés dönti el.")
 
                 # Törlés
                 try:
