@@ -48,6 +48,30 @@ from app.wu_core import FIRMWARE_RISK_CLASSES
 # A PnP-nek kell pár másodperc, mire az újraenumerálás után rákötötte a drivert.
 REBIND_SETTLE_SECONDS = 5
 
+# CSAK EZEKET AZ OSZTÁLYOKAT ENUMERÁLJUK ÚJRA - fehérlista, nem feketelista.
+#
+# Terepen (T580, Build 274) a "minden gyártó-kódos, alapdriveres eszköz" szabály 21
+# eszközt jelölt ki, köztük olyanokat, amikhez semmi közünk és amiknek a csomópontját
+# kiszedni egyenesen veszélyes:
+#     Platformmegbízhatósági modul 2.0 [SecurityDevices]   <- TPM (BitLocker!)
+#     Lefelé irányuló PCI Express-kapcsolóport [System]     <- PCIe port, mögötte eszközök
+#     xHCI-kompatibilis USB-állomásvezérlő [USB]            <- az EGÉSZ USB egy időre
+#     USB-gyökérhub x2, ACPI processzorösszesítő, tápadapter, Intel energiaellátási modul
+# Ezek mind a Windows saját busz-/infrastruktúra-driverén futnak, és ez a HELYES állapot -
+# gyári driver nem is létezik hozzájuk. A felhasználó tünete (tapipad, gombok, hang, háló)
+# egyik esetben sem ezekből jön.
+#
+# A fehérlistán csak olyan osztály van, ahol (a) létezhet gyári driver, és (b) a csomópont
+# pár másodperces eltűnése ártalmatlan. Ha egy jövőbeli eset új osztályt igényel, ide kell
+# felvenni - és leírni, miért biztonságos.
+REBIND_ALLOWED_CLASSES = {
+    'MOUSE', 'HIDCLASS', 'KEYBOARD',        # a fő eset: tapipad, TrackPoint, billentyűzet
+    'MEDIA',                                # hangkártya / hang-kodek
+    'NET', 'BLUETOOTH',                     # hálózat
+    'CAMERA', 'IMAGE', 'BIOMETRIC',         # kamera, szkenner, ujjlenyomat
+    'SMARTCARDREADER', 'MONITOR',
+}
+
 # A GYÁRTÓT ÉS AZ ESZKÖZT azonosító tokenek. Ezeknek KELL egyezniük ahhoz, hogy két
 # hardver-azonosítót ugyanarra az eszközre vonatkozónak tekintsünk. A SUBSYS/REV/COL/MI
 # eltérhet (ugyanaz a chip más gépgyártói változatban, illetve a kompozit eszköz
@@ -179,6 +203,8 @@ class GuiRebindMixin:
             if not info or not _is_inbox_driver(info):
                 continue                      # gyári driveren fut - nincs dolgunk vele
             cls = (d.get('pclass') or '').strip().upper()
+            if cls not in REBIND_ALLOWED_CLASSES:
+                continue                      # lásd a REBIND_ALLOWED_CLASSES indoklását
             if cls in STORAGE_RISK_CLASSES or cls in FIRMWARE_RISK_CLASSES:
                 continue
             hwids = [h for h in (d.get('all_hwids') or []) if h and is_specific_hwid(h)]
