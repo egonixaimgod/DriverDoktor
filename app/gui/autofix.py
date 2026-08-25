@@ -1012,6 +1012,31 @@ class GuiAutofixMixin:
                     # (~1,2 GB, 2,5 perc a semmiért). A tiltólista a lánc végéig él.
                     tried = self._autofix_stats_get('catalog_no_bind') or []
                     tried_keys = {(t.get('pnp', ''), t.get('title', '')) for t in tried}
+
+                    # EGY LÁNCON BELÜL EGY CSOMAGOT EGY ESZKÖZRE CSAK EGYSZER PRÓBÁLUNK.
+                    #
+                    # Terepen (ASUS Vivobook Go E1504FA, Build 272, 2026-08-25) enélkül a
+                    # lánc VÉGTELEN HUROKBA került és elérte a 10 láb plafont. A mechanizmus
+                    # önfenntartó volt, és külön-külön minden lépése helyesen működött:
+                    #   1. a katalógus-csomag (AMD Radeon, 762 MB) felment: "Added driver
+                    #      packages: 3", a kör 1 telepítést számolt -> új láb indult;
+                    #   2. a csomag 5 INF-jéből 3-at a _cleanup_unused_staged_infs jogosan
+                    #      kivezetett (egyetlen jelen lévő eszköz sem használta őket);
+                    #   3. a KÖVETKEZŐ láb emiatt a csomagot újra "nem telepítettnek" látta
+                    #      (a szülő eszköz verziója változatlan, mert a driver a GYEREK-
+                    #      interfészre kötött rá) -> újra letöltötte a 762 MB-ot;
+                    #   4. vissza az 1. pontra - nyolc körön át, ~6 GB fölösleges forgalom.
+                    # A `catalog_no_bind` lista ezt nem fogta meg, mert ez NEM nem-kötés
+                    # volt: a csomag sikeresen felment és rá is kötött.
+                    #
+                    # A javítás azért biztonságos, mert EGY láncon belül ugyanannak a
+                    # csomagnak ugyanarra az eszközre való újratelepítése definíció szerint
+                    # fölösleges: vagy sikerült (kész), vagy nem kötött rá (arra ott a
+                    # catalog_no_bind). A lánc végén a lista a stats-fájllal együtt törlődik,
+                    # tehát egy KÉSŐBBI fix újra megpróbálja.
+                    done = self._autofix_stats_get('catalog_done') or []
+                    done_keys = {(t.get('pnp', ''), t.get('title', '')) for t in done}
+                    tried_keys |= done_keys
                     skipped_known = 0
                     if tried_keys:
                         before = len(found)
@@ -1022,6 +1047,14 @@ class GuiAutofixMixin:
                             self.emit('task_progress', {'task': task_id, 'log': f'↷ {skipped_known} csomag kihagyva: egy korábbi körben már felment, de az eszköz nem vette át (nem töltjük le újra).'})
                     if found:
                         self.emit('task_progress', {'task': task_id, 'log': f'✅ A katalógusban {len(found)} eszközre van driver - telepítés...'})
+                        # A MEGKÍSÉRELT tételeket MÉG A TELEPÍTÉS ELŐTT feljegyezzük: ha a
+                        # lépés kivétellel száll el vagy a gép közben újraindul, akkor sem
+                        # kezdi elölről a következő láb ugyanazt a több száz MB-os letöltést.
+                        self._autofix_stats_set('catalog_done', done + [
+                            {'pnp': (d.get('pnp_id') or '').upper(), 'title': d.get('wu_title') or '',
+                             'name': d.get('name') or ''} for d in found])
+                        logging.info(f"[AUTOFIX] {len(found)} katalógus-csomag megjelölve 'ebben a láncban "
+                                     f"már próbáltuk'-ként: {[d.get('name') for d in found][:8]}")
                         s, _f, _c = self._install_catalog_sync(found, task_id=task_id)
                         total_installed_in_session += s
                         # Amit most nem vett át az eszköz, azt jegyezzük fel a következő lábnak.
@@ -1342,8 +1375,8 @@ class GuiAutofixMixin:
              "mentsük el a régit és rakjuk vissza" minta: a MOST telepített, aktuális
              csomag telepítésének befejezése, nem a fix előtti állapot konzerválása.
 
-        Visszatérés: (javítva, megmaradt_regresszió) darabszám."""
-        fixed = regressed = 0
+        Visszatérés: (javítva, megmaradt_regresszió, újraindításra_vár) darabszám."""
+        fixed = regressed = pending = 0
         if not pre_drivers:
             return 0, 0
         try:
@@ -1381,11 +1414,18 @@ class GuiAutofixMixin:
                     logging.warning(f"[REGRESSZIO] {dev_name}: a(z) {orig} csomag nincs stage-elve, nincs mit újrakötni.")
                     continue
                 # A javítás KÖZÖS MAGON megy (app/gui/rebind.py): újratelepítés, majd - ha
-                # az nem elég - eszköz-újraenumerálás. Ugyanazt a kódot használja a kézi
+                # az nem elég - a csomópont eltávolítása. Ugyanazt a kódot használja a kézi
                 # "Eszközök újrakötése" gomb is, hogy a kettő sose csússzon szét.
-                ok = self._rebind_device(pnp, path, dev_name, before.get('class') or '', task_id)
+                state = self._rebind_device(pnp, path, dev_name, before.get('class') or '', task_id)
+                if state == 'needs_reboot':
+                    # A csomópont eltűnt; a kötés a KÖVETKEZŐ induláskor épül fel. Ez a
+                    # lánc záró ülepítő újraindítása előtt fut, tehát a reboot pár
+                    # másodperc múlva úgyis jön - pontosan úgy, mint a lemez visszadugásakor.
+                    pending += 1
+                    self.emit('task_progress', {'task': task_id, 'log': f'   🔄 {dev_name}: eltávolítva - az újraindítás után derül fel újra, és akkor kapja meg a gyári drivert.'})
+                    continue
                 after = (self._get_installed_driver_info() or {}).get(pnp) or {}
-                if ok and after and not _is_inbox_driver(after):
+                if state == 'fixed' and after and not _is_inbox_driver(after):
                     fixed += 1
                     self.emit('task_progress', {'task': task_id, 'log': f'   ✅ {dev_name}: visszakötve a gyári driverre ({after.get("inf")}).'})
                     logging.warning(f"[REGRESSZIO] SIKER: {dev_name} -> {after.get('inf')} ({after.get('provider')})")
@@ -1397,9 +1437,13 @@ class GuiAutofixMixin:
                     self.emit('task_progress', {'task': task_id, 'log': f'      Ez működik, de gyengébb (pl. tapipadnál szaggatás, elveszett tracking). Teendő: a gyártó letöltőoldaláról telepítsd kézzel.'})
                     logging.error(f"[REGRESSZIO] MEGMARADT: {dev_name} - a gyári {orig} nem kötött rá, "
                                   f"marad {after.get('inf')}.")
+            if pending:
+                self.emit('task_progress', {'task': task_id, 'log': f'🔄 {pending} eszköz a most következő újraindítás után kapja meg a gyári drivert.'})
         except Exception as e:
             logging.warning(f"[REGRESSZIO] A regresszió-ellenőrzés hibára futott (nem kritikus): {e}", exc_info=True)
-        return fixed, regressed
+        logging.info(f"[REGRESSZIO] Eredmény: {fixed} azonnal javítva, {pending} újraindításra vár, "
+                     f"{regressed} megmaradt.")
+        return fixed, regressed, pending
 
     def _emit_missing_packages(self, pre_packages, task_id='autofix'):
         """A fix ELŐTT meglévő, de a végére VISSZA NEM KERÜLT driver-csomagok kiírása.
@@ -2559,6 +2603,15 @@ class GuiAutofixMixin:
                 # és egyenesen a lezárásra megy.
                 settle_done = bool(self._autofix_stats_get('settle_done'))
                 if not should_chain and not settle_done:
+                    # REGRESSZIÓ-JAVÍTÁS MÉG A ZÁRÓ ÚJRAINDÍTÁS ELŐTT. Ez a sorrend a lényeg:
+                    # ami gyáriról alapdriverre esett vissza, annak a csomópontját itt
+                    # eltávolítjuk, és a pár másodperc múlva következő újraindítás deríti fel
+                    # újra - PONTOSAN úgy, ahogy a technikus a lemez ki-be pakolásával
+                    # javította meg a tapipadot. Terepen (Build 273) bebizonyosodott, hogy a
+                    # `/remove-device` + `/scan-devices` páros ÚJRAINDÍTÁS NÉLKÜL 8 eszközből
+                    # nullát kötött vissza - a reboot nem opcionális része a gyógymódnak.
+                    self._fix_driver_regressions(
+                        self._autofix_stats_get('pre_device_drivers') or {}, 'autofix')
                     self._autofix_stats_set('settle_done', True)
                     logging.info("[AUTOFIX] Záró ülepítő újraindítás: a lezárás és a jelentés a "
                                  "friss boot utáni, végleges állapoton fut le.")
@@ -2629,9 +2682,10 @@ class GuiAutofixMixin:
                     # ugyanaz a csapda, mint a pre_packages-nél.
                     chain_started = self._autofix_stats_get('chain_started')
                     pre_packages = self._autofix_stats_get('pre_packages') or []
-                    # REGRESSZIÓ-ELLENŐRZÉS: a záró ülepítő újraindítás UTÁN vagyunk, tehát
-                    # ez a legjobb (és egyben utolsó) pillanat arra, hogy a futó rendszeren
-                    # elindulni képtelen gyári driver újra megpróbálja a kötést.
+                    # MÁSODIK KÖR a záró újraindítás UTÁN: az előző lábon eltávolított
+                    # csomópontokat a Windows az imént derítette fel újra. Ami mégis
+                    # alapdriveren maradt, azt itt még egyszer megpróbáljuk, és ami ezután
+                    # sem megy, azt a jelentés név szerint kimondja.
                     pre_drivers = self._autofix_stats_get('pre_device_drivers') or {}
                     self._fix_driver_regressions(pre_drivers, 'autofix')
                     # Ugyanígy a stats-fájl TÖRLÉSE ELŐTT: a lánc alatt megtalált, de az

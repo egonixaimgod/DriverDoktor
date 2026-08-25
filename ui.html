@@ -614,6 +614,12 @@ td input[type="checkbox"]{accent-color:var(--accent);width:16px;height:16px;curs
           </div>
           <div class="stress-hero-actions">
             <button class="btn-autofix-hero" onclick="startAutoFix()">🚀 FIX INDÍTÁSA</button>
+            <!-- Ugyanaz a művelet, mint a "Driver Keresés és Telepítés" nézetben lévő gomb
+                 (közös backend: app/gui/rebind.py). Azért van itt is, mert a technikus a
+                 fix után ITT áll, és a tünet (szaggató tapipad, nem működő gombok) ilyenkor
+                 derül ki - ne kelljen másik menüpontot keresnie hozzá. -->
+            <button class="btn btn-sm" onclick="rebindDrivers()" style="justify-content:center"
+                    title="Nem tölt le semmit. Azokat az eszközöket köti vissza a MÁR FENT LÉVŐ gyári driverre, amik a Windows általános driverén ragadtak. Erre akkor van szükség, ha egy driver felment, de az eszköz nem indult el rajta - ilyenkor a Windows némán visszaesik a sajátjára, hibakód nélkül. Tipikus tünet: szaggató/ugráló tapipad, nem működő extra gombok.">🔄 Eszközök újrakötése a gyári driverre</button>
             <button class="btn btn-sm" onclick="switchView('autofix')" style="justify-content:center" title="A teljes leírás és a Windows Defender figyelmeztetés a menüpont oldalán">ℹ️ Részletek + Defender-figyelmeztetés</button>
           </div>
         </div>
