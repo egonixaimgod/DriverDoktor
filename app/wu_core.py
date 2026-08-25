@@ -2343,6 +2343,53 @@ def collect_driver_usage(run_fn):
     return usage
 
 
+def driverstore_package_inf(original_inf):
+    """A DriverStore-ban STAGE-ELT csomag INF-jének teljes útvonala az EREDETI INF-név
+    alapján, vagy None.
+
+    MIRE KELL: ha egy eszköz megkapta a gyári drivert, de nem indult el rajta
+    (`CM_PROB_FAILED_START` - futó rendszeren telepítve ez előfordul), a csomag ettől még
+    OTT VAN a DriverStore-ban. Egy friss boot után újra rá lehet kötni. Ez NEM a tiltott
+    "mentsük el a régi drivert és rakjuk vissza" minta (lásd CLAUDE.md): itt a lánc által
+    MOST telepített, aktuális csomag telepítésének befejezéséről van szó, nem a gép fix
+    előtti állapotának megőrzéséről.
+
+    A mappanév alakja `<eredeti>.inf_<arch>_<hash>` (mérve). Több példány esetén a
+    legfrissebb kell."""
+    orig = (original_inf or '').strip().lower()
+    if not orig.endswith('.inf'):
+        return None
+    root = os.path.join(os.environ.get('WINDIR', r'C:\Windows'),
+                        'System32', 'DriverStore', 'FileRepository')
+    best, best_mtime = None, -1
+    try:
+        for name in os.listdir(root):
+            if not name.lower().startswith(orig + '_'):
+                continue
+            cand = os.path.join(root, name, original_inf)
+            if not os.path.isfile(cand):
+                # A fájlnév kis/nagybetűje eltérhet a mappanévétől.
+                try:
+                    for f in os.listdir(os.path.join(root, name)):
+                        if f.lower() == orig:
+                            cand = os.path.join(root, name, f)
+                            break
+                    else:
+                        continue
+                except Exception:
+                    continue
+            try:
+                mt = os.path.getmtime(cand)
+            except Exception:
+                mt = 0
+            if mt > best_mtime:
+                best, best_mtime = cand, mt
+    except Exception as e:
+        logging.debug(f"[DRIVERSTORE] A FileRepository nem olvasható: {e}")
+        return None
+    return best
+
+
 def wlan_connect(run_fn, ssid):
     """Csatlakozási kísérlet egy MÁR MEGLÉVŐ profillal. Ez a gyors út: ha a Windows
     csak nem kapcsolódott vissza magától (de a profil megvan és a jelszó a helyén),

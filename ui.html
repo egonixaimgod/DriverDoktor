@@ -733,6 +733,16 @@ td input[type="checkbox"]{accent-color:var(--accent);width:16px;height:16px;curs
               <span>🌐 Mély keresés (a katalógus minden eszközre - lassabb, de a régi gyári drivereket is frissíti)</span>
             </label>
           </div>
+          <!-- ESZKÖZ-ÚJRAKÖTÉS: nem keres és nem tölt le semmit - azokat az eszközöket
+               köti vissza a MÁR FENT LÉVŐ gyári driverre, amik a Windows alapdriverén
+               ragadtak. Terepen (T580) pont ez az eset okozta a szaggató tapipadot, és
+               a technikus addig csak az SSD ki-be pakolásával tudta megjavítani. -->
+          <div style="margin:-2px 0 12px">
+            <button class="btn btn-sm" onclick="rebindDrivers()" id="btn-rebind"
+                    title="Nem tölt le semmit. Azokat az eszközöket keresi meg, amik a Windows ÁLTALÁNOS driverén futnak, pedig a gépen ott van hozzájuk a gyári csomag - és visszaköti őket a gyárira (újratelepítés, majd ha kell, az eszköz újraenumerálása). Erre akkor van szükség, ha egy driver felment, de az eszköz nem indult el rajta: ilyenkor a Windows némán visszaesik a saját driverére, hibakód nélkül. Tipikus tünet: szaggató/ugráló tapipad, nem működő extra gombok.">
+              🔄 Eszközök újrakötése a gyári driverre (ha valami az alapdriveren ragadt)
+            </button>
+          </div>
           <div style="margin-bottom:10px">
             <div class="progress" id="hw-progress" style="display:none"><div class="progress-fill" id="hw-progress-fill"></div></div>
             <div id="hw-status" style="color:var(--text2);font-size:12px;margin-top:6px"></div>
@@ -1272,10 +1282,10 @@ td input[type="checkbox"]{accent-color:var(--accent);width:16px;height:16px;curs
         <span class="toggle-track"></span>
         ⚡ Firmware-frissítések (UEFI/BIOS, SSD, TPM) is – VISSZAFORDÍTHATATLAN!
       </label>
-      <label class="toggle" id="mc-wu-pause-row" style="display:none;margin-top:10px" title="Alapból BE. A fix a végén ~10 évre SZÜNETELTETI a Windows Update-et, hogy a most felrakott, koherens driverkészletet a Windows pár nap múlva ne írja felül. Ez szüneteltetés, nem letiltás: az ügyfél a Beállítások > Windows Update alatt egy kattintással folytathatja, és a biztonsági frissítések sincsenek véglegesen elvágva. Kikapcsolva a gép a megszokott, magától frissülő Windows Update-tel megy vissza. A fix ALATT a WU mindenképp szünetel - enélkül a Windows a lábak között a hátunk mögött telepítene drivereket.">
+      <label class="toggle" id="mc-wu-pause-row" style="display:none;margin-top:10px" title="Alapból BE. FONTOS: a driverek elleni védelem NEM ezen múlik - a fix a végén mindenképp letiltja, hogy a Windows Update drivert telepítsen (SearchOrderConfig=0 + ExcludeWUDriversInQualityUpdate=1), akkor is, ha ezt a pipát kiveszed. Ez a kapcsoló azt dönti el, hogy a Windows Update EGYÁLTALÁN elinduljon-e: bekapcsolva ~10 évre szünetel minden frissítés, ami a FUNKCIÓFRISSÍTÉS ellen véd (az újrafuttatja a Setupot és a beépített drivereket a gyáriak fölé teheti - ezt a driver-tiltás nem fogja meg). Ez szüneteltetés, nem letiltás: az ügyfél a Beállítások > Windows Update alatt egy kattintással folytathatja. A fix ALATT a WU mindenképp szünetel, függetlenül ettől a pipától.">
         <input type="checkbox" id="mc-wu-pause" checked>
         <span class="toggle-track"></span>
-        ⏸️ Windows Update szüneteltetése a végén (~10 év) – hogy ne írja felül a friss drivereket
+        ⏸️ Windows Update teljes szüneteltetése a végén (~10 év) – a funkciófrissítés ellen
       </label>
       <div id="mc-note-row" style="display:none;margin-top:14px">
         <textarea id="mc-note-input" rows="3" placeholder="Pl.: időszakos fagyás játék közben, gyanús kattogó hang a gépből..." style="width:100%;padding:10px 12px;border-radius:var(--r-sm);border:1px solid var(--glass-border);background:rgba(20,12,38,0.6);color:var(--text);font:13px var(--font);resize:vertical"></textarea>
@@ -3326,6 +3336,29 @@ async function openAppDataDir() {
 }
 
 /* ========== PROGRESS MODAL ========== */
+/* ESZKÖZ-ÚJRAKÖTÉS: azokat az eszközöket köti vissza a MÁR TELEPÍTETT gyári driverre,
+   amik a Windows alapdriverén ragadtak (mert a driver felment, de az eszköz nem indult el
+   rajta - ilyenkor a hibakód 0, tehát semmilyen hibakód-alapú ellenőrzés nem látja).
+   A backend: app/gui/rebind.py: rescan_and_rebind_drivers(). */
+async function rebindDrivers() {
+  const ok = await showConfirm('Eszközök újrakötése',
+    'Megkeresi azokat az eszközöket, amik a Windows ÁLTALÁNOS driverén futnak, pedig a gépen ' +
+    'ott van hozzájuk a gyári csomag - és visszaköti őket a gyárira.\n\n' +
+    'Nem tölt le semmit. A művelet alatt az érintett eszköz (pl. tapipad, egér) pár másodpercre ' +
+    'eltűnhet, majd magától visszajön.\n\nIndulhat?');
+  if (!ok) return;
+  const btn = document.getElementById('btn-rebind');
+  if (btn) { btn.disabled = true; btn.textContent = '⏳ Újrakötés folyamatban...'; }
+  showProgressModal('Eszközök újrakötése a gyári driverekre', '');
+  try {
+    await api().rescan_and_rebind_drivers();
+  } catch (e) {
+    toast('Újrakötési hiba: ' + e, 'error');
+  } finally {
+    if (btn) { btn.disabled = false; btn.textContent = '🔄 Eszközök újrakötése a gyári driverre (ha valami az alapdriveren ragadt)'; }
+  }
+}
+
 function showProgressModal(title, phase) {
   document.getElementById('mp-title').textContent = title || 'Folyamat';
   document.getElementById('mp-phase').textContent = phase || '';
@@ -3384,7 +3417,19 @@ function onTaskComplete(data) {
   if (progressTimer) { clearInterval(progressTimer); progressTimer = null; }
   const s = Math.floor((Date.now() - progressStartTime) / 1000);
   const m = Math.floor(s / 60);
-  document.getElementById('mp-time').textContent = 'Teljes idő: ' + (m > 0 ? m + ' perc ' + (s%60) + ' mp' : s + ' mp');
+  const tEl = document.getElementById('mp-time');
+  // A TELJES LÁNC ideje, ha a Python küldte (csak az AutoFix legvégén, minden
+  // újraindítással együtt). Enélkül a mező csak az AKTUÁLIS lábat mutatná - egy 4
+  // újraindításos fix után az "6 perc"-nek látszana, ami félrevezető. Kiemelten,
+  // citromsárgával, mert ez a technikus egyik legfontosabb visszajelzése.
+  if (data && data.chain_time) {
+    tEl.innerHTML = '<span style="color:var(--yellow);font-weight:700;font-size:15px">'
+      + '⏱️ Teljes idő: ' + data.chain_time + '</span>'
+      + '<span style="display:block;margin-top:2px;font-size:11px;color:var(--text3)">'
+      + 'az indítástól a befejezésig, az újraindításokkal együtt</span>';
+  } else {
+    tEl.textContent = 'Teljes idő: ' + (m > 0 ? m + ' perc ' + (s%60) + ' mp' : s + ' mp');
+  }
   document.getElementById('mp-progress').classList.remove('progress-indeterminate');
   document.getElementById('mp-progress-fill').style.width = '100%';
   

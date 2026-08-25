@@ -13,6 +13,7 @@ HOL A HELYE A SORBAN: a WU és a Microsoft-katalógus UTÁN, a lánc záró kör
 arra fut, amit a többi forrás nem oldott meg, és nem ír felül frissebb drivert.
 """
 import os
+import time
 import shutil
 import logging
 import tempfile
@@ -121,6 +122,34 @@ class GuiOemCatalogMixin:
             logging.debug(f"[OEM] Verzió-összevetés sikertelen ({pkg.get('title')}): {e}")
         return False
 
+    def _oem_progress_cb(self, title, task_id):
+        """Letöltés-haladás a fix naplójába, ~2 másodpercenként.
+
+        SAJÁT callback, NEM a stressz-nézeté (`_stress_dl_progress_emitter`): az egy
+        másik szignatúrájú, másik UI-eseményt kibocsátó függvény. Terepen (Build 272,
+        T580) épp ez volt a hiba - a rossz hívás minden gyártói letöltést azonnal
+        kivételre futtatott, így a kör mind az 5 lábon NULLA csomagot telepített,
+        miközben a képernyőn csak annyi látszott, hogy "a letöltés nem sikerült".
+        A gyári csomagok több száz MB-osak is lehetnek, ezért kell a visszajelzés."""
+        state = {'last': 0.0}
+
+        def cb(phase, done, total_bytes):
+            if phase != 'download':
+                return
+            now = time.monotonic()
+            is_final = bool(total_bytes) and done >= total_bytes
+            if now - state['last'] < 2.0 and not is_final:
+                return
+            state['last'] = now
+            if total_bytes:
+                pct = int(done * 100 / total_bytes)
+                txt = f'   ⬇️ {title}: {done / 1048576:.0f}/{total_bytes / 1048576:.0f} MB ({pct}%)'
+            else:
+                txt = f'   ⬇️ {title}: {done / 1048576:.0f} MB'
+            self.emit('task_progress', {'task': task_id, 'log': txt})
+
+        return cb
+
     def _oem_install_package(self, pkg, dev, workdir, idx, total, task_id):
         """Egy gyártói csomag: letöltés -> kicsomagolás -> pnputil telepítés -> ellenőrzés."""
         title = pkg.get('title') or pkg.get('id') or '?'
@@ -133,11 +162,9 @@ class GuiOemCatalogMixin:
         try:
             ok = download_with_cert_fallback(
                 self._run, pkg['url'], exe, timeout=OEM_DOWNLOAD_TIMEOUT,
-                log_tag='OEM',
-                progress_cb=self._stress_dl_progress_emitter(task_id, f'{title} letöltése')
-                if hasattr(self, '_stress_dl_progress_emitter') else None)
+                log_tag='OEM', progress_cb=self._oem_progress_cb(title, task_id))
         except Exception as e:
-            logging.warning(f"[OEM] Letöltés sikertelen ({title}): {e}")
+            logging.warning(f"[OEM] Letöltés sikertelen ({title}): {e}", exc_info=True)
             ok = False
         if not ok or not os.path.isfile(exe) or os.path.getsize(exe) < 1024:
             self.emit('task_progress', {'task': task_id, 'log': f'   ⚠️ A letöltés nem sikerült - kihagyva: {title}'})

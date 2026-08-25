@@ -60,6 +60,7 @@ from app.wu_core import verify_failed_installs
 from app.wu_core import unoffered_requested_titles
 from app.wu_core import mark_generic_replace_candidates
 from app.wu_core import _is_inbox_driver
+from app.wu_core import driverstore_package_inf
 from app.wu_core import HEALTH_REPORT_SKIP_INFS
 from app.wu_core import is_specific_hwid
 from app.wu_core import deep_catalog_candidates
@@ -103,6 +104,59 @@ AUTOFIX_MAX_INSTALL_LEGS = 10
 # kerül semmibe: az első próba azonnal visszatér.
 AUTOFIX_NET_WAIT_WIFI = 120
 AUTOFIX_NET_WAIT_WIRED = 45
+
+
+# GYÁRTÓ-KÓDOS azonosító: van benne VEN_/VID_ (PCI/USB), vagy ACPI-s gyártói előtag
+# (`ACPI\VEN_LEN&DEV_009B` - így jelenik meg a ThinkPad tapipadja). Csak az egészség-
+# jelentés használja, annak eldöntésére, hogy egy beviteli eszközhöz létezhet-e egyáltalán
+# gyári driver. NEM keresési szűrő (a katalógust minden eszközre megkérdezzük).
+_VENDOR_CODED_RE = re.compile(r'(VEN_|VID_|VEN&|&DEV_)', re.IGNORECASE)
+
+
+def format_duration_hu(seconds):
+    """Másodperc -> olvasható magyar időtartam ('1 óra 12 perc 5 mp')."""
+    try:
+        s = int(round(float(seconds)))
+    except (TypeError, ValueError):
+        return ''
+    if s < 0:
+        return ''
+    h, rem = divmod(s, 3600)
+    m, sec = divmod(rem, 60)
+    parts = []
+    if h:
+        parts.append(f"{h} óra")
+    if m:
+        parts.append(f"{m} perc")
+    if sec or not parts:
+        parts.append(f"{sec} mp")
+    return ' '.join(parts)
+
+
+# A lánc teljes idejét VALÓS IDŐBÉLYEGBŐL számoljuk (time.time()), mert a lábak közt
+# újraindul a gép, és a monotonic óra ilyenkor nullázódik. Cserébe viszont ki van téve az
+# óraugrásnak: terepen mérve egy friss gépen a Windows első időszinkronja a lánc közepén
+# +4 óra 51 perccel arrébb tolta a rendszerórát (lásd CLAUDE.md). Ezért a kapott értéket
+# józansági határok közé szorítjuk, és ha kilóg, inkább nem állítunk semmit, mint hogy egy
+# képtelen számot írjunk ki a technikusnak.
+CHAIN_TIME_MAX_SECONDS = 24 * 3600
+
+
+def chain_duration_text(started_wall, now_wall=None):
+    """A lánc teljes ideje szövegesen, vagy '' ha nem megbízható.
+
+    Visszatérés: (szöveg, megbízható-e)."""
+    if not started_wall:
+        return '', False
+    try:
+        elapsed = float(now_wall if now_wall is not None else time.time()) - float(started_wall)
+    except (TypeError, ValueError):
+        return '', False
+    if elapsed < 0 or elapsed > CHAIN_TIME_MAX_SECONDS:
+        logging.warning(f"[AUTOFIX] A lánc teljes ideje nem megbízható ({elapsed:.0f} mp) - "
+                        f"a rendszeróra valószínűleg elmozdult a lánc közben (időszinkron). Nem írjuk ki.")
+        return '', False
+    return format_duration_hu(elapsed), True
 
 
 class GuiAutofixMixin:
@@ -409,6 +463,41 @@ class GuiAutofixMixin:
                 logging.info(f"[AUTOFIX-DELETE] {len(carried)} csomag áthozva egy korábbi, félbeszakadt láncból "
                              f"a 'nem jött vissza' jelentéshez: {[c.get('original') for c in carried]}")
             self._autofix_stats_set('pre_packages', cur_pkgs + carried)
+
+            # ESZKÖZ -> DRIVER PILLANATKÉP A TÖRLÉS ELŐTT. A záró jelentés ebből tudja
+            # eldönteni, hogy a fix ROSSZABB állapotban adja-e vissza egy eszközt, mint
+            # ahogy kapta: ami gyári driveren futott és a végén Windows-alapdriveren van,
+            # az REGRESSZIÓ, akkor is, ha a hibakódja 0.
+            #
+            # MIÉRT KELL (terepi eset, T580, 2026-08-25): a WU feltette a gyári Synaptics
+            # drivert az `ACPI\LEN009B`-re, az eszköz viszont NEM INDULT EL
+            # (`CM_PROB_FAILED_START`, a Windows saját setupapi.dev.log-jában), mire a
+            # Windows visszaesett az általános `msmouse.inf`-re. Az általános driver
+            # hibátlanul elindul, tehát a hibakód 0 lett, és a lánc `✅ Nem maradt
+            # hibakódos eszköz`-t jelentett - miközben a tapipad szaggatott és elvesztette
+            # a trackinget, mert PS/2-emulációban futott a precíziós út helyett. A
+            # hibakód-alapú ellenőrzés ezt elvileg sem tudja elkapni; a "min futott ELŐTTE"
+            # összevetés viszont igen.
+            try:
+                # Az OSZTÁLY is kell: a záró javítás a tárolóvezérlőket/lemezeket SOSEM
+                # enumerálja újra (ott a csomópont pillanatnyi eltűnése a futó rendszert
+                # vinné el), és ez a mező dönti el, mi az.
+                dev_class = {}
+                for d in drivers:
+                    for used in (usage.get((d.get('published') or '').strip().lower()) or []):
+                        dev_class[used.strip().lower()] = (d.get('class') or '')
+                snap = {}
+                for pnp, info in (self._get_installed_driver_info() or {}).items():
+                    if info and not _is_inbox_driver(info):
+                        snap[pnp] = {'inf': info.get('inf') or '', 'provider': info.get('provider') or '',
+                                     'version': info.get('version') or '',
+                                     'class': dev_class.get((info.get('name') or '').strip().lower(), '')}
+                self._autofix_stats_set('pre_device_drivers', snap)
+                logging.info(f"[AUTOFIX] Törlés előtti pillanatkép: {len(snap)} eszköz futott GYÁRI driveren "
+                             f"(ezeket vetjük össze a lánc végén).")
+            except Exception as e:
+                logging.warning(f"[AUTOFIX] Az eszköz-driver pillanatkép nem készült el (a záró "
+                                f"regresszió-ellenőrzés kimarad): {e}")
             deleted_ok = 0
             stalled_streak = 0
             failed = []     # nem törölhető csomagok (pl. használatban lévő INF) - jelentjük
@@ -1231,6 +1320,87 @@ class GuiAutofixMixin:
             logging.debug(f"[AUTOFIX-STATS] Összesítés sikertelen: {e}")
         return total
 
+    def _fix_driver_regressions(self, pre_drivers, task_id='autofix'):
+        """GYÁRI -> ALAPDRIVER REGRESSZIÓK felderítése, javítási kísérlet, jelentés.
+
+        MIÉRT (terepi eset, ThinkPad T580, 2026-08-25 - a naplósor szó szerint):
+            Installing best driver (oem19.inf) on device 'ACPI\\LEN009B'
+            Strong Name=oem19.inf:...:LENOVO_GROUP53_InterTouch_Win8_Inst:19.3.4.228
+            Device NOT STARTED: Device has problem: 0x0a (CM_PROB_FAILED_START)
+        A gyári Synaptics driver felment, de FUTÓ RENDSZEREN nem tudott elindulni, mire a
+        Windows visszaesett az általános `msmouse.inf`-re. Az általános driver hibátlanul
+        elindul, tehát a hibakód 0 lett, és a lánc `✅ Nem maradt hibakódos eszköz`-t
+        jelentett - miközben a tapipad szaggatott és elvesztette a trackinget, mert
+        PS/2-emulációban futott a precíziós út helyett.
+
+        Két tanulság épült ebbe a lépésbe:
+          1. A HIBAKÓD NEM ELÉG. Az "ugyanaz az eszköz gyári driveren futott a fix előtt,
+             most meg alapdriveren" összevetés elkapja azt, amit a hibakód elvileg sem tud.
+          2. A JAVÍTÁS ITT INGYEN VAN. A csomag ott van a DriverStore-ban (a lánc most
+             telepítette), és a záró ülepítő újraindítás UTÁN vagyunk - friss bootnál az a
+             kötés jó eséllyel sikerül, ami futó rendszeren nem. Ez NEM a tiltott
+             "mentsük el a régit és rakjuk vissza" minta: a MOST telepített, aktuális
+             csomag telepítésének befejezése, nem a fix előtti állapot konzerválása.
+
+        Visszatérés: (javítva, megmaradt_regresszió) darabszám."""
+        fixed = regressed = 0
+        if not pre_drivers:
+            return 0, 0
+        try:
+            now = self._get_installed_driver_info() or {}
+            names = {}
+            try:
+                res = self._run(["powershell", "-NoProfile", "-Command", WU_PNP_QUERY_PS], encoding='utf-8')
+                for d in _filter_wu_scan_devices(json.loads(res.stdout or '[]')):
+                    names[(d.get('pnp_id') or '').upper()] = d.get('name') or ''
+            except Exception as e:
+                logging.debug(f"[REGRESSZIO] Az eszköznevek nem kérdezhetők le: {e}")
+
+            suspects = []
+            for pnp, before in pre_drivers.items():
+                info = now.get(pnp)
+                if not info:
+                    continue                     # az eszköz nincs jelen - nem a mi dolgunk
+                if not _is_inbox_driver(info):
+                    continue                     # gyári driveren fut, rendben
+                suspects.append((pnp, before, info))
+            if not suspects:
+                logging.info("[REGRESSZIO] Nincs olyan eszköz, ami gyáriról alapdriverre esett vissza.")
+                return 0, 0
+
+            self.emit('task_progress', {'task': task_id, 'log': f'\n🔧 {len(suspects)} eszköz a fix ELŐTT gyári driveren futott, most Windows-alapdriveren van - javítási kísérlet...', 'indeterminate': True})
+            for pnp, before, info in suspects:
+                dev_name = names.get((pnp or '').upper()) or pnp
+                orig = (before.get('inf') or '')
+                logging.warning(f"[REGRESSZIO] {dev_name}: ELŐTTE {orig} ({before.get('provider')} "
+                                f"{before.get('version')}) -> MOST {info.get('inf')} ({info.get('provider')})")
+                path = driverstore_package_inf(orig) if orig else None
+                if not path:
+                    regressed += 1
+                    self.emit('task_progress', {'task': task_id, 'log': f'   ⚠️ {dev_name}: a gyári driver ({orig or "?"}) nincs a DriverStore-ban - nem tudjuk visszakötni.'})
+                    logging.warning(f"[REGRESSZIO] {dev_name}: a(z) {orig} csomag nincs stage-elve, nincs mit újrakötni.")
+                    continue
+                # A javítás KÖZÖS MAGON megy (app/gui/rebind.py): újratelepítés, majd - ha
+                # az nem elég - eszköz-újraenumerálás. Ugyanazt a kódot használja a kézi
+                # "Eszközök újrakötése" gomb is, hogy a kettő sose csússzon szét.
+                ok = self._rebind_device(pnp, path, dev_name, before.get('class') or '', task_id)
+                after = (self._get_installed_driver_info() or {}).get(pnp) or {}
+                if ok and after and not _is_inbox_driver(after):
+                    fixed += 1
+                    self.emit('task_progress', {'task': task_id, 'log': f'   ✅ {dev_name}: visszakötve a gyári driverre ({after.get("inf")}).'})
+                    logging.warning(f"[REGRESSZIO] SIKER: {dev_name} -> {after.get('inf')} ({after.get('provider')})")
+                else:
+                    regressed += 1
+                    # EZT KI KELL MONDANI. Pont az a néma hiba, ami miatt a technikus egy
+                    # látszólag hibátlan gépet vesz át, aztán az ügyfélnél derül ki.
+                    self.emit('task_progress', {'task': task_id, 'log': f'   ❌ {dev_name}: a gyári driver nem indul el ezen a gépen - a Windows alapdriverén marad.'})
+                    self.emit('task_progress', {'task': task_id, 'log': f'      Ez működik, de gyengébb (pl. tapipadnál szaggatás, elveszett tracking). Teendő: a gyártó letöltőoldaláról telepítsd kézzel.'})
+                    logging.error(f"[REGRESSZIO] MEGMARADT: {dev_name} - a gyári {orig} nem kötött rá, "
+                                  f"marad {after.get('inf')}.")
+        except Exception as e:
+            logging.warning(f"[REGRESSZIO] A regresszió-ellenőrzés hibára futott (nem kritikus): {e}", exc_info=True)
+        return fixed, regressed
+
     def _emit_missing_packages(self, pre_packages, task_id='autofix'):
         """A fix ELŐTT meglévő, de a végére VISSZA NEM KERÜLT driver-csomagok kiírása.
 
@@ -1391,7 +1561,20 @@ class GuiAutofixMixin:
         """
         if not is_specific_hwid(dev.get('id') or ''):
             return False
-        if (inst.get('inf') or '').strip().lower() in HEALTH_REPORT_SKIP_INFS:
+        # KIVÉTEL A SKIP-LISTA ALÓL: a MUTATÓESZKÖZÖK és billentyűzetek közül azok, amiknek
+        # GYÁRTÓ-KÓDOS azonosítójuk van (pl. a ThinkPad tapipadja: ACPI\VEN_LEN&DEV_009B).
+        #
+        # Terepen (T580, 2026-08-25) a gyári Synaptics driver felment, de az eszköz nem
+        # indult el rajta (CM_PROB_FAILED_START), mire a Windows visszaesett a generikus
+        # `msmouse.inf`-re. Az `msmouse.inf` rajta van a skip-listán, ezért a jelentés nem
+        # csak elhallgatta a problémát, hanem azt írta ki, hogy "billentyűzet/egér -
+        # ezekhez gyári driver nem is létezik" - ami egy precíziós tapipadnál konkrétan
+        # téves (a Lenovo katalógusában ott az UltraNav csomag). A skip-lista célja az,
+        # hogy a gyári driverrel NEM rendelkező eszközöket ne emlegesse (általános USB-egér,
+        # PCI-híd, WAN Miniport); egy gyártó-kódos beviteli eszköz nem ilyen.
+        cls = (dev.get('pclass') or '').strip().upper()
+        vendor_coded_input = cls in ('MOUSE', 'HIDCLASS', 'KEYBOARD') and _VENDOR_CODED_RE.search(dev.get('id') or '')
+        if (inst.get('inf') or '').strip().lower() in HEALTH_REPORT_SKIP_INFS and not vendor_coded_input:
             return False
         return True
 
@@ -2073,6 +2256,18 @@ class GuiAutofixMixin:
                     # átmentjük őket (a törlési fázis olvassa: 'carry_pre_packages').
                     prev_pre = self._autofix_stats_get('pre_packages') or []
                     self._autofix_stats_clear()
+
+                    # A LÁNC INDULÁSÁNAK IDŐPONTJA - a záró összefoglaló ebből számolja a
+                    # TELJES időt. A lábak külön processzek, és köztük újraindul a gép,
+                    # ezért ez az EGYETLEN pont, ahol a "mikor nyomta meg" rögzíthető, és
+                    # a lánc-állapotban kell tárolni (a self-attribútum a következő lábon
+                    # már üres lenne). Szándékosan a _autofix_stats_clear() UTÁN.
+                    #
+                    # Ez az egyik olyan hely, ahol a time.time() a HELYES választás a
+                    # time.monotonic() helyett (lásd CLAUDE.md): a monotonic óra minden
+                    # újraindításnál nullázódik, tehát lábakon átívelő időt nem tud mérni.
+                    # Itt valódi időbélyeg kell, nem eltelt idő.
+                    self._autofix_stats_set('chain_started', time.time())
                     if prev_pre:
                         logging.warning(f"[AUTOFIX] Egy korábbi, be nem fejezett lánc {len(prev_pre)} csomagot hagyott hátra - "
                                         f"átvisszük az új lánc jelentésébe: {[p.get('original') for p in prev_pre]}")
@@ -2429,7 +2624,16 @@ class GuiAutofixMixin:
                     # csomagok + maradék hibakódos eszközök. A pre_packages-t a stats-fájl
                     # TÖRLÉSE ELŐTT kell kiolvasni (_autofix_stats_total_and_clear utána
                     # már nem találná).
+                    # A lánc INDULÁSÁNAK időbélyege - a stats-fájl TÖRLÉSE ELŐTT kell
+                    # kiolvasni (_autofix_stats_total_and_clear utána már nem találná),
+                    # ugyanaz a csapda, mint a pre_packages-nél.
+                    chain_started = self._autofix_stats_get('chain_started')
                     pre_packages = self._autofix_stats_get('pre_packages') or []
+                    # REGRESSZIÓ-ELLENŐRZÉS: a záró ülepítő újraindítás UTÁN vagyunk, tehát
+                    # ez a legjobb (és egyben utolsó) pillanat arra, hogy a futó rendszeren
+                    # elindulni képtelen gyári driver újra megpróbálja a kötést.
+                    pre_drivers = self._autofix_stats_get('pre_device_drivers') or {}
+                    self._fix_driver_regressions(pre_drivers, 'autofix')
                     # Ugyanígy a stats-fájl TÖRLÉSE ELŐTT: a lánc alatt megtalált, de az
                     # eszköz által át nem vett katalógus-csomagok (lásd _emit_catalog_no_bind).
                     no_bind = self._autofix_stats_get('catalog_no_bind') or []
@@ -2469,6 +2673,13 @@ class GuiAutofixMixin:
                     # MILYEN állapotban adjuk vissza. Bepipálva marad a ~10 éves szünet (ez a
                     # bolt alapértelmezése); kipipálatlanul itt oldjuk fel, hogy az ügyfél a
                     # megszokott, frissülő Windowst kapja vissza.
+                    # A DRIVER-TILTÁS ETTŐL FÜGGETLENÜL ÉRVÉNYBEN MARAD, és ezt ki KELL
+                    # mondani. A _disable_wu_sync() minden lezáráskor lefut
+                    # (SearchOrderConfig=0 + ExcludeWUDriversInQualityUpdate=1), tehát a
+                    # frissen felrakott driverkészletet a WU akkor sem írja felül, ha a
+                    # technikus a szüneteltetést kivette. E nélkül a sor nélkül a képernyő
+                    # azt sugallná, hogy a pipa kivételével a gép "teljesen normál" WU-val
+                    # megy vissza - pedig a driver-ág továbbra is zárva van.
                     if getattr(self, '_autofix_wu_pause', True):
                         self.emit('task_progress', {'task': 'autofix', 'log': 'ℹ️ A Windows Update szüneteltetve marad (~10 év) - a Beállítások > Windows Update alatt egy kattintással folytatható.'})
                         logging.info("[AUTOFIX] Záró WU-állapot: SZÜNETELTETVE marad (a dialóguson bepipálva).")
@@ -2485,6 +2696,7 @@ class GuiAutofixMixin:
                             # néma eltérés a felhasználó választásától nem maradhat.
                             logging.warning(f"[AUTOFIX] A WU szüneteltetés feloldása nem sikerült: {e}")
                             self.emit('task_progress', {'task': 'autofix', 'log': '⚠️ A Windows Update szüneteltetését nem sikerült feloldani - a Beállítások > Windows Update alatt kézzel folytatható.'})
+                        self.emit('task_progress', {'task': 'autofix', 'log': 'ℹ️ A Windows Update fut, de DRIVERT továbbra sem telepít (ez a védelem a szüneteltetéstől függetlenül marad érvényben, hogy a most felrakott driverkészlet ne íródjon felül).'})
 
                     try:
                         self.emit('task_progress', {'task': 'autofix', 'log': '\nA FOLYAMAT SIKERESEN BEFEJEZŐDÖTT!'})
@@ -2493,7 +2705,16 @@ class GuiAutofixMixin:
                     
                     # If we were in resume mode, it means this was an automated post-boot check that found nothing.
                     # We can close the app or leave it open. Let's just finish the task.
-                    self.emit('task_complete', {'task': 'autofix', 'status': 'Teljesen befejezve'})
+                    # A TELJES LÁNC IDEJE. A modál addig csak az AKTUÁLIS LÁB idejét
+                    # mutatta (a számláló minden lábon nullázódik), ami félrevezető: a
+                    # technikus 4 újraindításnyi munka után "6 perc"-et olvasott. Ezt
+                    # csak ITT, a lánc tényleges végén írjuk ki.
+                    chain_time, ok_time = chain_duration_text(chain_started)
+                    if ok_time:
+                        self.emit('task_progress', {'task': 'autofix', 'log': f'\n⏱️ A teljes AutoFix {chain_time} alatt futott le (az indítástól, az újraindításokkal együtt).'})
+                        logging.info(f"[AUTOFIX] A lánc teljes ideje: {chain_time}.")
+                    self.emit('task_complete', {'task': 'autofix', 'status': 'Teljesen befejezve',
+                                                'chain_time': chain_time})
                     if not getattr(self, 'resume_mode', False):
                         time.sleep(1)
                         self.emit('ask_reboot', None)
