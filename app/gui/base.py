@@ -64,6 +64,12 @@ class GuiBaseMixin:
         # Csak Wi-Fi módban van értelme: vezetékesen az adapter drivere amúgy is a normál
         # törlési fázisban megy el, és a WU rakja vissza. Lásd wu_core.rebuild_wifi_driver.
         self.rebuild_wifi_driver = '--rebuild-wifi-driver' in sys.argv
+        # A ZÁRÓ Windows Update-szüneteltetés (~10 év) kérése. Az alapértelmezés BE, ezért
+        # - a többi kapcsolóval ellentétben - a TILTÁS utazik jelzőként: így egy régi
+        # ütemezett feladat argumentuma (amiben még nincs ilyen kapcsoló) is a megszokott,
+        # szüneteltető viselkedést adja. A lábak külön processzek, ezért ez is csak az
+        # ütemezett feladat argumentumában él tovább (lásd _schedule_autofix_resume).
+        self.no_wu_pause = '--no-wu-pause' in sys.argv
         self._si = subprocess.STARTUPINFO()
         self._si.dwFlags |= subprocess.STARTF_USESHOWWINDOW
         self._nw = subprocess.CREATE_NO_WINDOW

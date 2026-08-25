@@ -953,6 +953,34 @@ class GuiAutofixMixin:
             logging.warning(f"[AUTOFIX] Katalógus-zárókör hiba (nem kritikus): {e}")
             self.emit('task_progress', {'task': task_id, 'log': f'⚠️ Katalógus-zárókör hiba (a folyamat megy tovább): {e}'})
 
+        # ================================================================
+        # NEGYEDIK FORRÁS: A GÉPGYÁRTÓ SAJÁT KATALÓGUSA
+        #
+        # Van olyan gyári driver, amit sem a WU Agent, sem a Microsoft Update Catalog nem
+        # szállít, mert a gépgyártó a saját frissítő-csatornáján adja (Lenovo Vantage,
+        # Dell Command Update, HP Image Assistant). Ez a kör onnan szerzi meg - NULLÁRÓL
+        # letöltve, nem a gép régi driverét visszatéve (lásd CLAUDE.md: re-driver from ZERO).
+        #
+        # A SORREND SZÁNDÉKOS: a WU és a Microsoft-katalógus UTÁN fut, tehát csak arra
+        # marad munkája, amit azok nem oldottak meg, és nem ír felül frissebb drivert.
+        #
+        # NEM UNIVERZÁLIS FELTÉTEL: ha a géphez nincs gyártói katalógus (Acer, összerakott
+        # PC), a kör üresen tér vissza, és a gép semmit nem veszít - az univerzális
+        # forrásokat (WU + Microsoft-katalógus + GPU-gyártók) addigra már megkapta.
+        try:
+            devices_for_oem = locals().get('devices_now') or []
+            if not devices_for_oem:
+                res_p = self._run(["powershell", "-NoProfile", "-Command", WU_PNP_QUERY_PS], encoding='utf-8')
+                try:
+                    devices_for_oem = _filter_wu_scan_devices(json.loads(res_p.stdout or '[]'))
+                except Exception as e:
+                    logging.warning(f"[OEM] Az eszközlista nem olvasható a gyártói körhöz: {e}")
+                    devices_for_oem = []
+            oem_installed, _oem_skipped = self._oem_catalog_round(devices_for_oem, task_id=task_id)
+            total_installed_in_session += oem_installed
+        except Exception as e:
+            logging.warning(f"[OEM] A gyártói katalógus-kör hiba (nem kritikus): {e}", exc_info=True)
+
         return total_installed_in_session
 
     # ================================================================
@@ -990,6 +1018,11 @@ class GuiAutofixMixin:
             resume_flag += ' --wifi-mode'
         if getattr(self, '_autofix_rebuild_wifi', False) and '--rebuild-wifi-driver' not in resume_flag:
             resume_flag += ' --rebuild-wifi-driver'
+        # A ZÁRÓ WU-szüneteltetés lemondása. Fordítva utazik, mint a többi kapcsoló (a
+        # TILTÁS a flag), mert az alapértelmezés a szüneteltetés: így egy régi ütemezett
+        # feladat argumentuma is a megszokott viselkedést adja.
+        if not getattr(self, '_autofix_wu_pause', True) and '--no-wu-pause' not in resume_flag:
+            resume_flag += ' --no-wu-pause'
         exe_path = _app_exe_path()
         temp_env = os.environ.get('TEMP', '!!').lower()
         # Ha temp mappából fut a program, a következő indulásig törlődhet alóla az exe -
@@ -1950,10 +1983,12 @@ class GuiAutofixMixin:
         return ok
 
     def run_autofix(self, skip_printer_drivers=True, allow_storage_drivers=False, allow_firmware=False,
-                    wifi_mode=False, keep_packages=None, rebuild_wifi_driver=True):
+                    wifi_mode=False, keep_packages=None, rebuild_wifi_driver=True,
+                    pause_windows_update=True):
         logging.info(f"[API] run_autofix() indítása (skip_printer_drivers={skip_printer_drivers}, "
                      f"allow_storage_drivers={allow_storage_drivers}, allow_firmware={allow_firmware}, "
                      f"wifi_mode={wifi_mode}, rebuild_wifi_driver={rebuild_wifi_driver}, "
+                     f"pause_windows_update={pause_windows_update}, "
                      f"keep_packages={len(keep_packages or [])} db)")
         if self.target_os_path:
             self.emit('toast', {'message': 'Az 1 kattintásos fix csak az Élő (jelenlegi) rendszeren futtatható le biztonságosan!', 'type': 'error'})
@@ -1971,12 +2006,16 @@ class GuiAutofixMixin:
                 allow_fw = getattr(self, 'allow_firmware_updates', False)
                 wifi = getattr(self, 'wifi_mode', False)
                 rebuild_wifi = getattr(self, 'rebuild_wifi_driver', False)
+                # Itt a TILTÁS utazik jelzőként (alapértelmezés: szüneteltetünk), ezért
+                # negálva olvassuk vissza - lásd GuiBaseMixin.__init__: self.no_wu_pause.
+                wu_pause = not getattr(self, 'no_wu_pause', False)
             else:
                 skip_printers = skip_printer_drivers
                 allow_storage = bool(allow_storage_drivers)
                 allow_fw = bool(allow_firmware)
                 wifi = bool(wifi_mode)
                 rebuild_wifi = bool(rebuild_wifi_driver)
+                wu_pause = bool(pause_windows_update)
             # A belépési log a JS-paramétert írja ki, ami a resume lábakon a frontend
             # ALAPÉRTÉKE (mindig True), nem a felhasználó választása - egy nyomtató-panasz
             # kivizsgálásánál pont ez a mező vinne félre. Ezért a FELOLDOTT értéket is
@@ -2001,8 +2040,11 @@ class GuiAutofixMixin:
             self._autofix_skip_printers = skip_printers
             self._autofix_allow_storage = allow_storage
             self._autofix_allow_firmware = allow_fw
+            logging.info(f"[AUTOFIX] Záró Windows Update-szüneteltetés (~10 év): {wu_pause} "
+                         f"(forrás: {'sys.argv --no-wu-pause' if (is_resume_step1 or is_resume_mode) else 'GUI dialógus'})")
             self._autofix_wifi_mode = wifi
             self._autofix_rebuild_wifi = bool(rebuild_wifi) and wifi
+            self._autofix_wu_pause = wu_pause
 
             task_title = '1 Katt. Fix (RESTART UTÁNI LÁNC FOLYTATÁSA!)' if (is_resume_mode or is_resume_step1) else '1 Kattintásos Driver Javítás és Frissítés'
             self.emit('task_start', {'task': 'autofix', 'title': task_title})
@@ -2293,6 +2335,42 @@ class GuiAutofixMixin:
                 # után tud rendesen felmenni (ez volt a ~20 perces, 8 hamis hibás terepi eset).
                 reboot_needed = getattr(self, '_autofix_reboot_pending', False)
                 should_chain = installed_count > 0 or reboot_needed
+
+                # ================================================================
+                # ZÁRÓ ÜLEPÍTŐ ÚJRAINDÍTÁS (2026-08-25, terepen bizonyított)
+                #
+                # A lánc eddig az UTOLSÓ telepítő láb végén, ÚJRAINDÍTÁS NÉLKÜL zárult:
+                # kiírta a "kész"-t, és a gép abban a félig leülepedett állapotban maradt,
+                # amiben az utolsó driver-telepítés hagyta. A záró egészség-jelentés is
+                # EBBEN az állapotban készült, tehát arról a gépről szólt, ami még nem
+                # állt össze.
+                #
+                # TEREPI ESET (ThinkPad T580, 2026-08-24): a fix hibátlanul feltette a
+                # gyári Synaptics UltraNav drivert (a Windows saját setupapi.dev.log-ja
+                # igazolja: `Strong Name=oem17.inf:...:19.3.4.228:acpi\len009b`, majd
+                # `Start:`), a technikus mégis működésképtelen tapipad-gombokat kapott
+                # kézbe, és jogosan hitte, hogy a program rontotta el. A gép ezután
+                # ÉRINTETLENÜL, pusztán egy későbbi indítástól rendbe jött - vagyis egyetlen
+                # boot hiányzott neki. A driverekkel semmi baj nem volt.
+                #
+                # Ez közvetlenül sérti az elfogadási kritériumot (CLAUDE.md): a szerelő
+                # elmegy kávézni, és KÉSZ gépet kell találnia - nem olyat, ami még egy
+                # újraindításra vár. Ezért a lánc a lezárás előtt még EGYSZER újraindul,
+                # és a takarítás + a záró jelentés már a leülepedett gépen fut.
+                #
+                # NEM TUD VÉGTELEN CIKLUST OKOZNI: a jelző a lánc-állapotban (autofix_stats.json)
+                # él, ami túléli az újraindítást és a lánc elején törlődik - tehát pontosan
+                # EGY plusz újraindítás lehet belőle. A visszatérő láb `settle_done`-t lát,
+                # és egyenesen a lezárásra megy.
+                settle_done = bool(self._autofix_stats_get('settle_done'))
+                if not should_chain and not settle_done:
+                    self._autofix_stats_set('settle_done', True)
+                    logging.info("[AUTOFIX] Záró ülepítő újraindítás: a lezárás és a jelentés a "
+                                 "friss boot utáni, végleges állapoton fut le.")
+                    self.emit('task_progress', {'task': 'autofix', 'log': '\n🔄 Minden driver fent van. Egy utolsó újraindítás következik, hogy az eszközök véglegesen a helyükre álljanak - utána a gép KÉSZ.'})
+                    self._schedule_autofix_resume('--resume-autofix')
+                    self._reboot_or_cancel('Záró újraindulás felkészítve...')
+                    return
                 # A "MINDEN LÉPÉS KÉSZ" CSAK akkor igaz, ha nem jön még egy láb. Korábban
                 # a kör végén mindig kiment, majd közvetlenül utána a gép újraindult -
                 # a felhasználó felé ez befejezett folyamat + váratlan reboot volt.
@@ -2384,6 +2462,30 @@ class GuiAutofixMixin:
                         logging.debug(f"[AUTOFIX] Store App sync error: {e}")
                         self.emit('task_progress', {'task': 'autofix', 'log': 'ℹ️ A Store-szinkront nem sikerült elindítani (nem kritikus, a driverek fent vannak).'})
                     
+                    # ZÁRÓ WINDOWS UPDATE-ÁLLAPOT (a fix indításakor bepipálható választás).
+                    # A lánc ALATT a WU mindenképp szüneteltetve van - enélkül a Windows a
+                    # lábak között a hátunk mögött telepítene drivereket, és pont az általunk
+                    # felrakott, koherens készletet írná felül. A kérdés csak az, hogy a gépet
+                    # MILYEN állapotban adjuk vissza. Bepipálva marad a ~10 éves szünet (ez a
+                    # bolt alapértelmezése); kipipálatlanul itt oldjuk fel, hogy az ügyfél a
+                    # megszokott, frissülő Windowst kapja vissza.
+                    if getattr(self, '_autofix_wu_pause', True):
+                        self.emit('task_progress', {'task': 'autofix', 'log': 'ℹ️ A Windows Update szüneteltetve marad (~10 év) - a Beállítások > Windows Update alatt egy kattintással folytatható.'})
+                        logging.info("[AUTOFIX] Záró WU-állapot: SZÜNETELTETVE marad (a dialóguson bepipálva).")
+                    else:
+                        self.emit('task_progress', {'task': 'autofix', 'log': '\n▶️ Windows Update szüneteltetésének feloldása (a fix indításakor így kérted)...'})
+                        try:
+                            wusettings_core.resume_wu(
+                                self._run,
+                                lambda m: self.emit('task_progress', {'task': 'autofix', 'log': m}))
+                            logging.info("[AUTOFIX] Záró WU-állapot: FELOLDVA (a dialóguson nem volt bepipálva).")
+                        except Exception as e:
+                            # Nem kritikus: a driverek fent vannak. De ki KELL mondani, mert a
+                            # gép ilyenkor szüneteltetett WU-val megy vissza az ügyfélhez -
+                            # néma eltérés a felhasználó választásától nem maradhat.
+                            logging.warning(f"[AUTOFIX] A WU szüneteltetés feloldása nem sikerült: {e}")
+                            self.emit('task_progress', {'task': 'autofix', 'log': '⚠️ A Windows Update szüneteltetését nem sikerült feloldani - a Beállítások > Windows Update alatt kézzel folytatható.'})
+
                     try:
                         self.emit('task_progress', {'task': 'autofix', 'log': '\nA FOLYAMAT SIKERESEN BEFEJEZŐDÖTT!'})
                     except Exception as e:

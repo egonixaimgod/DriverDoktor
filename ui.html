@@ -1272,6 +1272,11 @@ td input[type="checkbox"]{accent-color:var(--accent);width:16px;height:16px;curs
         <span class="toggle-track"></span>
         ⚡ Firmware-frissítések (UEFI/BIOS, SSD, TPM) is – VISSZAFORDÍTHATATLAN!
       </label>
+      <label class="toggle" id="mc-wu-pause-row" style="display:none;margin-top:10px" title="Alapból BE. A fix a végén ~10 évre SZÜNETELTETI a Windows Update-et, hogy a most felrakott, koherens driverkészletet a Windows pár nap múlva ne írja felül. Ez szüneteltetés, nem letiltás: az ügyfél a Beállítások > Windows Update alatt egy kattintással folytathatja, és a biztonsági frissítések sincsenek véglegesen elvágva. Kikapcsolva a gép a megszokott, magától frissülő Windows Update-tel megy vissza. A fix ALATT a WU mindenképp szünetel - enélkül a Windows a lábak között a hátunk mögött telepítene drivereket.">
+        <input type="checkbox" id="mc-wu-pause" checked>
+        <span class="toggle-track"></span>
+        ⏸️ Windows Update szüneteltetése a végén (~10 év) – hogy ne írja felül a friss drivereket
+      </label>
       <div id="mc-note-row" style="display:none;margin-top:14px">
         <textarea id="mc-note-input" rows="3" placeholder="Pl.: időszakos fagyás játék közben, gyanús kattogó hang a gépből..." style="width:100%;padding:10px 12px;border-radius:var(--r-sm);border:1px solid var(--glass-border);background:rgba(20,12,38,0.6);color:var(--text);font:13px var(--font);resize:vertical"></textarea>
       </div>
@@ -2628,6 +2633,9 @@ async function startAutoFix(skipConfirm = false) {
   let wifiMode = false;
   // Resume lábon a Python sys.argv-ből olvassa vissza; itt csak alapérték kell.
   let rebuildWifi = true;
+  // Alapértelmezés: BE (a bolt gyakorlata). Resume lábon a Python a sys.argv-ből olvassa
+  // vissza (--no-wu-pause), itt csak az első láb alapértéke kell.
+  let wuPause = true;
   let keepPackages = [];
   if (!ok) {
     const res = await showAutoFixConfirm('1 Kattintásos Driver Fix', 'Megerősíted a teljes automatikus javítás (visszaállítási pont, driver törlés és újratelepítés) indítását?');
@@ -2637,13 +2645,14 @@ async function startAutoFix(skipConfirm = false) {
     allowFirmware = res.allowFirmware;
     wifiMode = res.wifiMode;
     rebuildWifi = res.rebuildWifi !== false;
+    wuPause = res.wuPause !== false;
     keepPackages = res.keepPackages || [];
   }
   if (ok) {
     document.getElementById('btn-autofix').disabled = true;
     document.getElementById('btn-autofix').textContent = '⏳ FOLYAMATBAN...';
     try {
-      await api().run_autofix(skipPrinters, allowStorage, allowFirmware, wifiMode, keepPackages, rebuildWifi);
+      await api().run_autofix(skipPrinters, allowStorage, allowFirmware, wifiMode, keepPackages, rebuildWifi, wuPause);
     } catch (e) {
       toast('Autofix hiba: ' + e, 'error');
       document.getElementById('btn-autofix').disabled = false;
@@ -3604,8 +3613,11 @@ function renderDeletePreview() {
 // A dialógus vezérlőinek engedélyezése/tiltása az elemzés idejére.
 function delSetLoading(on) {
   delLoading = on;
+  // A WU-szüneteltetés kapcsolója is ide tartozik. Nem a törlési előnézetre hat (arra
+  // semmilyen hatása nincs), de amíg az elemzés fut, az Igen gomb úgyis tiltott - egyetlen
+  // aktív kapcsoló a kiszürkült oszlopban hibának látszana.
   const ids = ['mc-wifi-mode', 'mc-rebuild-wifi', 'mc-skip-printers', 'mc-allow-storage',
-               'mc-allow-firmware', 'mc-del-search', 'mc-del-all', 'mc-del-none'];
+               'mc-allow-firmware', 'mc-wu-pause', 'mc-del-search', 'mc-del-all', 'mc-del-none'];
   ids.forEach(id => { const el = document.getElementById(id); if (el) el.disabled = on; });
   // A Wi-Fi újraépítés kapcsolója vezetékes gépen amúgy is tiltott marad - a
   // syncRebuildWifi() dönt róla, ezért az elemzés végén ŐT kérdezzük újra, nem itt.
@@ -3641,11 +3653,13 @@ function showAutoFixConfirm(title, message) {
       // Vezetékes gépen a kapcsoló nem is látszik (helyette magyarázó sor van), az
       // értéke bekapcsolva marad - a Python úgyis csak Wi-Fi módban veszi figyelembe.
       const rebuildWifi = document.getElementById('mc-rebuild-wifi').checked;
+      const wuPause = document.getElementById('mc-wu-pause').checked;
       // Amit a tech kézzel kivett: csak a NEM zárolt sorok számítanak (a zároltakat
       // úgyis a Python védi, és a kettőt nem szabad összekeverni).
       const keep = delPreview
         .filter(d => !delRowForce(d) && delUnchecked.has((d.published || '').toLowerCase()))
         .map(d => ({ published: d.published, original: d.original }));
+      document.getElementById('mc-wu-pause-row').style.display = 'none';
       document.getElementById('mc-wifi-mode-row').style.display = 'none';
       document.getElementById('mc-rebuild-wifi-row').style.display = 'none';
       document.getElementById('mc-rebuild-wifi-info').style.display = 'none';
@@ -3654,7 +3668,7 @@ function showAutoFixConfirm(title, message) {
       document.getElementById('mc-allow-firmware-row').style.display = 'none';
       document.getElementById('mc-del-panel').style.display = 'none';
       document.getElementById('mc-box').style.maxWidth = '480px';
-      resolve({ ok: val, skipPrinters: skip, allowStorage: storage, allowFirmware: firmware, wifiMode: wifi, rebuildWifi: rebuildWifi, keepPackages: keep });
+      resolve({ ok: val, skipPrinters: skip, allowStorage: storage, allowFirmware: firmware, wifiMode: wifi, rebuildWifi: rebuildWifi, wuPause: wuPause, keepPackages: keep });
     };
     document.getElementById('mc-title').textContent = title;
     document.getElementById('mc-message').textContent = message;
@@ -3668,6 +3682,12 @@ function showAutoFixConfirm(title, message) {
     document.getElementById('mc-allow-storage-row').style.display = 'flex';
     document.getElementById('mc-allow-firmware').checked = false;
     document.getElementById('mc-allow-firmware-row').style.display = 'flex';
+    // WU-SZÜNETELTETÉS: a tároló/firmware kapcsolókkal ellentétben ez ALAPÉRTELMEZÉSBEN BE
+    // van kapcsolva, és minden nyitáskor vissza is áll bekapcsolt állapotba. Ez a bolt
+    // alapértelmezett gyakorlata (a frissen felrakott driverkészletet ne írja felül a WU
+    // pár nap múlva), a kikapcsolás a tudatos eltérés - nem fordítva.
+    document.getElementById('mc-wu-pause').checked = true;
+    document.getElementById('mc-wu-pause-row').style.display = 'flex';
     // WI-FI MÓD: a dialógus AZONNAL megjelenik (a hálózat-felismerés PowerShell-hívás,
     // pár másodperc), a pipa és a magyarázó sor utólag frissül. Alapból kikapcsolva
     // nyílik, és csak akkor kapcsol be magától, ha a gép TÉNYLEG Wi-Fin lóg és nincs
