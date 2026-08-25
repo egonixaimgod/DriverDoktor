@@ -27,6 +27,16 @@ soha többé ne kelljen hozzányúlni a vashoz.
 EZ NEM A TILTOTT "mentsük el a régi drivert és rakjuk vissza" MINTA (lásd CLAUDE.md):
 itt a lánc által MOST telepített, a DriverStore-ban ott lévő csomag telepítését fejezzük
 be. Semmit nem konzerválunk a gép fix előtti állapotából.
+
+A KÖR TERJEDELME (explicit user decision, 2026-08-25): MINDEN alapdriveres eszköz, kivéve
+a tárolót/firmware-t és a rendszerlemez eszközláncát - lásd REBIND_BLOCKED_CLASSES. A
+korábbi osztály-FEHÉRLISTA ugyanabba a hibába esett, amit a CLAUDE.md a generic-replace
+osztálylistáinál már egyszer megírt: egy eszköz azért nem kapta meg a gépen MÁR OTT LÉVŐ
+gyári drivert, mert az osztálya nem volt felsorolva (kimaradt pl. a videokártya és a
+kártyaolvasó is). Az ár, amit ezért cserébe kezelni kell: a kör az USB-vezérlőt és a
+HID-eszközöket is érinti, tehát a billentyűzet/egér a kör után halott lehet - ezért kéri a
+felület ELŐRE a hozzájárulást, és ezért indul újra a gép magától a végén
+(_rebind_finish_reboot).
 """
 import os
 import time
@@ -44,33 +54,50 @@ from app.wu_core import _read_text_best_effort
 from app.wu_core import driverstore_package_inf
 from app.wu_core import STORAGE_RISK_CLASSES
 from app.wu_core import FIRMWARE_RISK_CLASSES
+from app.wu_core import _collect_boot_path_protection
 
 # A PnP-nek kell pár másodperc, mire az újraenumerálás után rákötötte a drivert.
 REBIND_SETTLE_SECONDS = 5
 
-# CSAK EZEKET AZ OSZTÁLYOKAT ENUMERÁLJUK ÚJRA - fehérlista, nem feketelista.
+# Visszaszámlálás a kör végi automatikus újraindításig (lásd _rebind_finish_reboot).
+REBIND_REBOOT_GRACE_SECONDS = 10
+
+# MINDEN ÚJRAENUMERÁLHATÓ, KIVÉVE A TÁROLÓT ÉS A FIRMWARE-T (explicit user decision,
+# 2026-08-25): "mindent rúgjon meg ami nem boot kritikus... ha van gyári driver akkor
+# inkább az legyen fent mint az inbox, kivéve a vezérlő és a firmware".
 #
-# Terepen (T580, Build 274) a "minden gyártó-kódos, alapdriveres eszköz" szabály 21
-# eszközt jelölt ki, köztük olyanokat, amikhez semmi közünk és amiknek a csomópontját
-# kiszedni egyenesen veszélyes:
-#     Platformmegbízhatósági modul 2.0 [SecurityDevices]   <- TPM (BitLocker!)
-#     Lefelé irányuló PCI Express-kapcsolóport [System]     <- PCIe port, mögötte eszközök
-#     xHCI-kompatibilis USB-állomásvezérlő [USB]            <- az EGÉSZ USB egy időre
-#     USB-gyökérhub x2, ACPI processzorösszesítő, tápadapter, Intel energiaellátási modul
-# Ezek mind a Windows saját busz-/infrastruktúra-driverén futnak, és ez a HELYES állapot -
-# gyári driver nem is létezik hozzájuk. A felhasználó tünete (tapipad, gombok, hang, háló)
-# egyik esetben sem ezekből jön.
+# Ez a projekt általános szabályának a folytatása (CLAUDE.md): a kizárás csak az lehet,
+# amit a felhasználó tilt le, illetve ami nem hardver. A korábbi FEHÉRLISTA
+# (egér/HID/billentyű/hang/háló/kamera/monitor) ugyanabba a hibába esett, mint a
+# generic-replace osztálylistái: egy kártyaolvasó, egy chipset-eszköz vagy egy alapdriveren
+# ragadt VIDEOKÁRTYA azért nem kapta meg a gépen MÁR OTT LÉVŐ gyári drivert, mert az
+# osztálya nem volt felsorolva.
 #
-# A fehérlistán csak olyan osztály van, ahol (a) létezhet gyári driver, és (b) a csomópont
-# pár másodperces eltűnése ártalmatlan. Ha egy jövőbeli eset új osztályt igényel, ide kell
-# felvenni - és leírni, miért biztonságos.
-REBIND_ALLOWED_CLASSES = {
-    'MOUSE', 'HIDCLASS', 'KEYBOARD',        # a fő eset: tapipad, TrackPoint, billentyűzet
-    'MEDIA',                                # hangkártya / hang-kodek
-    'NET', 'BLUETOOTH',                     # hálózat
-    'CAMERA', 'IMAGE', 'BIOMETRIC',         # kamera, szkenner, ujjlenyomat
-    'SMARTCARDREADER', 'MONITOR',
-}
+# MI MARAD KI, ÉS MIÉRT:
+#   1) tároló + firmware osztályok (lent): a csomópont pár másodperces eltűnése a FUTÓ
+#      rendszert viheti el, a firmware-nél pedig eleve nem driver-cseréről van szó;
+#   2) a rendszerlemezt hordozó TELJES eszközlánc, osztálytól függetlenül - lásd
+#      _rebind_candidates. Az osztály-tiltás ezt NEM fedi le: a dev gépen a lánc
+#      `WD Blue SN580 [DiskDrive] -> NVMe vezérlő [SCSIAdapter] -> PCI Express Root Port
+#      [System] -> Root Complex [System] -> ACPI [System]`, tehát a boot NVMe alatti PCIe
+#      port System osztályú, és a puszta osztálylista alapján kirúgható lenne;
+#   3) típuskódos azonosítójú eszköz (rendszeridőzítő, PCI-híd): ehhez gyári csomag nem
+#      létezhet, tehát az újraenumerálás garantáltan ugyanazt az inbox drivert hozná
+#      vissza - csak időbe és fölösleges kockázatba kerülne.
+#
+# AMI TUDATOSAN BENNE MARADT, pedig a Build 274-es futásnál gyanús volt: TPM, USB-vezérlő
+# és -gyökérhub, PCIe portok, processzorösszesítő. Ezek a Windows saját busz-driverén
+# futnak, ott is maradnak (nincs jobb csomag), a csomópont-eltávolítás pedig nem törli a
+# TPM tartalmát (az a `tpm.msc` Clear, nem ez), csak újrafelderítteti az eszközt. A
+# gyakorlati ár: az USB-vezérlő kirúgásakor a billentyűzet/egér az újraindításig nem
+# működik - ezért mondja ki a felület, hogy ÚJRAINDÍTÁS KELL, és ezért ajánlja fel egyből.
+REBIND_BLOCKED_CLASSES = set(STORAGE_RISK_CLASSES) | set(FIRMWARE_RISK_CLASSES)
+
+# FAIL-SAFE: ha a rendszerlemez eszközláncát NEM sikerült felderíteni, a busz-/
+# infrastruktúra-osztályokat is kihagyjuk, mert pont ezek visznek a boot-eszközhöz
+# (PCIe port, root complex, ACPI csomópont). Ugyanaz az elv, mint a törlési fázis
+# BOOT_FALLBACK_PROTECT_CLASSES ága: bizonytalanságban az óvatos ág.
+REBIND_BOOT_FALLBACK_CLASSES = {'SYSTEM', 'COMPUTER'}
 
 # A GYÁRTÓT ÉS AZ ESZKÖZT azonosító tokenek. Ezeknek KELL egyezniük ahhoz, hogy két
 # hardver-azonosítót ugyanarra az eszközre vonatkozónak tekintsünk. A SUBSYS/REV/COL/MI
@@ -176,7 +203,30 @@ class GuiRebindMixin:
         info = (self._get_installed_driver_info() or {}).get(pnp) or {}
         return bool(info) and not _is_inbox_driver(info)
 
-    def _rebind_candidates(self, devices, inst):
+    def _rebind_boot_chain_ids(self):
+        """A rendszerlemezt hordozó eszközlánc PnP-azonosítói (nagybetűsen).
+
+        Ugyanaz a felderítés, amit a törlési fázis is használ (`_collect_boot_path_protection`),
+        csak itt nem az INF-ek, hanem maguk az ESZKÖZÖK kellenek: ezeknek a csomópontját
+        nem szedjük ki. Az osztály-tiltás erre nem elég - a boot-lánc felső fele System
+        osztályú (PCIe port, root complex, ACPI).
+
+        Ha a felderítés nem sikerül, ÜRES helyett None-t adunk vissza, és a hívó ilyenkor
+        fail-safe módon a tároló-osztályok mellett a busz-osztályokat is békén hagyja.
+        Ugyanaz a logika, mint a törlésnél: egy nem bootoló gép visszafordíthatatlan."""
+        try:
+            _infs, chain, detected = _collect_boot_path_protection(self._run)
+        except Exception as e:
+            logging.warning(f"[REBIND] A boot-lánc felderítése hibára futott: {e}")
+            return None
+        if not detected:
+            return None
+        ids = {str(c.get('Id') or '').strip().upper() for c in (chain or []) if c.get('Id')}
+        logging.info(f"[REBIND] A rendszerlemez eszközlánca ({len(ids)} eszköz) ki van zárva "
+                     f"az újraenumerálásból: {sorted(ids)}")
+        return ids
+
+    def _rebind_candidates(self, devices, inst, boot_ids=None):
         """Mely eszközöket érdemes újra felderíttetni a Windowszal?
 
         MIÉRT NEM AZ INF-EKBŐL DOLGOZUNK (élő méréssel bizonyítva a T580 lemezén):
@@ -193,25 +243,64 @@ class GuiRebindMixin:
         rosszabb állapotot előidézni: ha nincs jobb driver, ugyanazt az alapdrivert köti
         vissza, mint eddig.
 
-        Kiket veszünk be: Windows-ALAPDRIVEREN futó, GYÁRTÓ-KÓDOS azonosítójú eszközök.
-        Kiket nem: tároló/firmware (a csomópont eltűnése a futó rendszert vinné), és a
-        típuskódos azonosítójú eszközök (rendszeridőzítő, PCI-híd - ezekhez gyári driver
-        nem is létezik, felesleges bolygatni őket)."""
+        Kiket veszünk be: Windows-ALAPDRIVEREN futó, GYÁRTÓ-KÓDOS azonosítójú eszközök -
+        osztálytól FÜGGETLENÜL (explicit user decision, 2026-08-25).
+        Kiket nem: tároló/firmware osztály, a rendszerlemez eszközlánca, és a típuskódos
+        azonosítójú eszközök. Az indoklás a REBIND_BLOCKED_CLASSES-nél.
+
+        `boot_ids`: a boot-lánc eszköz-azonosítói; None = a felderítés nem sikerült,
+        ilyenkor fail-safe módon a busz-osztályokat is kihagyjuk (egy nem bootoló gép
+        visszafordíthatatlan, egy inbox driveren maradt PCIe port nem az)."""
         out = []
+        dropped = {}
         for d in devices or []:
             info = inst.get(d.get('pnp_id') or '')
             if not info or not _is_inbox_driver(info):
                 continue                      # gyári driveren fut - nincs dolgunk vele
             cls = (d.get('pclass') or '').strip().upper()
-            if cls not in REBIND_ALLOWED_CLASSES:
-                continue                      # lásd a REBIND_ALLOWED_CLASSES indoklását
-            if cls in STORAGE_RISK_CLASSES or cls in FIRMWARE_RISK_CLASSES:
+            if cls in REBIND_BLOCKED_CLASSES:
+                dropped['tároló/firmware'] = dropped.get('tároló/firmware', 0) + 1
+                continue
+            if boot_ids is None and cls in REBIND_BOOT_FALLBACK_CLASSES:
+                dropped['boot-lánc ismeretlen (fail-safe)'] = dropped.get('boot-lánc ismeretlen (fail-safe)', 0) + 1
+                continue
+            if boot_ids and (d.get('pnp_id') or '').strip().upper() in boot_ids:
+                dropped['a rendszerlemez láncán van'] = dropped.get('a rendszerlemez láncán van', 0) + 1
+                logging.info(f"[REBIND] Kihagyva (rendszerlemez lánca): {d.get('name')} [{cls}]")
                 continue
             hwids = [h for h in (d.get('all_hwids') or []) if h and is_specific_hwid(h)]
             if not hwids:
-                continue                      # típuskódos: gyári driver nem létezik hozzá
+                dropped['csak típuskódos azonosító'] = dropped.get('csak típuskódos azonosító', 0) + 1
+                continue
             out.append((d, info))
+        # Egy összegző sor - a terepi kérdés ("miért nem rúgta meg X-et?") csak ebből
+        # válaszolható meg, viszont eszközönként naplózni már zajos lenne (lásd Rule 0).
+        if dropped:
+            logging.info("[REBIND] Alapdriveres eszközök kizárva az újraenumerálásból: "
+                         + ", ".join(f"{k}={v}" for k, v in sorted(dropped.items())))
         return out
+
+    def _rebind_pkg_ids(self, orig_inf):
+        """(INF útvonala, a benne szereplő hardver-azonosítók) egy stage-elt csomaghoz.
+
+        Futásonként cache-el (`_rebind_pkg_cache`), mert ugyanazt a néhány INF-et minden
+        egyes eszköz-jelölt újra beolvastatná. A cache-t a kör indulása üríti, hogy egy
+        közben települt csomag ne maradjon ki."""
+        cache = getattr(self, '_rebind_pkg_cache', None)
+        if cache is None:
+            cache = self._rebind_pkg_cache = {}
+        if orig_inf in cache:
+            return cache[orig_inf]
+        path = driverstore_package_inf(orig_inf)
+        ids = []
+        if path:
+            try:
+                ids = extract_inf_hardware_ids(_read_text_best_effort(path))
+            except Exception as e:
+                logging.debug(f"[REBIND] A(z) {orig_inf} INF nem olvasható: {e}")
+                path = None
+        cache[orig_inf] = (path, ids)
+        return path, ids
 
     def _staged_vendor_inf_for(self, dev, third_party):
         """Van-e a DriverStore-ban olyan STAGE-ELT gyári csomag, ami EZT az eszközt állítja?
@@ -237,7 +326,12 @@ class GuiRebindMixin:
              tokenek mind egyeznek. Így a `SUBSYS`/`REV` eltérés még belefér, egy másik
              gyártó csomagja viszont nem.
 
-        Visszatérés: (INF útvonala, eredeti INF-név) vagy (None, '')."""
+        Visszatérés: (INF útvonala, eredeti INF-név) vagy (None, '').
+
+        A csomagok INF-jeit CSOMAGONKÉNT EGYSZER olvassuk be (`_rebind_pkg_ids`): mióta a
+        kör minden alapdriveres eszközre kiterjed, ez a metódus eszközönként fut le, és
+        cache nélkül a beolvasás a jelöltek számával szorzódna (a dev gépen 62 jelölt x 19
+        csomag = ~1200 fájlbeolvasás ugyanabból a néhány INF-ből)."""
         hwids = [h for h in (dev.get('all_hwids') or []) if h and is_specific_hwid(h)]
         if not hwids:
             return None, ''
@@ -245,12 +339,8 @@ class GuiRebindMixin:
             orig = (pkg.get('original') or '').strip()
             if not orig:
                 continue
-            path = driverstore_package_inf(orig)
+            path, ids = self._rebind_pkg_ids(orig)
             if not path:
-                continue
-            try:
-                ids = extract_inf_hardware_ids(_read_text_best_effort(path))
-            except Exception:
                 continue
             for inf_id in ids:
                 if not is_specific_hwid(inf_id):
@@ -262,14 +352,94 @@ class GuiRebindMixin:
         return None, ''
 
     # ------------------------------------------------------------------
+    # A KÖR MAGJA - ezt hívja a KÉZI GOMB és az AUTOFIX ZÁRÓ KÖRE is
+    # ------------------------------------------------------------------
+    def _rebind_sweep(self, task_id):
+        """Minden alapdriveres eszköz újra felderíttetése. Visszatérés: (fixed, failed, pending).
+
+        Csak `task_progress`-t emittál - a `task_start`/`task_complete`/újraindítás a hívóé,
+        mert a gomb és a lánc ezekben különbözik (a gomb saját taskként fut és a végén
+        magától újraindít, a lánc az 'autofix' csatornán jelent és a saját ütemezett
+        újraindítását használja). A DÖNTÉSI LOGIKA viszont közös - ha két példányban élne,
+        a gomb és a lánc előbb-utóbb más eszközöket kötne újra, és a terepi jelentésből
+        nem lehetne megmondani, melyik futott."""
+        fixed, failed, pending = 0, [], []
+        self._rebind_pkg_cache = {}           # friss kör = friss INF-olvasás
+        self.emit('task_progress', {'task': task_id, 'log': 'Eszközök és telepített driverek felmérése...', 'indeterminate': True})
+        res = self._run(["powershell", "-NoProfile", "-Command", WU_PNP_QUERY_PS], encoding='utf-8')
+        devices = _filter_wu_scan_devices(json.loads(res.stdout or '[]'))
+        inst = self._get_installed_driver_info() or {}
+        third_party = [d for d in (self._get_third_party_drivers() or []) if d.get('original')]
+        self.emit('task_progress', {'task': task_id, 'log': f'{len(devices)} eszköz, {len(third_party)} gyári driver-csomag a gépen.'})
+
+        # A rendszerlemez eszközlánca osztálytól függetlenül kimarad (a lánc felső fele
+        # System osztályú, oda az osztály-tiltás nem ér el).
+        boot_ids = self._rebind_boot_chain_ids()
+        candidates = self._rebind_candidates(devices, inst, boot_ids)
+        logging.info(f"[REBIND] {len(candidates)} jelölt: Windows-alapdriveren fut, "
+                     f"gyártó-kódos azonosítóval, nem tároló/firmware, nem a boot-láncon.")
+        for d, info in candidates:
+            logging.info(f"[REBIND]   jelölt: {d.get('name')} [{d.get('pclass')}] "
+                         f"most: {info.get('inf')} ({info.get('provider')})")
+
+        # A csomagot NEM mi választjuk ki (lásd _rebind_candidates indoklását): eltávolítjuk
+        # a csomópontot, és a Windows dönt az újraindítás után. Ha van szigorúan az eszközhöz
+        # köthető stage-elt gyári csomag, azt előbb megpróbáljuk telepíteni - hátha reboot
+        # nélkül is megoldódik. De ez csak gyorsítás, nem feltétel.
+        todo, with_pkg = [], 0
+        for d, info in candidates:
+            path, orig = self._staged_vendor_inf_for(d, third_party)
+            if path:
+                with_pkg += 1
+            todo.append((d, info, path, orig or '(a Windows választ)'))
+        if not todo:
+            self.emit('task_progress', {'task': task_id, 'log': '\n✅ Nincs olyan eszköz, ami Windows-alapdriveren futna és amit érdemes lenne újra felderíttetni.'})
+            return 0, [], []
+
+        # PONTOS SZÖVEG: a lista két külön dolgot tartalmaz, és a régi egymondatos
+        # "N eszközhöz VAN gyári driver a gépen" MINDKETTŐRE ezt állította - akkor is, ha
+        # egyetlen eszközhöz sem volt csomag. A technikus ebből azt olvasta ki, hogy N
+        # drivert fog visszakapni, holott a többségnél a Windows ugyanazt az inbox drivert
+        # köti majd vissza (ami nem hiba, csak nem javulás).
+        self.emit('task_progress', {'task': task_id, 'log': f'\n🔧 {len(todo)} eszköz fut Windows-alapdriveren - újra felderíttetjük őket:'})
+        self.emit('task_progress', {'task': task_id, 'log': f'   • {with_pkg} db: VAN hozzá gyári csomag a gépen, ezt próbáljuk rákötni;'})
+        self.emit('task_progress', {'task': task_id, 'log': f'   • {len(todo) - with_pkg} db: nincs a gépen hozzá gyári csomag - ezeknél a Windows választ újra. Ha nincs jobb, ugyanazt kapja vissza (nem lesz rosszabb).'})
+        for i, (d, info, path, orig) in enumerate(todo, 1):
+            if self._cancel_flag:
+                break
+            name = d.get('name') or d.get('pnp_id')
+            self.emit('task_progress', {'task': task_id, 'log': f'\n({i}/{len(todo)}) {name}\n   most: {info.get("inf")} ({info.get("provider")}) → gyári: {orig}',
+                                        'current': i, 'total': len(todo)})
+            state = self._rebind_device(d.get('pnp_id'), path, name, d.get('pclass'), task_id)
+            if state == 'fixed':
+                fixed += 1
+                after = (self._get_installed_driver_info() or {}).get(d.get('pnp_id')) or {}
+                self.emit('task_progress', {'task': task_id, 'log': f'   ✅ Sikerült - most a gyári driveren fut ({after.get("inf")}).'})
+            elif state == 'needs_reboot':
+                pending.append(name)
+                self.emit('task_progress', {'task': task_id, 'log': '   🔄 Eltávolítva - a Windows az ÚJRAINDÍTÁS után deríti fel újra (ez a lemez visszadugásának megfelelője).'})
+            else:
+                failed.append(name)
+                self.emit('task_progress', {'task': task_id, 'log': '   ❌ Nem sikerült - az eszköz a Windows alapdriverén marad.'})
+        logging.info(f"[REBIND] Kör vége: {fixed} azonnal visszakötve, {len(pending)} újraindításra vár, "
+                     f"{len(failed)} sikertelen.")
+        return fixed, failed, pending
+
+    # ------------------------------------------------------------------
     # KÉZI GOMB
     # ------------------------------------------------------------------
-    def rescan_and_rebind_drivers(self):
-        """KÉZI ÚJRASCANNELÉS: azok az eszközök, amik Windows-alapdriveren futnak, pedig
-        van hozzájuk STAGE-ELT gyári csomag a gépen - ezeket kötjük vissza a gyárira.
+    def rescan_and_rebind_drivers(self, auto_reboot=True):
+        """KÉZI ÚJRASCANNELÉS: MINDEN Windows-alapdriveren futó eszközt újra felderíttetünk
+        a Windowszal - kivéve a tárolót, a firmware-t és a rendszerlemez eszközláncát.
 
-        Ez a gomb arra való, amit a technikus eddig az SSD ki-be pakolásával oldott meg."""
-        logging.info("[API] rescan_and_rebind_drivers() - kézi eszköz-újrakötés")
+        Ez a gomb arra való, amit a technikus eddig az SSD ki-be pakolásával oldott meg.
+        Ha van a gépen az eszközhöz illő gyári csomag, azzal jön vissza; ha nincs, ugyanazt
+        az inbox drivert kapja (nem lesz rosszabb).
+
+        `auto_reboot`: a kör végén magától újraindul-e a gép. Alapból IGEN, mert a kör a
+        beviteli eszközöket (USB-vezérlő, hubok, HID) is érintheti, tehát utána kattintani
+        már nem biztos, hogy lehet - a hozzájárulást a felület előre kéri."""
+        logging.info(f"[API] rescan_and_rebind_drivers(auto_reboot={auto_reboot}) - kézi eszköz-újrakötés")
         if self.target_os_path:
             self.emit('toast', {'message': '❌ Offline módban nem elérhető!', 'type': 'error'})
             return
@@ -277,57 +447,12 @@ class GuiRebindMixin:
         def worker():
             task = 'rebind'
             self.emit('task_start', {'task': task, 'title': 'Eszközök újrakötése a gyári driverekre'})
-            fixed, failed, checked = 0, [], 0
             try:
-                self.emit('task_progress', {'task': task, 'log': 'Eszközök és telepített driverek felmérése...', 'indeterminate': True})
-                res = self._run(["powershell", "-NoProfile", "-Command", WU_PNP_QUERY_PS], encoding='utf-8')
-                devices = _filter_wu_scan_devices(json.loads(res.stdout or '[]'))
-                inst = self._get_installed_driver_info() or {}
-                third_party = [d for d in (self._get_third_party_drivers() or []) if d.get('original')]
-                self.emit('task_progress', {'task': task, 'log': f'{len(devices)} eszköz, {len(third_party)} gyári driver-csomag a gépen.'})
-
-                candidates = self._rebind_candidates(devices, inst)
-                logging.info(f"[REBIND] {len(candidates)} jelölt: Windows-alapdriveren fut, "
-                             f"gyártó-kódos azonosítóval, nem tároló/firmware.")
-                for d, info in candidates:
-                    logging.info(f"[REBIND]   jelölt: {d.get('name')} [{d.get('pclass')}] "
-                                 f"most: {info.get('inf')} ({info.get('provider')})")
-
-                # A csomagot NEM mi választjuk ki (lásd _rebind_candidates indoklását):
-                # eltávolítjuk a csomópontot, és a Windows dönt az újraindítás után. Ha
-                # történetesen van stage-elt gyári csomag, amit szigorúan az eszközhöz
-                # tudunk kötni, azt előbb megpróbáljuk telepíteni - hátha reboot nélkül is
-                # megoldódik. De ez csak gyorsítás, nem feltétel.
-                todo = []
-                for d, info in candidates:
-                    checked += 1
-                    path, orig = self._staged_vendor_inf_for(d, third_party)
-                    todo.append((d, info, path, orig or '(a Windows választ)'))
-                if not todo:
-                    self.emit('task_progress', {'task': task, 'log': '\n✅ Nincs olyan eszköz, ami alapdriveren futna, pedig van hozzá gyári csomag a gépen.'})
+                fixed, failed, pending = self._rebind_sweep(task)
+                if not fixed and not failed and not pending:
                     self.emit('task_progress', {'task': task, 'log': 'Ha valamelyik eszköz mégis rosszul működik, ahhoz a gépen NINCS gyári driver - a "Driver Keresés és Telepítés" menüben kerestethetsz hozzá.'})
                     self.emit('task_complete', {'task': task, 'status': 'Nincs javítanivaló'})
                     return
-
-                self.emit('task_progress', {'task': task, 'log': f'\n🔧 {len(todo)} eszközhöz VAN gyári driver a gépen, mégis alapdriveren fut - visszakötés:'})
-                pending = []
-                for i, (d, info, path, orig) in enumerate(todo, 1):
-                    if self._cancel_flag:
-                        break
-                    name = d.get('name') or d.get('pnp_id')
-                    self.emit('task_progress', {'task': task, 'log': f'\n({i}/{len(todo)}) {name}\n   most: {info.get("inf")} ({info.get("provider")}) → gyári: {orig}',
-                                                'current': i, 'total': len(todo)})
-                    state = self._rebind_device(d.get('pnp_id'), path, name, d.get('pclass'), task)
-                    if state == 'fixed':
-                        fixed += 1
-                        after = (self._get_installed_driver_info() or {}).get(d.get('pnp_id')) or {}
-                        self.emit('task_progress', {'task': task, 'log': f'   ✅ Sikerült - most a gyári driveren fut ({after.get("inf")}).'})
-                    elif state == 'needs_reboot':
-                        pending.append(name)
-                        self.emit('task_progress', {'task': task, 'log': '   🔄 Eltávolítva - a Windows az ÚJRAINDÍTÁS után deríti fel újra (ez a lemez visszadugásának megfelelője).'})
-                    else:
-                        failed.append(name)
-                        self.emit('task_progress', {'task': task, 'log': '   ❌ Nem sikerült - az eszköz a Windows alapdriverén marad.'})
 
                 self.emit('task_progress', {'task': task, 'log': f'\n📊 Kész: {fixed} eszköz azonnal visszakötve.'})
                 if failed:
@@ -345,9 +470,37 @@ class GuiRebindMixin:
                                             'need_reboot': bool(pending)})
                 if pending:
                     time.sleep(1)
-                    self.emit('ask_reboot', None)
+                    self._rebind_finish_reboot(task, auto_reboot)
             except Exception as e:
                 logging.error(f"[REBIND] Hiba a kézi újrakötésben: {e}", exc_info=True)
                 self.emit('task_error', {'task': task, 'error': str(e)})
 
         self._safe_thread('rebind', worker)
+
+    def _rebind_finish_reboot(self, task, auto_reboot):
+        """A sweep utáni újraindítás.
+
+        MIÉRT NEM ELÉG ITT A "Szeretnéd újraindítani?" KÉRDÉS (2026-08-25): amióta a kör
+        minden alapdriveres eszközre kiterjed, a jelöltek közt ott van az USB-állomásvezérlő
+        és a gyökérhubok is - azok csomópontja nélkül pedig A BILLENTYŰZET ÉS AZ EGÉR IS
+        HALOTT az újraindításig. A régi folyamat pont ekkor kérdezett rá egy gombos ablakkal,
+        amire a technikus már nem tudott volna kattintani. A hozzájárulást ezért a felület
+        ELŐRE kéri (lásd ui.html: rebindDrivers), itt már csak visszaszámolunk és megyünk.
+
+        Ha a hívó mégis interaktív módot kért (auto_reboot=False), marad a régi kérdés."""
+        if not auto_reboot:
+            self.emit('ask_reboot', None)
+            return
+        logging.warning("[REBIND] Automatikus újraindítás: a kör beviteli eszközöket is "
+                        "érinthetett, kézi megerősítésre nem lehet számítani.")
+        self.emit('task_progress', {'task': task, 'log': f'\n🔄 A gép {REBIND_REBOOT_GRACE_SECONDS} másodperc múlva ÚJRAINDUL, hogy a Windows felderítse az eszközöket.'})
+        for left in range(REBIND_REBOOT_GRACE_SECONDS, 0, -1):
+            if self._cancel_flag:
+                self.emit('task_progress', {'task': task, 'log': '⏹️ Megszakítva - az újraindítás elmarad. FONTOS: az érintett eszközök addig NEM működnek, amíg kézzel újra nem indítod a gépet!'})
+                logging.warning("[REBIND] Az automatikus újraindítást a felhasználó megszakította.")
+                return
+            if left % 5 == 0 or left <= 3:
+                self.emit('task_progress', {'task': task, 'log': f'   {left}...'})
+            time.sleep(1)
+        logging.warning("[REBIND] Újraindítás: shutdown /r /t 0 /f")
+        self._run(['shutdown', '/r', '/t', '0', '/f'])

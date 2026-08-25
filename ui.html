@@ -619,7 +619,7 @@ td input[type="checkbox"]{accent-color:var(--accent);width:16px;height:16px;curs
                  fix után ITT áll, és a tünet (szaggató tapipad, nem működő gombok) ilyenkor
                  derül ki - ne kelljen másik menüpontot keresnie hozzá. -->
             <button class="btn btn-sm" onclick="rebindDrivers()" style="justify-content:center"
-                    title="Nem tölt le semmit. Azokat az eszközöket köti vissza a MÁR FENT LÉVŐ gyári driverre, amik a Windows általános driverén ragadtak. Erre akkor van szükség, ha egy driver felment, de az eszköz nem indult el rajta - ilyenkor a Windows némán visszaesik a sajátjára, hibakód nélkül. Tipikus tünet: szaggató/ugráló tapipad, nem működő extra gombok.">🔄 Eszközök újrakötése a gyári driverre</button>
+                    title="Nem tölt le semmit. MINDEN eszközt újra felderíttet a Windowszal, ami a Windows általános driverén fut - kivéve a tárolót, a firmware-t és a rendszerlemez eszközláncát. Ha van a gépen hozzá gyári csomag, azt kapja meg; ha nincs, ugyanazt kapja vissza. Erre akkor van szükség, ha egy driver felment, de az eszköz nem indult el rajta - ilyenkor a Windows némán visszaesik a sajátjára, hibakód nélkül. Tipikus tünet: szaggató/ugráló tapipad, nem működő extra gombok. A végén a gép automatikusan újraindul.">🔄 Eszközök újrakötése a gyári driverre</button>
             <button class="btn btn-sm" onclick="switchView('autofix')" style="justify-content:center" title="A teljes leírás és a Windows Defender figyelmeztetés a menüpont oldalán">ℹ️ Részletek + Defender-figyelmeztetés</button>
           </div>
         </div>
@@ -745,7 +745,7 @@ td input[type="checkbox"]{accent-color:var(--accent);width:16px;height:16px;curs
                a technikus addig csak az SSD ki-be pakolásával tudta megjavítani. -->
           <div style="margin:-2px 0 12px">
             <button class="btn btn-sm" onclick="rebindDrivers()" id="btn-rebind"
-                    title="Nem tölt le semmit. Azokat az eszközöket keresi meg, amik a Windows ÁLTALÁNOS driverén futnak, pedig a gépen ott van hozzájuk a gyári csomag - és visszaköti őket a gyárira (újratelepítés, majd ha kell, az eszköz újraenumerálása). Erre akkor van szükség, ha egy driver felment, de az eszköz nem indult el rajta: ilyenkor a Windows némán visszaesik a saját driverére, hibakód nélkül. Tipikus tünet: szaggató/ugráló tapipad, nem működő extra gombok.">
+                    title="Nem tölt le semmit. MINDEN Windows-alapdriveren futó eszközt újra felderíttet a Windowszal (újratelepítés, majd ha kell, az eszköz újraenumerálása) - kivéve a tárolóvezérlőket, a lemezt, a firmware-t és a rendszerlemez eszközláncát. Ha van a gépen hozzá gyári csomag, azt kapja meg; ha nincs, ugyanazt kapja vissza, rosszabb nem lesz. Erre akkor van szükség, ha egy driver felment, de az eszköz nem indult el rajta: ilyenkor a Windows némán visszaesik a saját driverére, hibakód nélkül. Tipikus tünet: szaggató/ugráló tapipad, nem működő extra gombok. A kör az USB-vezérlőt is érintheti, ezért a végén a gép automatikusan újraindul.">
               🔄 Eszközök újrakötése a gyári driverre (ha valami az alapdriveren ragadt)
             </button>
           </div>
@@ -3348,16 +3348,23 @@ async function openAppDataDir() {
    A backend: app/gui/rebind.py: rescan_and_rebind_drivers(). */
 async function rebindDrivers() {
   const ok = await showConfirm('Eszközök újrakötése',
-    'Megkeresi azokat az eszközöket, amik a Windows ÁLTALÁNOS driverén futnak, pedig a gépen ' +
-    'ott van hozzájuk a gyári csomag - és visszaköti őket a gyárira.\n\n' +
-    'Nem tölt le semmit. A művelet alatt az érintett eszköz (pl. tapipad, egér) pár másodpercre ' +
-    'eltűnhet, majd magától visszajön.\n\nIndulhat?');
+    'Minden olyan eszközt újra felderíttet a Windowszal, ami most a Windows ÁLTALÁNOS ' +
+    'driverén fut. Ha van hozzá gyári csomag a gépen, azt fogja megkapni; ha nincs, ' +
+    'ugyanazt kapja vissza - rosszabb nem lesz tőle.\n\n' +
+    'NEM nyúl hozzá: a tárolóvezérlőkhöz, a lemezhez, a firmware-hez és a rendszerlemez ' +
+    'eszközláncához.\n\n' +
+    '❗ A kör az USB-vezérlőt és a HID-eszközöket is érintheti, ezért a billentyűzet és az ' +
+    'egér közben leállhat. Emiatt a gép a végén AUTOMATIKUSAN ÚJRAINDUL (10 mp visszaszámlálás ' +
+    'után) - a Windows ekkor deríti fel újra az eszközöket. Zárj be mindent, amiben ' +
+    'mentetlen munkád van.\n\nIndulhat?');
   if (!ok) return;
   const btn = document.getElementById('btn-rebind');
   if (btn) { btn.disabled = true; btn.textContent = '⏳ Újrakötés folyamatban...'; }
   showProgressModal('Eszközök újrakötése a gyári driverekre', '');
   try {
-    await api().rescan_and_rebind_drivers();
+    /* auto_reboot=true: a hozzájárulás a fenti ablakban megvan, és a kör után a
+       billentyűzet/egér már nem biztos, hogy él - lásd rebind.py: _rebind_finish_reboot. */
+    await api().rescan_and_rebind_drivers(true);
   } catch (e) {
     toast('Újrakötési hiba: ' + e, 'error');
   } finally {

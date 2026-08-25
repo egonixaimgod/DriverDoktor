@@ -112,6 +112,12 @@ AUTOFIX_NET_WAIT_WIRED = 45
 # gyári driver. NEM keresési szűrő (a katalógust minden eszközre megkérdezzük).
 _VENDOR_CODED_RE = re.compile(r'(VEN_|VID_|VEN&|&DEV_)', re.IGNORECASE)
 
+# USB-RE CSATLAKOZÓ PERIFÉRIA azonosítója (`HID\VID_046D&PID_C534`, `USB\VID_1532&PID_00B9`).
+# Egy külső egér/billentyűzet/headset HELYESEN fut a Windows HID-driverén, gyári csomag nem
+# is létezik hozzá - a záró jelentésben ezek csak elfedik az igazi találatokat. A beépített
+# beviteli eszközök (ACPI/I2C tapipad, TrackPoint) sosem ilyen alakúak.
+_USB_PERIPHERAL_HWID_RE = re.compile(r'(VID_|PID_)', re.IGNORECASE)
+
 
 def format_duration_hu(seconds):
     """Másodperc -> olvasható magyar időtartam ('1 óra 12 perc 5 mp')."""
@@ -1445,6 +1451,51 @@ class GuiAutofixMixin:
                      f"{regressed} megmaradt.")
         return fixed, regressed, pending
 
+    def _autofix_closing_rebind(self):
+        """A lánc ZÁRÓ ÚJRAKÖTŐ KÖRE. Visszatérés: újraindulunk-e miatta.
+
+        A kézi gombbal KÖZÖS magot futtatja (`_rebind_sweep`), csak a keretezés más: itt
+        nincs külön task és nincs visszaszámlálós újraindítás, mert a lánc a saját ütemezett
+        lábával indul újra - a technikus nincs a gép mellett, épp ez a lényeg.
+
+        Ha egyetlen csomópontot sem kellett eltávolítani, NEM indítunk újra: a lezárás
+        ugyanebben a lábban megy tovább (fölösleges reboot = fölösleges perc a kávészünetből).
+
+        Hibára SOSEM bukik el a lánc lezárása: ez a kör kényelmi javítás, nem feltétel.
+        Ilyenkor viszont a naplóban WARNING marad, mert a "miért maradt alapdriveren?"
+        kérdésre a záró jelentés önmagában nem adna választ."""
+        try:
+            fixed, failed, pending = self._rebind_sweep('autofix')
+        except Exception as e:
+            logging.warning(f"[AUTOFIX] A záró újrakötő kör hibára futott (nem kritikus): {e}", exc_info=True)
+            self.emit('task_progress', {'task': 'autofix', 'log': '⚠️ A záró újrakötő kör nem futott le teljesen - a driverek ettől még fent vannak.'})
+            return False
+
+        if fixed:
+            self.emit('task_progress', {'task': 'autofix', 'log': f'✅ {fixed} eszköz azonnal átvette a gyári drivert.'})
+        if failed:
+            self.emit('task_progress', {'task': 'autofix', 'log': f'⚠️ {len(failed)} eszközt nem sikerült újra felderíttetni: {", ".join(failed[:6])}'})
+        if not pending:
+            logging.info("[AUTOFIX] A záró újrakötő kör nem igényel újraindítást.")
+            return False
+
+        # A csomópontok már NINCSENEK meg - ezek az eszközök CSAK az újraindítás után
+        # élednek fel. A lánc innen kötelezően újraindul, akkor is, ha a felhasználó közben
+        # a Mégsére nyomott: egy billentyűzet nélkül átadott gép rosszabb, mint egy plusz
+        # reboot. Megszakításkor viszont a lánc NEM folytatódik - a feladatot töröljük, és
+        # a gép csak azért indul újra, hogy az eszközök visszajöjjenek.
+        self.emit('task_progress', {'task': 'autofix', 'log': f'\n🔄 {len(pending)} eszköz csomópontja eltávolítva - a Windows az újraindítás után deríti fel őket újra, ekkor kapják meg a gyári drivert.'})
+        if self._cancel_flag:
+            logging.warning(f"[AUTOFIX] Megszakítás a záró újrakötő körben, de {len(pending)} eszköz "
+                            f"csomópontja már nincs meg - a gép a helyreállásukhoz újraindul, a lánc nem folytatódik.")
+            self.emit('task_progress', {'task': 'autofix', 'log': '⏹️ Leállítás kérve. A gép ettől még újraindul, különben az imént eltávolított eszközök nem működnének - a lánc viszont NEM folytatódik.'})
+            self._run(["powershell", "-NoProfile", "-Command", 'Unregister-ScheduledTask -TaskName "DriverVarazsloResume" -Confirm:$false -ErrorAction SilentlyContinue'], ok_codes=(0, 1))
+            self._run(['shutdown', '/r', '/t', '0', '/f'])
+            return True
+        self._schedule_autofix_resume('--resume-autofix')
+        self._reboot_or_cancel('Záró újrakötés - újraindulás felkészítve...')
+        return True
+
     def _emit_missing_packages(self, pre_packages, task_id='autofix'):
         """A fix ELŐTT meglévő, de a végére VISSZA NEM KERÜLT driver-csomagok kiírása.
 
@@ -1616,8 +1667,17 @@ class GuiAutofixMixin:
         # téves (a Lenovo katalógusában ott az UltraNav csomag). A skip-lista célja az,
         # hogy a gyári driverrel NEM rendelkező eszközöket ne emlegesse (általános USB-egér,
         # PCI-híd, WAN Miniport); egy gyártó-kódos beviteli eszköz nem ilyen.
+        # A KIVÉTEL NEM VONATKOZIK A USB-RE CSATLAKOZÓ PERIFÉRIÁKRA (2026-08-25, mérve).
+        # A `_VENDOR_CODED_RE` a `VID_`-re is illeszkedik, márpedig MINDEN USB-s egér,
+        # billentyűzet és headset ilyen azonosítót visel - a dev gépen ettől 36 soros lett a
+        # jelentés, amiből 34 sor `HID\VID_046D&PID_C534` típusú külső periféria volt, ami
+        # HELYESEN fut a Windows HID-driverén. Ez pont az a "42 sorból 40 zaj" hiba, amit ez
+        # a szűrő megszüntetni hivatott. A kivétel célja a BEÉPÍTETT beviteli eszköz
+        # (`ACPI\VEN_LEN&DEV_009B` tapipad, `ACPI\SYNA30A0` I2C precíziós tapipad), amihez
+        # a gyártó katalógusában valóban van csomag - azok viszont sosem VID_/PID_ alakúak.
         cls = (dev.get('pclass') or '').strip().upper()
-        vendor_coded_input = cls in ('MOUSE', 'HIDCLASS', 'KEYBOARD') and _VENDOR_CODED_RE.search(dev.get('id') or '')
+        vendor_coded_input = (cls in ('MOUSE', 'HIDCLASS', 'KEYBOARD')
+                              and not _USB_PERIPHERAL_HWID_RE.search(dev.get('id') or ''))
         if (inst.get('inf') or '').strip().lower() in HEALTH_REPORT_SKIP_INFS and not vendor_coded_input:
             return False
         return True
@@ -2619,6 +2679,38 @@ class GuiAutofixMixin:
                     self._schedule_autofix_resume('--resume-autofix')
                     self._reboot_or_cancel('Záró újraindulás felkészítve...')
                     return
+
+                # ================================================================
+                # ZÁRÓ ÚJRAKÖTŐ KÖR (2026-08-25, explicit user decision)
+                #
+                # "a lánc végén telibe ez fusson le és csak akkor legyen vége a láncnak ha
+                # ez lefutott... amikor visszajovok a kavezasrol minden hibatlanul mukodjon
+                # a fix utan egybol."
+                #
+                # A _fix_driver_regressions (fent) csak azt kapja el, ami a fix ELŐTT gyári
+                # driveren futott és most alapdriveren van. Ez a kör ennél tágabb: MINDEN
+                # alapdriveres eszközt újra felderíttet a Windowszal, hogy ha van hozzá gyári
+                # csomag a gépen, azt kapja meg. Ugyanaz a mag fut, mint a kézi gombban
+                # (app/gui/rebind.py: _rebind_sweep) - két külön példány előbb-utóbb más
+                # eszközöket érintene, és a terepi naplóból nem lehetne megmondani, melyik
+                # futott.
+                #
+                # A HELYE A LÁNCBAN: a záró ülepítő újraindítás UTÁN, a lezárás ELŐTT. Így
+                # (a) a kör már a leülepedett gépen dönt arról, mi maradt alapdriveren,
+                # (b) az általa eltávolított csomópontok a KÖVETKEZŐ indításkor derülnek fel
+                #     újra (reboot nélkül a /remove-device semmit nem javít - Build 273),
+                # (c) a záró egészség-jelentés és az összefoglaló így már a VÉGLEGES
+                #     állapotról szól, nem egy félig szétszedett gépről.
+                #
+                # NEM TUD VÉGTELEN CIKLUST OKOZNI: a `rebind_done` jelző a lánc-állapotban
+                # él (autofix_stats.json), ami túléli az újraindítást és a lánc elején
+                # törlődik - tehát pontosan EGY plusz újraindítás lehet belőle.
+                if not should_chain and not bool(self._autofix_stats_get('rebind_done')):
+                    self._autofix_stats_set('rebind_done', True)
+                    if self._autofix_closing_rebind():
+                        return      # újraindulunk; a visszatérő láb zárja le a láncot
+                    # Ha nem kellett eltávolítani egy csomópontot sem, nincs mire várni:
+                    # ugyanebben a lábban megyünk tovább a lezárásra.
                 # A "MINDEN LÉPÉS KÉSZ" CSAK akkor igaz, ha nem jön még egy láb. Korábban
                 # a kör végén mindig kiment, majd közvetlenül utána a gép újraindult -
                 # a felhasználó felé ez befejezett folyamat + váratlan reboot volt.

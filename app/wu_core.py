@@ -669,6 +669,10 @@ HEALTH_REPORT_SKIP_INFS = {
     # beviteli eszközök: a gyártók ide SZOFTVERT adnak (Synapse, Logi Options), nem drivert
     'input.inf', 'msmouse.inf', 'keyboard.inf', 'hidserv.inf', 'hidclass.inf',
     'hidusb.inf', 'hidi2c.inf', 'hidbth.inf',
+    # USB-s headset HID-fele (hangerő/némítás gombok). Mérve a dev gépen: a Creative
+    # headset `hidtelephonydriver.inf`-en fut, és e nélkül egyedüli HID-eszközként bent
+    # maradt a záró jelentésben - pedig ez a HELYES driver, gyári alternatíva nincs.
+    'hidtelephonydriver.inf',
     # Microsoft osztály-driverek, amikhez gyári alternatíva nem létezik
     'usbstor.inf', 'cdrom.inf', 'wpdfs.inf', 'wpdmtp.inf',
     # szoftver-eszközök és WAN miniportok: nincs mögöttük fizikai hardver
@@ -715,7 +719,19 @@ HEALTH_REPORT_SKIP_INFS = {
 # hanem az, hogy TÍPUSKÓDDAL nem kérdezünk. Amelyik eszköznek csak ilyen azonosítója van,
 # arra egyszerűen nem lesz találat - ami az őszinte eredmény, hiszen a típuskódos találat
 # eleve más gyártó másik eszközére szólt volna.
-_HWID_VENDOR_TOKEN_RE = re.compile(r'(?:VEN|VID)_?[0-9A-Z]{4}', re.IGNORECASE)
+# A gyártókód HOSSZA 3 VAGY 4 KARAKTER - a 4-re szűkítés némán elrejtette a legfontosabb
+# terepi eszközt (2026-08-25). A PCI/USB azonosítók valóban 4 hexát adnak (VEN_8086,
+# VID_046D), az ACPI-s eszközök viszont a 3 karakteres PnP-gyártókódot viselik:
+#     ACPI\VEN_LEN&DEV_009B   <- A ThinkPad T580 tapipadja, amiért ez az egész funkció van
+#     ACPI\VEN_INT&DEV_34BF
+# Ez a `{4}` miatt NEM SZÁMÍTOTT konkrét azonosítónak, aminek három következménye volt,
+# mind néma: (1) a katalógust sosem kérdeztük meg róla, (2) a záró egészség-jelentésből
+# kimaradt - miközben a CLAUDE.md épp azt írja, hogy a "gyártó-kódos beviteli eszköz"
+# kivétel őt hivatott láthatóvá tenni -, és (3) az újrakötő kör jelöltjei közé sem került
+# be, tehát a tapipadot pont az a funkció hagyta ki, ami miatt megírtuk.
+# A hátsó lezárás `(?![0-9A-Z])` azért kell, hogy a 3-as hossz ne harapjon bele egy 4
+# karakteres kódba (VEN_8086 -> "808" + "6" nem lehet találat két külön tokenként).
+_HWID_VENDOR_TOKEN_RE = re.compile(r'(?:VEN|VID)_?[0-9A-Z]{3,4}(?![0-9A-Z])', re.IGNORECASE)
 _HWID_GENERIC_PNP_RE = re.compile(r'^(?:VEN_PNP&DEV_[0-9A-F]{3,4}|PNP[0-9A-F]{3,4})(?:&.*)?$',
                                   re.IGNORECASE)
 # ACPI gyártókód: 3 betűs gyártó-előtag + hexa modellkód (ACPI\INT3F0D = Intel). A
