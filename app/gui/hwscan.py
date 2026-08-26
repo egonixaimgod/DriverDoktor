@@ -92,6 +92,18 @@ CATALOG_MODEL_PROBE_MAX = 10
 # (a nyertessel együtt ennyi letöltés lehet összesen). Csak azonos dátumú jelöltek
 # jönnek szóba, tehát a tartalék sosem lehet régebbi kiadás - lásd _catalog_find_driver.
 CATALOG_MAX_CANDIDATES = 3
+# WINDOWS-ALAPDRIVEREN ülő eszköznél ennél többet is megpróbálunk, és ott RÉGEBBI kiadás
+# is szóba jön (explicit user decision, 2026-08-26: "az inbox drivernél jobb a régi driver
+# milliószor"). Terepen mérve (ASRock B450M + Realtek ALC897) a helyes csomag a
+# LEGSPECIFIKUSABB kulcs első találata volt, de RÉGEBBI kiadás, mint az általános kulcson
+# nyert (és az eszközre nem illő) Acer-változat - a 3-as korláttal és az azonos-dátum
+# szabállyal soha nem jutottunk el hozzá.
+#
+# Miért nem drágább a gyakorlatban: a tartalékok a legspecifikusabb kulcs felől jönnek,
+# tehát a helyes csomag jellemzően az ELSŐ tartalék; a telepítő ráadásul URL szerint
+# deduplikál (mérve: 25 katalógus-bejegyzés ugyanarra az 1,2 GB-os cab-ra mutatott), és a
+# korábban megbukott csomagokat le sem tölti (tartós no-bind tár).
+CATALOG_INBOX_FALLBACK_CANDIDATES = 6
 
 
 class GuiHwScanMixin:
@@ -787,11 +799,26 @@ try {
         replace_inbox = bool(item.get('generic_ok')) and _is_inbox_driver(inst)
 
         rows_by_guid = {}
-        for hwid in hwids[:4]:
+        # MELYIK KULCS HOZTA A SORT? A `hwids` lista SPECIFIKUS -> ÁLTALÁNOS sorrendű (az
+        # eszköz saját azonosítói, végül a szintetizált törzs-ID), így az index maga a
+        # "mennyire pontosan szól ez a sor ennek az eszköznek" mérőszáma: 0 = a legpontosabb.
+        #
+        # MIÉRT KELL (terepen mérve, 2026-08-26, ASRock B450M + Realtek ALC897): az eszköz
+        # SAJÁT kulcsára (`...DEV_0897&SUBSYS_18494897`) a katalógus első találata a
+        # 'Realtek - MEDIA - 6.0.9360.1' csomag, aminek az INF-je PONTOSAN ezt az eszközt
+        # listázza. Az ÁLTALÁNOS kulcsra (`...DEV_0897`) viszont egy ÚJABB, 6.0.10007.1-es
+        # csomag jött - ami viszont Acer gépekre való (mind a 332 DEV_0897 bejegyzése
+        # SUBSYS_1025xxxx). Mivel a sorokat egy halmazba öntöttük és csak a dátum döntött,
+        # az Acer-csomag nyert, az INF-ellenőrzés jogosan elvetette, a helyes (de régebbi)
+        # csomaghoz pedig soha nem jutottunk el - a hangkártya a Windows alapdriverén maradt.
+        spec_by_guid = {}
+        for spec, hwid in enumerate(hwids[:4]):
             try:
                 logging.debug(f"[CATALOG] Keresés: {item['name']} ({hwid})")
                 for (g, t, row_l, d) in self._catalog_fetch_rows(hwid, ssl_ctx):
                     rows_by_guid.setdefault(g, (t, row_l, d))
+                    if spec < spec_by_guid.get(g, 99):
+                        spec_by_guid[g] = spec
             except Exception as e:
                 logging.debug(f"[CATALOG] Lekérdezési hiba ({hwid}): {e}")
         if not rows_by_guid:
@@ -945,6 +972,43 @@ try {
             alts = [(c[1], c[2], c[3]) for _r, c in ranked if c[1] != best_id][:CATALOG_MAX_CANDIDATES - 1]
         else:
             alts = []
+
+        # RÉGEBBI KIADÁSOK IS TARTALÉKKÉNT - de CSAK Windows-alapdriveres eszköznél.
+        #
+        # Explicit user decision (2026-08-26): "a semminél, az inbox drivernél jobb a régi
+        # driver milliószor... ha semmit se tud feltelepíteni, akkor azt ami jó hozzá, de
+        # verzióban régebbi, azt nyugodtan felrakhatja, sőt rakja fel - és ez ne csak a
+        # hangra legyen igaz, MINDENBŐL mindennél legyen ez a szabály".
+        #
+        # A terepi eset (ASRock ALC897): az azonos dátumú tartalékok MIND Acer-változatok
+        # voltak, a helyes csomag (6.0.9360.1) pedig RÉGEBBI kiadás - a régi szabály szerint
+        # tartalékként sem jöhetett szóba, így a hangkártya a generikus `hdaudio.inf`-en
+        # maradt. Egy régebbi GYÁRI driver viszont minden szempontból jobb a Windows
+        # generikusánál.
+        #
+        # MIÉRT CSAK INBOX-ESZKÖZNÉL: ha az eszköz már GYÁRI driveren fut, egy régebbi
+        # kiadás felrakása visszalépés lenne - azt a `is_newer_release` kapu tiltja, és ez
+        # a szabály nem írja felül. Ott marad a régi, azonos dátumú tartalék-viselkedés.
+        #
+        # SORREND: elsőként a legSPECIFIKUSABB kulcsról származó sorok (spec_by_guid), azon
+        # belül a legfrissebb dátum. Így a helyes csomag jellemzően az ELSŐ tartalék, tehát
+        # a bővítés a gyakorlatban nem jelent plusz letöltést - a telepítő ráadásul URL
+        # szerint deduplikál, és a korábban megbukott csomagokat le sem tölti.
+        if _is_inbox_driver(inst):
+            have = {best_id} | {a[0] for a in alts}
+            extra = [c for c in cands if c[1] not in have]
+            # Két menetben, a Python STABIL rendezésére építve: előbb dátum szerint
+            # csökkenőbe, majd a specifikusság szerint növekvőbe - így a legspecifikusabb
+            # kulcs sorai kerülnek előre, azon belül a legfrissebb dátum.
+            extra.sort(key=lambda c: (c[3] or ''), reverse=True)
+            extra.sort(key=lambda c: spec_by_guid.get(c[1], 99))
+            room = max(0, CATALOG_INBOX_FALLBACK_CANDIDATES - 1 - len(alts))
+            if extra and room:
+                alts += [(c[1], c[2], c[3]) for c in extra[:room]]
+                logging.info(f"[CATALOG] {item['name']}: Windows-alapdriveren fut, ezért RÉGEBBI kiadások "
+                             f"is tartalékba kerülnek ({len(extra[:room])} db, a legspecifikusabb kulcs "
+                             f"felől) - egy régi gyári driver jobb a generikusnál. Első tartalék: "
+                             f"'{extra[0][2][:60]}' [{extra[0][3] or '?'}]")
 
         cab_url = self._catalog_download_url(best_id, ssl_ctx, item['name'])
         if not cab_url:
