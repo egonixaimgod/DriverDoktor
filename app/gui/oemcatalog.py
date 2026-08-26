@@ -67,19 +67,49 @@ class GuiOemCatalogMixin:
                 self.emit('task_progress', {'task': task_id, 'log': f'ℹ️ A gyártói katalógus {len(packages)} csomagja közül egyik sem tartozik a gép jelen lévő eszközeihez.'})
                 return 0, 0
 
+            # EGY LÁNCON BELÜL EGY GYÁRTÓI CSOMAGOT CSAK EGYSZER (`oem_done`).
+            #
+            # Terepen bizonyítva (HP EliteDesk 800 G1, Build 277, 2026-08-26): a
+            # `HP driver pack sp92706` MINDEN LÁBON újra letöltődött és felment - 16:14,
+            # 16:21, 16:26, 16:31 -, körönként ~7 percet elvéve, mire a technikus
+            # megszakította a láncot. A katalógus-kör ugyanezt a hibát már megkapta és
+            # javítottuk (`catalog_done`), a gyártói kör viszont védelem nélkül maradt.
+            #
+            # Miért nem fogta meg az `_oem_already_current`: a TELJES GÉPRE szóló driver
+            # packnél nincs konkrét eszköz (`dev is None`), ezért az a függvény eleve
+            # `False`-t ad ("telepítsd") - és a pack verziója sem köthető egyetlen eszköz
+            # driververziójához. Vagyis a packet semmi nem tudta "már naprakész"-nek látni.
+            #
+            # Biztonságos: egy láncon belül ugyanannak a csomagnak az újratelepítése
+            # definíció szerint fölösleges. A lista a lánc-állapotban él, tehát a stats-fájl
+            # törlésekor (lánc eleje/vége) elévül - egy KÉSŐBBI fix újra megpróbálja.
+            done = self._autofix_stats_get('oem_done') or []
+            done_ids = {str(d) for d in done}
             inst_info = self._get_installed_driver_info()
             todo = []
             for pkg, dev in matched:
+                key = f"{pkg.get('vendor', '')}|{pkg.get('id', '')}|{(dev or {}).get('pnp_id', '')}"
+                if key in done_ids:
+                    skipped += 1
+                    logging.info(f"[OEM] Kihagyva (ebben a láncban már próbáltuk): {pkg.get('title')}")
+                    continue
                 if self._oem_already_current(pkg, dev, inst_info):
                     skipped += 1
                     continue
-                todo.append((pkg, dev))
-            self.emit('task_progress', {'task': task_id, 'log': f'🏭 {len(todo)} gyári csomag telepítendő (a katalógus {len(packages)} csomagjából; {skipped} már naprakész).'})
+                todo.append((pkg, dev, key))
+            self.emit('task_progress', {'task': task_id, 'log': f'🏭 {len(todo)} gyári csomag telepítendő (a katalógus {len(packages)} csomagjából; {skipped} kihagyva/naprakész).'})
             if not todo:
                 return 0, skipped
 
+            # A MEGKÍSÉRELT csomagok MÉG A TELEPÍTÉS ELŐTT bekerülnek a listába: egy
+            # összeomlás vagy újraindítás a telepítés közben így sem indítja újra ugyanazt a
+            # több száz MB-os letöltést a következő lábon.
+            self._autofix_stats_set('oem_done', done + [k for _p, _d, k in todo])
+            logging.info(f"[OEM] {len(todo)} csomag megjelölve 'ebben a láncban már próbáltuk'-ként: "
+                         f"{[p.get('title') for p, _d, _k in todo][:6]}")
+
             workdir = tempfile.mkdtemp(prefix='dv_oem_')
-            for i, (pkg, dev) in enumerate(todo, 1):
+            for i, (pkg, dev, _key) in enumerate(todo, 1):
                 if self._cancel_flag:
                     logging.warning("[OEM] Felhasználói megszakítás a gyártói körben.")
                     break
