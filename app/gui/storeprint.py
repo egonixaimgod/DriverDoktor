@@ -9,6 +9,7 @@ import socket
 import shutil
 import tempfile
 from app.common import _ps_quote
+from app.common import CMD_TIMEOUT_RETURNCODE
 # === /AUTO-IMPORTS ===
 
 
@@ -117,16 +118,34 @@ class GuiStorePrintMixin:
         stageeltük most (2. eset), a "oemXX.inf" publikált nevet adjuk vissza, hogy a hívó
         ezzel pontosan visszatudja vonni (`pnputil /delete-driver`) - lásd a "ne maradjon
         rajta az ügyfél gépén a mi driverünk" elvárást a print_via_store_printer végén."""
+        # Időkorlát: ez is a nyomtatósoron megy keresztül, tehát ugyanúgy elakadhat, mint a
+        # nyomtató-lista lekérdezése (lásd ott a részletes indoklást).
         ref_ps = f"(Get-Printer -Name '{_ps_quote(STORE_PRINTER_REFERENCE_NAME)}' -ErrorAction Stop).DriverName"
-        res = self._run(['powershell', '-NoProfile', '-ExecutionPolicy', 'Bypass', '-Command', ref_ps], encoding='utf-8')
+        logging.info(f"[STOREPRINT] 3/6 - referencia-nyomtató drivere: '{STORE_PRINTER_REFERENCE_NAME}' (max 60s)...")
+        t0 = time.monotonic()
+        res = self._run(['powershell', '-NoProfile', '-ExecutionPolicy', 'Bypass', '-Command', ref_ps],
+                        encoding='utf-8', timeout=60)
+        if getattr(res, 'returncode', 0) == CMD_TIMEOUT_RETURNCODE:
+            logging.warning("[STOREPRINT] A referencia-nyomtató lekérdezése IDŐTÚLLÉPÉSSEL zárult (60s) - "
+                            "a becsomagolt HP driverrel folytatjuk.")
         driver_name = (res.stdout or '').strip() if res else ''
+        logging.info(f"[STOREPRINT] 3/6 kész ({time.monotonic() - t0:.1f}s): "
+                     f"{'driver=' + driver_name if driver_name else 'nincs referencia-nyomtató ezen a gépen'}")
         if driver_name:
             self.emit('task_progress', {'task': 'store_print', 'log': f'✅ Meglévő HP driver újrahasznosítva: {driver_name}'})
             return driver_name, None
 
-        self.emit('task_progress', {'task': 'store_print', 'log': '📦 HP driver keresése a becsomagolt fájlok között...'})
-        stress_dir = self._download_stresstools()
+        # ITT IS ~621 MB LEHET: a becsomagolt HP driver a stresstools.zip-ben van. Haladás
+        # nélkül ez a lépés is néma percekben telik - lásd a 4) lépés indoklását.
+        self.emit('task_progress', {'task': 'store_print', 'log': '📦 HP driver keresése a becsomagolt fájlok között (szükség esetén letöltés)...'})
+        logging.info("[STOREPRINT] 4/6 - stresstools ellenőrzése/letöltése (HP driver miatt)...")
+        t0 = time.monotonic()
+        stress_dir = self._download_stresstools(
+            progress=self._report_progress_cb('store_print')
+            if hasattr(self, '_report_progress_cb') else None)
+        logging.info(f"[STOREPRINT] 4/6 kész: mappa={stress_dir!r} ({time.monotonic() - t0:.1f}s)")
         inf_path = self._find_hp_driver_inf(stress_dir) if stress_dir else None
+        logging.info(f"[STOREPRINT] Becsomagolt HP driver INF: {inf_path or 'NEM TALÁLHATÓ'}")
         if not inf_path:
             raise Exception(
                 f"Nincs meg a becsomagolt HP LaserJet 1320 driver (HPDriver mappa) a "
@@ -137,6 +156,7 @@ class GuiStorePrintMixin:
             )
 
         self.emit('task_progress', {'task': 'store_print', 'log': '⬇️ HP driver telepítése a driver store-ba (pnputil)...'})
+        logging.info(f"[STOREPRINT] HP driver stageelése: {inf_path}")
         stage_res = self._run(['pnputil', '/add-driver', inf_path, '/install'], timeout=120)
         # A pnputil kilépési kódja NEM megbízható sikerjelzés: élesben tesztelve, ha a
         # driver már staged, "Driver package added successfully. (Already exists in the
@@ -373,11 +393,15 @@ class GuiStorePrintMixin:
             # 9100/tcp) porthoz csatlakozunk - ez megbízhatóbb jel, mint egy ICMP ping, mert
             # sok nyomtató blokkolja/nem válaszol pingre, de a nyomtatási portot figyeli.
             reachable = False
+            logging.info(f"[STOREPRINT] 1/6 - elérhetőség vizsgálata: TCP {STORE_PRINTER_IP}:9100 (3s)...")
+            t0 = time.monotonic()
             try:
                 with socket.create_connection((STORE_PRINTER_IP, 9100), timeout=3):
                     reachable = True
-            except OSError:
+            except OSError as e:
                 reachable = False
+                logging.warning(f"[STOREPRINT] A nyomtató nem válaszol a 9100-as porton: {e}")
+            logging.info(f"[STOREPRINT] 1/6 kész: elérhető={reachable} ({time.monotonic() - t0:.1f}s)")
             if not reachable:
                 raise Exception(f"A bolti nyomtató ({STORE_PRINTER_IP}) nem érhető el a hálózaton - lehet, hogy nem a bolt hálózatán vagy, vagy a nyomtató ki van kapcsolva.")
 
@@ -386,8 +410,26 @@ class GuiStorePrintMixin:
                 f"$port = Get-PrinterPort | Where-Object {{ $_.PrinterHostAddress -eq '{STORE_PRINTER_IP}' }} | Select-Object -First 1; "
                 "if ($port) { $p = Get-Printer | Where-Object { $_.PortName -eq $port.Name } | Select-Object -First 1; if ($p) { Write-Output $p.Name } }"
             )
-            res = self._run(['powershell', '-NoProfile', '-ExecutionPolicy', 'Bypass', '-Command', find_ps], encoding='utf-8')
+            # IDŐKORLÁT KELL: a `Get-Printer` a nyomtatósorra (spooler) támaszkodik, és ha az
+            # elakadt vagy egy másik hálózati nyomtató nem válaszol, PERCEKIG lóghat.
+            # Timeout nélkül ilyenkor a képernyőn örökké a "Nyomtató keresése a hálózaton"
+            # felirat áll - terepen pontosan ezt jelentették ("5 perce megy a csúszka").
+            # A _run az időtúllépést CMD_TIMEOUT_RETURNCODE-dal adja vissza, nem dob.
+            self.emit('task_progress', {'task': 'store_print', 'log': '🔎 Windows nyomtatók átvizsgálása (van-e már felvéve ehhez az IP-hez)...'})
+            logging.info("[STOREPRINT] 2/6 - meglévő Windows-nyomtató keresése ehhez az IP-hez (max 60s)...")
+            t0 = time.monotonic()
+            res = self._run(['powershell', '-NoProfile', '-ExecutionPolicy', 'Bypass', '-Command', find_ps],
+                            encoding='utf-8', timeout=60)
+            if getattr(res, 'returncode', 0) == CMD_TIMEOUT_RETURNCODE:
+                # Nem végzetes: ilyenkor úgy megyünk tovább, mintha nem lenne felvéve -
+                # de KI KELL MONDANI, mert innentől mi vesszük fel a nyomtatót.
+                logging.warning("[STOREPRINT] A nyomtató-lista lekérdezése IDŐTÚLLÉPÉSSEL zárult (60s) - "
+                                "valószínűleg akadozik a nyomtatósor (spooler). Úgy folytatjuk, mintha "
+                                "nem lenne felvéve.")
+                self.emit('task_progress', {'task': 'store_print', 'log': '⚠️ A Windows nyomtató-listája nem válaszolt 60 mp alatt (akadozó nyomtatósor) - felvesszük a nyomtatót magunk.'})
             existing_name = (res.stdout or '').strip() if res else ''
+            logging.info(f"[STOREPRINT] 2/6 kész ({time.monotonic() - t0:.1f}s): "
+                         f"{'megvan: ' + existing_name if existing_name else 'nincs felvéve ehhez az IP-hez'}")
 
             # we_added_printer/staged_driver_published_name: mit hoztunk létre MI EBBEN a
             # futásban, hogy a végén pontosan azt (és csakis azt) takarítsuk el - lásd a
@@ -427,9 +469,21 @@ class GuiStorePrintMixin:
                         f"if (-not (Get-Printer -Name '{_ps_quote(STORE_PRINTER_NAME)}' -ErrorAction SilentlyContinue)) "
                         f"{{ Add-Printer -Name '{_ps_quote(STORE_PRINTER_NAME)}' -DriverName '{_ps_quote(driver_name)}' -PortName '{_ps_quote(STORE_PRINTER_PORT_NAME)}' -ErrorAction Stop }}"
                     )
-                    ares = self._run(['powershell', '-NoProfile', '-ExecutionPolicy', 'Bypass', '-Command', add_ps], encoding='utf-8')
-                    if not ares or ares.returncode != 0:
+                    # Időkorlát: az `Add-PrinterPort`/`Add-Printer` is a nyomtatósoron megy
+                    # keresztül, és egy nem válaszoló hálózati porton percekig lóghat.
+                    logging.info(f"[STOREPRINT] 6/6 - nyomtató felvétele: név='{STORE_PRINTER_NAME}', "
+                                 f"port={STORE_PRINTER_PORT_NAME} -> {STORE_PRINTER_IP}, driver='{driver_name}' (max 120s)...")
+                    t0 = time.monotonic()
+                    ares = self._run(['powershell', '-NoProfile', '-ExecutionPolicy', 'Bypass', '-Command', add_ps],
+                                     encoding='utf-8', timeout=120)
+                    rc = getattr(ares, 'returncode', None)
+                    logging.info(f"[STOREPRINT] 6/6 kész ({time.monotonic() - t0:.1f}s): rc={rc}")
+                    if rc == CMD_TIMEOUT_RETURNCODE:
+                        raise Exception("A nyomtató felvétele 2 perc alatt sem fejeződött be (akadozó nyomtatósor). "
+                                        "Indítsd újra a Nyomtatásisor-kezelő (Spooler) szolgáltatást, majd próbáld újra.")
+                    if not ares or rc != 0:
                         err_detail = (ares.stderr or ares.stdout or 'ismeretlen hiba') if ares else 'ismeretlen hiba'
+                        logging.error(f"[STOREPRINT] A nyomtató felvétele NEM sikerült (rc={rc}): {err_detail[:400]}")
                         raise Exception(f"Nem sikerült felvenni a nyomtatót: {err_detail}")
                     printer_name = STORE_PRINTER_NAME
                     we_added_printer = True
@@ -446,9 +500,20 @@ class GuiStorePrintMixin:
                     )
 
                 # 4) PDF -> néma nyomtatás a bolti nyomtatóra.
-                self.emit('task_progress', {'task': 'store_print', 'log': '📤 Nyomtatás küldése...'})
-                stress_dir = self._download_stresstools()
+                # A SumatraPDF a stresstools.zip-ben van, amit itt SZÜKSÉG ESETÉN LETÖLTÜNK -
+                # ~621 MB. Egy frissen újratelepített gépen ez mindig hiányzik, és a letöltés
+                # korábban NÉMÁN futott: a képernyőn a "Nyomtatás küldése..." felirat állt
+                # percekig, a technikus pedig joggal hitte, hogy a program lefagyott
+                # (terepen két gépen pontosan ezt jelentették). Ezért haladás-visszajelzés.
+                self.emit('task_progress', {'task': 'store_print', 'log': '📤 Nyomtatási eszköz (SumatraPDF) ellenőrzése...'})
+                logging.info("[STOREPRINT] 5/6 - stresstools ellenőrzése/letöltése (SumatraPDF miatt)...")
+                t0 = time.monotonic()
+                stress_dir = self._download_stresstools(
+                    progress=self._report_progress_cb('store_print')
+                    if hasattr(self, '_report_progress_cb') else None)
+                logging.info(f"[STOREPRINT] 5/6 kész: mappa={stress_dir!r} ({time.monotonic() - t0:.1f}s)")
                 sumatra = self._find_sumatra_exe(stress_dir) if stress_dir else None
+                logging.info(f"[STOREPRINT] SumatraPDF: {sumatra or 'NEM TALÁLHATÓ'}")
                 if not sumatra:
                     raise Exception("A SumatraPDF nem található (a stresstools.zip-ben kell lennie) - néma nyomtatás nem lehetséges.")
 
