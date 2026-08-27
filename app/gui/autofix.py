@@ -8,6 +8,7 @@ import sys
 import subprocess
 import re
 import time
+import platform
 import logging
 import shutil
 import json
@@ -64,6 +65,8 @@ from app.wu_core import driverstore_package_inf
 from app.wu_core import HEALTH_REPORT_SKIP_INFS
 from app.wu_core import is_specific_hwid
 from app.wu_core import deep_catalog_candidates
+from app import logupload_core
+from app import benchmark_core
 from app.common import spawn_failed
 from app.common import CMD_TIMEOUT_RETURNCODE
 from app.drivers_core import DELETE_DRIVER_TIMEOUT
@@ -2848,9 +2851,7 @@ class GuiAutofixMixin:
                         self.emit('task_progress', {'task': 'autofix', 'log': '\nA FOLYAMAT SIKERESEN BEFEJEZŐDÖTT!'})
                     except Exception as e:
                         logging.debug(f"[AUTOFIX] Záró emit sikertelen (ablak már bezárva?): {e}")
-                    
-                    # If we were in resume mode, it means this was an automated post-boot check that found nothing.
-                    # We can close the app or leave it open. Let's just finish the task.
+
                     # A TELJES LÁNC IDEJE. A modál addig csak az AKTUÁLIS LÁB idejét
                     # mutatta (a számláló minden lábon nullázódik), ami félrevezető: a
                     # technikus 4 újraindításnyi munka után "6 perc"-et olvasott. Ezt
@@ -2859,6 +2860,28 @@ class GuiAutofixMixin:
                     if ok_time:
                         self.emit('task_progress', {'task': 'autofix', 'log': f'\n⏱️ A teljes AutoFix {chain_time} alatt futott le (az indítástól, az újraindításokkal együtt).'})
                         logging.info(f"[AUTOFIX] A lánc teljes ideje: {chain_time}.")
+
+                    # NAPLÓ FELTÖLTÉSE A BOLT DRIVE-JÁRA (explicit user decision, 2026-08-26).
+                    # Ennek a projektnek a hibajelentése maga a napló, és pont akkor marad el,
+                    # amikor a legfontosabb lenne: mire kiderül, hogy valami furcsa volt, a gép
+                    # már az ügyfélnél van. SZÁNDÉKOSAN ITT, a lánc legvégén: így a feltöltött
+                    # napló a záró jelentést és a teljes időt IS tartalmazza. A hibája sosem
+                    # akaszthatja meg a lezárást (a upload_logs mindent elnyel), és a napló a
+                    # gépen is ott marad - ez csak másolat.
+                    try:
+                        self.emit('task_progress', {'task': 'autofix', 'log': '☁️ Napló feltöltése a szerviz Drive-jára...'})
+                        ok_up, where = logupload_core.upload_logs(
+                            self._run, benchmark_core.resolve_endpoint(),
+                            machine_name=platform.node(),
+                            build=common.BUILD_NUMBER,
+                            outcome=f"{chain_total} driver telepítve, {chain_time or 'ismeretlen idő'}")
+                        if ok_up:
+                            self.emit('task_progress', {'task': 'autofix', 'log': f'✅ Napló feltöltve{(" - " + where) if where else ""}.'})
+                        else:
+                            # Nem hiba a technikus szempontjából: a napló ott van a gépen is.
+                            self.emit('task_progress', {'task': 'autofix', 'log': f'ℹ️ A napló feltöltése nem sikerült ({where}) - a gépen itt találod: {_app_data_dir()}'})
+                    except Exception as e:
+                        logging.warning(f"[LOGUP] A napló-feltöltés hívása hibára futott (nem kritikus): {e}")
                     self.emit('task_complete', {'task': 'autofix', 'status': 'Teljesen befejezve',
                                                 'chain_time': chain_time})
                     if not getattr(self, 'resume_mode', False):

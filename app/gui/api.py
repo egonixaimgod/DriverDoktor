@@ -27,6 +27,7 @@ from app.gui.bitlocker import GuiBitlockerMixin
 from app.gui.report import GuiReportMixin
 from app.gui.storeprint import GuiStorePrintMixin
 from app.gui.blockscript import GuiBlockScriptMixin
+from app.gui.logs import GuiLogsMixin
 from app.gui.nvidia import GuiNvidiaMixin
 from app.gui.vendorgpu import GuiVendorGpuMixin
 from app.gui.oemdrivers import GuiOemDriversMixin
@@ -42,6 +43,7 @@ class DriverToolApi(GuiBaseMixin, GuiUpdaterMixin, GuiStressMixin,
                     GuiBcdMixin, GuiGhostMixin, GuiTempCleanMixin, GuiHwScanMixin,
                     GuiWuMixin, GuiAutofixMixin, GuiBackupMixin, GuiBitlockerMixin,
                     GuiReportMixin, GuiStorePrintMixin, GuiBlockScriptMixin,
+                    GuiLogsMixin,
                     GuiNvidiaMixin, GuiVendorGpuMixin, GuiOemDriversMixin,
                     GuiOemCatalogMixin, GuiRebindMixin,
                     GuiBenchmarkMixin, GuiDisplayMixin):

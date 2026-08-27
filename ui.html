@@ -152,6 +152,11 @@ td input[type="checkbox"]{accent-color:var(--accent);width:16px;height:16px;curs
 .search-box input::placeholder{color:var(--text3)}
 .search-box input:focus{outline:none;border-color:var(--glass-border-hover);box-shadow:0 0 0 3px rgba(180,100,255,0.15)}
 .search-box .icon{position:absolute;left:11px;top:50%;transform:translateY(-50%);font-size:12px;opacity:0.6;pointer-events:none}
+/* Jelszómező a Naplók nézet hero-jában. flex:0 0 auto - ugyanaz a lecke, mint a
+   .toggle-track-nál: zsugorodó flex-gyerekként hosszabb szöveg mellett összenyomódna. */
+.pw-input{flex:0 0 auto;width:150px;padding:10px 14px;border-radius:10px;border:1px solid var(--glass-border);background:rgba(20,12,38,0.6);color:var(--text);font:14px var(--font);text-align:center;letter-spacing:3px;transition:all var(--t)}
+.pw-input::placeholder{color:var(--text3);letter-spacing:normal}
+.pw-input:focus{outline:none;border-color:var(--glass-border-hover);box-shadow:0 0 0 3px rgba(180,100,255,0.15)}
 
 /* Danger-zone wrapper for the "list all/inbox drivers" toggle */
 .danger-zone{display:flex;align-items:center;gap:8px;padding:7px 14px;border-radius:999px;background:rgba(255,100,90,0.1);border:1px solid rgba(255,100,90,0.3)}
@@ -518,6 +523,7 @@ td input[type="checkbox"]{accent-color:var(--accent);width:16px;height:16px;curs
     <button class="nav-btn" onclick="switchView('display')" data-view="display"><span class="icon">🎨</span>Kijelző &amp; Színkezelés</button>
     <button class="nav-btn" onclick="switchView('report')" data-view="report"><span class="icon">📊</span>Rendszer Riport (PDF)</button>
     <button class="nav-btn" onclick="switchView('blockscript')" data-view="blockscript"><span class="icon">🚫</span>Net Blokkoló Script</button>
+    <button class="nav-btn" onclick="switchView('logs')" data-view="logs"><span class="icon">📥</span>Naplók letöltése</button>
     <div class="sidebar-bottom" id="build-label">Build ---</div>
     <div class="sidebar-datadir" id="data-dir-label" title="Ide menti a program a debug naplót és a Rendszer Riport HTML fájlokat - kattints a megnyitáshoz" onclick="openAppDataDir()">📁 ...</div>
   </nav>
@@ -1206,6 +1212,30 @@ td input[type="checkbox"]{accent-color:var(--accent);width:16px;height:16px;curs
         </div>
       </div>
 
+      <div class="view" id="view-logs">
+        <div class="view-hero vh-blue" data-emoji="📥">
+          <div class="vh-text">
+            <div class="vh-title">📥 Naplók letöltése a szerviz Drive-járól</div>
+            <div class="vh-sub">Minden lefuttatott 1 kattintásos fix a végén feltölti a saját debug naplóját a bolt Google Drive-jára, gépenként külön mappába (gépnév + típus + dátum). Ez a gomb egy kattintásra visszahozza őket <b>kicsomagolva</b> erre a gépre, hogy elemezni lehessen. Ami már megvan helyben, azt átugorja — az ismételt kattintás csak az újakat hozza le.</div>
+            <div class="vh-chips">
+              <span class="hero-chip">🔑 Jelszóval védve</span>
+              <span class="hero-chip">📦 Kicsomagolva menti</span>
+              <span class="hero-chip">⏭️ Csak az újakat tölti le</span>
+            </div>
+          </div>
+          <div class="vh-actions">
+            <input type="password" id="logs-password" class="pw-input" placeholder="Jelszó" onkeydown="if(event.key==='Enter')downloadUploadedLogs()">
+            <button class="btn btn-big btn-primary" onclick="downloadUploadedLogs()" id="btn-logs-dl">📥 Naplók Letöltése</button>
+          </div>
+        </div>
+        <div class="panel glass">
+          <div class="panel-title"><span class="emoji">📁</span> Hova kerülnek a naplók</div>
+          <p>A letöltött naplók helye: <code id="logs-dest">C:\DriverVarazslo\letoltott_naplok</code></p>
+          <p style="opacity:.75;margin-top:8px">Futásonként egy almappa (gépnév + típus + dátum), benne a napló <code>.log</code> kiterjesztéssel — Jegyzettömbbel is megnyitható.</p>
+          <p style="opacity:.75;margin-top:8px"><b>A jelszó</b> szándékosan nincs beleégetve a programba: a Google Apps Script <code>LOG_READ_PASSWORD</code> sora tartalmazza, és ott is írható át. Azért kell, mert a feltöltési cím minden kiadott exe-ben benne van — enélkül bárki lehúzhatná az ügyfélgépek naplóit.</p>
+        </div>
+      </div>
+
 <!-- Progress Modal -->
 <div class="modal-overlay" id="modal-progress">
   <div class="modal-box">
@@ -1632,6 +1662,7 @@ function switchView(name) {
   if (name === 'stress') refreshServiceTools();
   if (name === 'benchmark') loadBenchmarkView();
   if (name === 'display') loadDisplayView();
+  if (name === 'logs') loadLogsViewInfo();
   
   const targetBar = document.querySelector('.target-bar');
   if (targetBar) {
@@ -2758,6 +2789,31 @@ async function downloadBlockScript() {
     btn.disabled = false;
     btn.textContent = '⬇️ block.bat Letöltése';
   }
+}
+
+/* ========== NAPLÓK LETÖLTÉSE A DRIVE-RÓL ========== */
+async function downloadUploadedLogs() {
+  const pwEl = document.getElementById('logs-password');
+  const pw = (pwEl.value || '').trim();
+  if (!pw) {
+    toast('Add meg a jelszót!', 'warning');
+    pwEl.focus();
+    return;
+  }
+  try {
+    // A folyamat-modál a task_start/task_progress eseményekből épül fel (mint minden
+    // más hosszú műveletnél), a jelszót itt nem tároljuk el sehol.
+    await api().download_uploaded_logs(pw, true);
+  } catch (e) {
+    toast('Letöltési hiba: ' + e, 'error');
+  }
+}
+
+async function loadLogsViewInfo() {
+  try {
+    const dir = await api().get_log_download_dir();
+    if (dir) document.getElementById('logs-dest').textContent = dir;
+  } catch (e) { /* csak a kiírt útvonal, nem kritikus */ }
 }
 
 /* ========== BACKUP / RESTORE ========== */
