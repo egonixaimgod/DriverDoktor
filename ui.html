@@ -157,6 +157,36 @@ td input[type="checkbox"]{accent-color:var(--accent);width:16px;height:16px;curs
 .pw-input{flex:0 0 auto;width:150px;padding:10px 14px;border-radius:10px;border:1px solid var(--glass-border);background:rgba(20,12,38,0.6);color:var(--text);font:14px var(--font);text-align:center;letter-spacing:3px;transition:all var(--t)}
 .pw-input::placeholder{color:var(--text3);letter-spacing:normal}
 .pw-input:focus{outline:none;border-color:var(--glass-border-hover);box-shadow:0 0 0 3px rgba(180,100,255,0.15)}
+/* Windows & Office nézet */
+.winact-btnrow{display:flex;gap:8px;flex-wrap:wrap}
+/* A BIOS-ba égetett gyári kulcs - szándékosan a nézet leghangsúlyosabb eleme: ha van,
+   az dönti el az egész aktiválást, és a technikusnak első pillantásra látnia kell. */
+.winact-oem{margin-bottom:18px;padding:20px 24px;border-radius:14px;
+  background:linear-gradient(135deg,rgba(60,200,120,0.16),rgba(60,200,120,0.06));
+  border:2px solid rgba(80,220,140,0.45)}
+.winact-oem-title{font-size:19px;font-weight:800;color:#5fe0a0;letter-spacing:.3px;margin-bottom:12px;
+  display:flex;align-items:center;gap:10px}
+.winact-oem-key{font-family:ui-monospace,Consolas,monospace;font-size:26px;font-weight:700;
+  letter-spacing:3px;color:#eaffe7;background:rgba(0,0,0,0.28);padding:12px 18px;border-radius:10px;
+  display:inline-block;user-select:all;word-break:break-all;line-height:1.4}
+.winact-oem-sub{margin-top:12px;font-size:13px;color:var(--text2);line-height:1.65}
+.winact-none{margin-bottom:18px;padding:14px 18px;border-radius:12px;
+  background:rgba(160,160,180,0.10);border:1px solid var(--glass-border);
+  font-size:13px;color:var(--text2);line-height:1.6}
+.winact-plan-ok{padding:14px 18px;border-radius:12px;background:rgba(90,140,255,0.10);
+  border:1px solid rgba(120,160,255,0.35);font-size:14px;color:var(--text);line-height:1.65}
+.winact-plan-bad{padding:14px 18px;border-radius:12px;background:rgba(255,90,90,0.12);
+  border:1px solid rgba(255,120,120,0.4);font-size:14px;color:#ffbdbd;line-height:1.65}
+.winact-grid{display:grid;grid-template-columns:auto 1fr;gap:8px 16px;font-size:13px;align-items:baseline}
+.winact-grid dt{color:var(--text3);white-space:nowrap}
+.winact-grid dd{margin:0;color:var(--text);word-break:break-word}
+.winact-badge{display:inline-block;padding:4px 12px;border-radius:999px;font-weight:700;font-size:13px}
+.winact-badge.ok{background:rgba(60,200,120,0.18);color:#5fe0a0}
+.winact-badge.warning{background:rgba(255,180,60,0.18);color:#ffc95f}
+.winact-badge.error{background:rgba(255,90,90,0.18);color:#ff8080}
+.winact-badge.unknown{background:rgba(160,160,180,0.18);color:var(--text2)}
+.winact-key{font-family:ui-monospace,Consolas,monospace;letter-spacing:1px;background:rgba(20,12,38,0.6);padding:2px 8px;border-radius:6px}
+.winact-note{margin-top:12px;font-size:12px;color:var(--text3);line-height:1.6}
 
 /* Danger-zone wrapper for the "list all/inbox drivers" toggle */
 .danger-zone{display:flex;align-items:center;gap:8px;padding:7px 14px;border-radius:999px;background:rgba(255,100,90,0.1);border:1px solid rgba(255,100,90,0.3)}
@@ -523,6 +553,7 @@ td input[type="checkbox"]{accent-color:var(--accent);width:16px;height:16px;curs
     <button class="nav-btn" onclick="switchView('display')" data-view="display"><span class="icon">🎨</span>Kijelző &amp; Színkezelés</button>
     <button class="nav-btn" onclick="switchView('report')" data-view="report"><span class="icon">📊</span>Rendszer Riport (PDF)</button>
     <button class="nav-btn" onclick="switchView('blockscript')" data-view="blockscript"><span class="icon">🚫</span>Net Blokkoló Script</button>
+    <button class="nav-btn" onclick="switchView('winact')" data-view="winact"><span class="icon">🎫</span>Windows &amp; Office</button>
     <button class="nav-btn" onclick="switchView('logs')" data-view="logs"><span class="icon">📥</span>Naplók letöltése</button>
     <div class="sidebar-bottom" id="build-label">Build ---</div>
     <div class="sidebar-datadir" id="data-dir-label" title="Ide menti a program a debug naplót és a Rendszer Riport HTML fájlokat - kattints a megnyitáshoz" onclick="openAppDataDir()">📁 ...</div>
@@ -1212,6 +1243,45 @@ td input[type="checkbox"]{accent-color:var(--accent);width:16px;height:16px;curs
         </div>
       </div>
 
+      <div class="view" id="view-winact">
+        <div class="view-hero vh-blue" data-emoji="🎫">
+          <div class="vh-text">
+            <div class="vh-title">🎫 Windows &amp; Office aktiválás</div>
+            <div class="vh-sub">Megmutatja, aktiválva van-e a gép, milyen licenccel (OEM / Retail / Volume), és kiolvassa a <b>gyári kulcsot a BIOS-ból</b> — újratelepítés után jellemzően ez a válasz arra, hogy miért nem aktivált magától. Az aktiválás három lépése (kulcs telepítése → KMS-kiszolgáló → aktiválás) egy gombbal lefut, a végén pedig a program <b>leellenőrzi a rendszer licenc-állapotát</b>, és csak akkor írja ki, hogy kész, ha tényleg aktív.</div>
+            <div class="vh-chips">
+              <span class="hero-chip">🔑 Gyári kulcs a BIOS-ból</span>
+              <span class="hero-chip">🏷️ Licenc-csatorna</span>
+              <span class="hero-chip">✅ Ellenőrzött eredmény</span>
+              <span class="hero-chip">📄 Office állapot</span>
+            </div>
+          </div>
+          <div class="vh-actions">
+            <button class="btn btn-big btn-primary" onclick="activateWindows()" id="btn-winact">🔓 Windows Aktiválása</button>
+            <button class="btn btn-sm" onclick="loadWinActView()" style="justify-content:center">🔄 Állapot Frissítése</button>
+          </div>
+        </div>
+
+        <div class="panel glass">
+          <div class="panel-title"><span class="emoji">💻</span> Windows állapota</div>
+          <div id="winact-windows">Állapot lekérdezése...</div>
+        </div>
+
+        <div class="panel glass">
+          <div class="panel-title"><span class="emoji">🔧</span> Mit fog csinálni a gomb</div>
+          <div id="winact-plan">Állapot lekérdezése...</div>
+          <div class="winact-btnrow" style="margin-top:14px">
+            <button class="btn btn-sm" onclick="clearKmsServer()">🧹 KMS-kiszolgáló törlése</button>
+            <button class="btn btn-sm" onclick="api().open_activation_tool('settings')">⚙️ Windows aktiválás-beállítások</button>
+            <button class="btn btn-sm" onclick="api().open_activation_tool('phone')">☎️ Telefonos aktiválás</button>
+          </div>
+        </div>
+
+        <div class="panel glass">
+          <div class="panel-title"><span class="emoji">📄</span> Office állapota</div>
+          <div id="winact-office">Állapot lekérdezése...</div>
+        </div>
+      </div>
+
       <div class="view" id="view-logs">
         <div class="view-hero vh-blue" data-emoji="📥">
           <div class="vh-text">
@@ -1649,6 +1719,9 @@ window.handlePyEvent = function(payload) {
     case 'display_info':
       renderDisplayInfo(data);
       break;
+    case 'activation_status':
+      renderActivationStatus(data);
+      break;
   }
 };
 
@@ -1663,6 +1736,7 @@ function switchView(name) {
   if (name === 'benchmark') loadBenchmarkView();
   if (name === 'display') loadDisplayView();
   if (name === 'logs') loadLogsViewInfo();
+  if (name === 'winact') loadWinActView();
   
   const targetBar = document.querySelector('.target-bar');
   if (targetBar) {
@@ -2788,6 +2862,110 @@ async function downloadBlockScript() {
   } finally {
     btn.disabled = false;
     btn.textContent = '⬇️ block.bat Letöltése';
+  }
+}
+
+/* ========== WINDOWS & OFFICE AKTIVÁLÁS ========== */
+let winActState = null;
+
+async function loadWinActView() {
+  const winEl = document.getElementById('winact-windows');
+  const offEl = document.getElementById('winact-office');
+  winEl.textContent = 'Állapot lekérdezése...';
+  offEl.textContent = 'Állapot lekérdezése...';
+  try {
+    renderActivationStatus(await api().get_activation_status());
+  } catch (e) {
+    winEl.textContent = 'Nem sikerült lekérdezni: ' + e;
+  }
+}
+
+function renderActivationStatus(data) {
+  winActState = data;
+  const winEl = document.getElementById('winact-windows');
+  const offEl = document.getElementById('winact-office');
+  if (!data || data.offline) {
+    winEl.textContent = 'Offline módban nem elérhető.';
+    offEl.textContent = '';
+    return;
+  }
+  if (data.error) { winEl.textContent = 'Hiba: ' + data.error; return; }
+
+  const w = data.windows || {};
+  const rows = [];
+  rows.push(['Állapot', '<span class="winact-badge ' + esc(w.status_color || 'unknown') + '">'
+    + esc(w.status_text || 'ismeretlen') + '</span>']);
+  if (w.os_caption) rows.push(['Windows', esc(w.os_caption) + (w.os_build ? ' (build ' + esc(w.os_build) + ')' : '')]);
+  if (w.edition) rows.push(['Licenc-kiadás', esc(w.edition)]);
+  if (w.channel) {
+    rows.push(['Licenc típusa', esc(w.channel) + (w.channel_text ? ' — ' + esc(w.channel_text) : '')]);
+  }
+  if (w.partial_key) rows.push(['Telepített kulcs vége', '<span class="winact-key">' + esc(w.partial_key) + '</span>']);
+  if (w.grace_days > 0) rows.push(['Türelmi időből hátra', esc(w.grace_days) + ' nap']);
+  if (w.kms_host) rows.push(['Beállított KMS-kiszolgáló', '<span class="winact-key">' + esc(w.kms_host) + '</span>']);
+
+  // A BIOS-kulcs a nézet legfontosabb információja: ha van, az dönti el az egész
+  // aktiválást. Ezért NAGY, kiemelt dobozban, a többi adat FÖLÖTT.
+  const oemBox = w.oem_key
+    ? '<div class="winact-oem">'
+      + '<div class="winact-oem-title">🔑 VAN GYÁRI KULCS A GÉPBEN!</div>'
+      + '<div class="winact-oem-key">' + esc(w.oem_key) + '</div>'
+      + '<div class="winact-oem-sub">Ez a kulcs a gép <b>alaplapjába (BIOS/UEFI) van égetve</b>, '
+      + 'és <b>mindig működni fog</b> — újratelepítés után is, internet nélkül is megmarad. '
+      + 'Az „Aktiválás” gomb magától <b>ezt</b> fogja használni.<br>'
+      + '<b>NE cseréld le másik kulcsra</b> — bármi más csak rosszabb lehet nála.</div>'
+      + '</div>'
+    : '<div class="winact-none">ℹ️ <b>Ebben a gépben nincs gyári kulcs a BIOS-ban</b> '
+      + '(nem gyári Windowsos gép, vagy összerakott konfiguráció).</div>';
+
+  winEl.innerHTML = oemBox + '<dl class="winact-grid">'
+    + rows.map(r => '<dt>' + r[0] + '</dt><dd>' + r[1] + '</dd>').join('')
+    + '</dl>';
+
+  // MIT FOG CSINÁLNI A GOMB - a kattintás ELŐTT látszódjon.
+  const plan = data.plan || {};
+  const planEl = document.getElementById('winact-plan');
+  planEl.innerHTML = '<div class="' + (plan.ready ? 'winact-plan-ok' : 'winact-plan-bad') + '">'
+    + (plan.ready ? '▶️ ' : '⛔ ') + esc(plan.text || '') + '</div>';
+  document.getElementById('btn-winact').disabled = !plan.ready;
+
+  const o = data.office || {};
+  if (!o.products || !o.products.length) {
+    offEl.innerHTML = '<div style="opacity:.7">Nem található licencelt Office ezen a gépen. '
+      + '(A Microsoft 365 / Store-os Office fiókhoz kötött, az itt nem jelenik meg.)</div>';
+  } else {
+    offEl.innerHTML = o.products.map(p =>
+      '<div style="margin-bottom:10px"><b>' + esc(p.name || p.description) + '</b><br>'
+      + '<span class="winact-badge ' + esc(p.status_color) + '">' + esc(p.status_text) + '</span>'
+      + (p.partial_key ? ' <span class="winact-key">…' + esc(p.partial_key) + '</span>' : '')
+      + '</div>').join('')
+      + (o.ospp ? '<div class="winact-note">Kézi beavatkozáshoz: <span class="winact-key">' + esc(o.ospp) + '</span></div>' : '');
+  }
+}
+
+async function clearKmsServer() {
+  if (!confirm('Törlöd a beállított KMS-kiszolgálót? Az aktiválás utána a Microsoft felé megy.')) return;
+  try { await api().clear_kms_server(); } catch (e) { toast('Hiba: ' + e, 'error'); }
+}
+
+async function activateWindows() {
+  const w = (winActState && winActState.windows) || {};
+  // BIOS-kulcsos gépen kimondjuk, mi fog történni és miért az a jó - ez a legfontosabb
+  // információ, amit a technikusnak tudnia kell a kattintás pillanatában.
+  if (w.oem_key) {
+    if (!confirm('VAN GYÁRI KULCS A GÉPBEN!\n\n' + w.oem_key + '\n\n'
+      + 'Ez a kulcs az alaplapba (BIOS/UEFI) van égetve, és MINDIG MŰKÖDNI FOG — '
+      + 'újratelepítés után is megmarad.\n\n'
+      + 'NE CSERÉLD LE MÁSIK KULCSRA, bármi más csak rosszabb nála!\n\n'
+      + 'A program most EZZEL a gyári kulccsal fog aktiválni. Indulhat?')) return;
+  } else if (w.activated && !confirm('Ez a Windows MÁR aktiválva van ('
+      + (w.status_text || '') + ').\n\nBiztosan újraaktiválod?')) {
+    return;
+  }
+  try {
+    await api().activate_windows();
+  } catch (e) {
+    toast('Hiba: ' + e, 'error');
   }
 }
 
