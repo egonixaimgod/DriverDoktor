@@ -875,3 +875,53 @@ def install_call_logging(cls):
         if not inspect.isfunction(fn):
             continue
         setattr(cls, name, _make_logged(cls.__name__, fn))
+
+
+# ===========================================================================
+# EGYPÉLDÁNYOS MUTEX - a belépési pont hozza létre, de EL KELL TUDNI ENGEDNI
+# ---------------------------------------------------------------------------
+# MIÉRT: a program csak egy példányban futhat (driver_tool.py, "Global\...Mutex_Lock").
+# A CLI módra váltás viszont ÚJ FOLYAMATOT indít, és a régi (grafikus) példány még
+# fogja a mutexet, amikor az új elindul - az új példány ezért "A DriverVarázsló már fut
+# a rendszeren!" üzenettel azonnal kilépne (terepen ez történt, 2026-08-29).
+#
+# Ezért a belépési pont ide teszi a handle-t, és a váltás előtt elengedjük. Ha az új
+# folyamat indítása mégis elhasal, visszavesszük - különben a mostani példány mutex
+# nélkül futna tovább, és utána bárhányszor el lehetne indítani a programot.
+# ===========================================================================
+APP_MUTEX_HANDLE = None
+APP_MUTEX_NAME = r"Global\DriverVarazslo_App_Mutex_Lock"
+
+
+def release_app_mutex():
+    """Az egypéldányos mutex elengedése. True, ha tényleg elengedtük."""
+    global APP_MUTEX_HANDLE
+    h = APP_MUTEX_HANDLE
+    if not h:
+        logging.debug("[MUTEX] Nincs elengedhető mutex-handle.")
+        return False
+    try:
+        import ctypes
+        ctypes.windll.kernel32.ReleaseMutex(h)
+        ctypes.windll.kernel32.CloseHandle(h)
+        APP_MUTEX_HANDLE = None
+        logging.info("[MUTEX] Az egypéldányos mutex elengedve (CLI módra váltás).")
+        return True
+    except Exception as e:
+        logging.warning(f"[MUTEX] A mutex elengedése nem sikerült: {e}")
+        return False
+
+
+def acquire_app_mutex():
+    """A mutex visszavétele (ha az elengedés utáni művelet elhasalt)."""
+    global APP_MUTEX_HANDLE
+    if APP_MUTEX_HANDLE:
+        return True
+    try:
+        import ctypes
+        APP_MUTEX_HANDLE = ctypes.windll.kernel32.CreateMutexW(None, False, APP_MUTEX_NAME)
+        logging.info("[MUTEX] Az egypéldányos mutex visszavéve.")
+        return bool(APP_MUTEX_HANDLE)
+    except Exception as e:
+        logging.warning(f"[MUTEX] A mutex visszavétele nem sikerült: {e}")
+        return False

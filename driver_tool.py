@@ -17,7 +17,7 @@ import threading
 import time
 import logging
 
-BUILD_NUMBER = 282
+BUILD_NUMBER = 283
 
 from app import common
 common.BUILD_NUMBER = BUILD_NUMBER
@@ -76,6 +76,12 @@ if __name__ == "__main__":
             pass
         sys.exit(0)
 
+    # A handle-t elérhetővé tesszük: a CLI módra váltás ÚJ folyamatot indít, és a mutexet
+    # el kell engedni, különben az új példány "már fut a rendszeren" üzenettel kilépne
+    # (lásd common.release_app_mutex).
+    common.APP_MUTEX_HANDLE = hMutex
+    common.APP_MUTEX_NAME = mutex_name
+
     import multiprocessing
     multiprocessing.freeze_support()
 
@@ -98,6 +104,15 @@ if __name__ == "__main__":
                 sys.stdout = open("CONOUT$", "w", encoding="utf-8")
                 sys.stderr = open("CONOUT$", "w", encoding="utf-8")
                 sys.stdin = open("CONIN$", "r", encoding="utf-8")
+            else:
+                # NINCS szülő-konzol, amihez csatlakozhatnánk: SAJÁT konzolt nyitunk.
+                # Ez az eset NEM elméleti - így indul a CLI, ha (a) a grafikus felület
+                # "CLI mód" gombja indította (app/gui/climode.py), vagy (b) valaki az
+                # exe-t közvetlenül, `--cli` kapcsolóval futtatja. A windowed exe-ben a
+                # `sys.stdout` ilyenkor None, tehát enélkül a menü egy ÜRES, néma ablak
+                # lenne - minden kiírás nyomtalanul elveszne (a print() AttributeError-t
+                # dobna, amit a konzol-réteg elnyel).
+                ensure_console()
 
     # Logging - RotatingFileHandler, hogy a DEBUG-szintű, minden subprocess-kimenetet logoló
     # fájl ne nőhessen korlátlanul (egy hosszú élettartamú szerviz-USB-n/WinPE-n, sok gépen,

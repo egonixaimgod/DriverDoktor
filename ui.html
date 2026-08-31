@@ -227,6 +227,21 @@ td input[type="checkbox"]{accent-color:var(--accent);width:16px;height:16px;curs
 .progress{height:8px;background:rgba(180,100,255,0.15);border-radius:4px;overflow:hidden;width:100%;border:1px solid rgba(180,100,255,0.2)}
 .progress-fill{height:100%;background:linear-gradient(90deg,#b060ff,var(--green));border-radius:4px;transition:width 0.4s ease;box-shadow:0 0 12px var(--accent-glow);width:0%}
 .progress-indeterminate .progress-fill{width:30%!important;animation:indeterminate 1.5s ease-in-out infinite}
+/* Élő szken-jelző (Driver keresés). A forgó pont és a másodpercre frissülő eltelt idő
+   nem dísz: ez a KÉT elem mondja meg, hogy a program dolgozik és nem ragadt be - a
+   százalék önmagában percekig állhat egy lassú hálózati lekérdezés alatt. */
+.scan-live{margin-bottom:12px;padding:14px 16px;border-radius:12px;
+  background:rgba(90,140,255,0.08);border:1px solid rgba(120,160,255,0.28)}
+.scan-live-head{display:flex;align-items:center;gap:10px;margin-bottom:10px}
+.scan-phase{flex:1;font-size:13px;font-weight:700;color:var(--text)}
+.scan-elapsed{font-family:ui-monospace,Consolas,monospace;font-size:13px;font-weight:700;
+  color:var(--yellow);min-width:48px;text-align:right}
+.scan-detail{margin-top:8px;font-size:11px;color:var(--text3);min-height:15px;
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.scan-spinner{width:13px;height:13px;flex:0 0 auto;border-radius:50%;
+  border:2px solid rgba(180,100,255,0.25);border-top-color:var(--accent);
+  animation:scanspin 0.8s linear infinite}
+@keyframes scanspin{to{transform:rotate(360deg)}}
 @keyframes indeterminate{0%{margin-left:-30%}100%{margin-left:100%}}
 
 /* HW Tree */
@@ -577,6 +592,11 @@ td input[type="checkbox"]{accent-color:var(--accent);width:16px;height:16px;curs
     <!-- Target Bar -->
     <div class="target-bar">
       <span class="target-label online" id="target-label">JELENLEGI RENDSZER</span>
+      <!-- CLI MÓD: a régi/lassú gépeken a grafikus felület használhatatlan, ezért egy
+           kattintással át lehet váltani szöveges módba (a program új konzolablakban
+           indul újra, ez a példány kilép). -->
+      <button class="btn btn-sm" onclick="switchToCliMode()" id="btn-cli-mode"
+              title="Átvált szöveges (CLI) módra: a program új konzolablakban indul újra, ugyanazzal a tudással, de a nehéz grafikus réteg nélkül. Régi, lassú gépeken ez a használható mód.">🖥️ CLI mód</button>
       <button class="btn btn-sm" onclick="changeTarget()">Másik lemez kiválasztása</button>
       <button class="btn btn-sm" onclick="resetTarget()">Vissza (Jelenlegi lemez)</button>
     </div>
@@ -823,8 +843,20 @@ td input[type="checkbox"]{accent-color:var(--accent);width:16px;height:16px;curs
               🔄 Eszközök újrakötése a gyári driverre (ha valami az alapdriveren ragadt)
             </button>
           </div>
+          <!-- ÉLŐ FOLYAMATJELZŐ. A szken 3-5 percig is tarthat, és korábban csak egy
+               animált csík + egy ritkán frissülő szöveg volt: a technikus nem tudta
+               eldönteni, dolgozik-e a program vagy beragadt. Most látszik a fázis, a
+               tényleges százalék, az épp vizsgált eszköz és a percre pontos eltelt idő. -->
+          <div class="scan-live" id="hw-live" style="display:none">
+            <div class="scan-live-head">
+              <span class="scan-spinner" id="hw-spinner"></span>
+              <span class="scan-phase" id="hw-phase">Indul...</span>
+              <span class="scan-elapsed" id="hw-elapsed">0:00</span>
+            </div>
+            <div class="progress" id="hw-progress"><div class="progress-fill" id="hw-progress-fill"></div></div>
+            <div class="scan-detail" id="hw-detail"></div>
+          </div>
           <div style="margin-bottom:10px">
-            <div class="progress" id="hw-progress" style="display:none"><div class="progress-fill" id="hw-progress-fill"></div></div>
             <div id="hw-status" style="color:var(--text2);font-size:12px;margin-top:6px"></div>
           </div>
           <div id="hw-rescan-offer"></div>
@@ -2526,10 +2558,8 @@ async function startHwScan() {
   document.getElementById('intel-card').innerHTML = '';
   document.getElementById('oem-card').style.display = 'none';
   document.getElementById('oem-card').innerHTML = '';
-  document.getElementById('hw-progress').style.display = 'block';
-  document.getElementById('hw-progress').classList.add('progress-indeterminate');
-  document.getElementById('hw-progress-fill').style.width = '30%';
-  document.getElementById('hw-status').textContent = '⏳ Scannelés folyamatban...';
+  hwScanStart();
+  document.getElementById('hw-status').textContent = '';
   document.getElementById('btn-hw-scan').disabled = true;
   updateHwButtons();
   try {
@@ -2544,19 +2574,61 @@ async function startHwScan() {
                               stEl ? !!stEl.checked : false,
                               fwEl ? !!fwEl.checked : false);
   } catch (e) {
+    hwScanStop();
     document.getElementById('hw-status').textContent = '❌ Hiba: ' + e;
-    document.getElementById('hw-progress').style.display = 'none';
     document.getElementById('btn-hw-scan').disabled = false;
     toast('Hardver scan hiba: ' + e, 'error');
   }
 }
+
+/* ---- ÉLŐ SZKEN-JELZŐ ----------------------------------------------------
+   A szken 3-5 percig is tarthat. Korábban csak egy animált csík volt, ritkán
+   frissülő szöveggel - a technikus nem tudta eldönteni, dolgozik-e a program vagy
+   beragadt ("azt se latom h most keres e valamit vagy beragadt").
+
+   AZ ELTELT IDŐ ÓRÁJA A LEGFONTOSABB ELEM: a Windows Update keresése egyetlen,
+   percekig tartó blokkoló hívás, ami közben SEMMILYEN adatot nem küld - ott a
+   százalék és a szöveg is percekig áll. Egy másodpercenként lépő óra viszont
+   bizonyítja, hogy a felület él és a művelet fut. */
+let hwScanTimer = null, hwScanT0 = 0;
+
+function hwScanStart() {
+  hwScanT0 = Date.now();
+  document.getElementById('hw-live').style.display = 'block';
+  document.getElementById('hw-progress').classList.add('progress-indeterminate');
+  document.getElementById('hw-progress-fill').style.width = '30%';
+  document.getElementById('hw-phase').textContent = 'Indul...';
+  document.getElementById('hw-detail').textContent = '';
+  document.getElementById('hw-spinner').style.display = '';
+  if (hwScanTimer) clearInterval(hwScanTimer);
+  hwScanTimer = setInterval(hwScanTick, 1000);
+  hwScanTick();
+}
+
+function hwScanTick() {
+  const s = Math.floor((Date.now() - hwScanT0) / 1000);
+  document.getElementById('hw-elapsed').textContent =
+    Math.floor(s / 60) + ':' + String(s % 60).padStart(2, '0');
+}
+
+function hwScanStop() {
+  if (hwScanTimer) { clearInterval(hwScanTimer); hwScanTimer = null; }
+  document.getElementById('hw-spinner').style.display = 'none';
+}
+
 function updateHwScanProgress(data) {
-  document.getElementById('hw-status').textContent = data.status || '';
+  if (data.status) document.getElementById('hw-phase').textContent = data.status;
+  // A `detail` az épp vizsgált eszköz neve: ez mozog akkor is, amikor a százalék
+  // egy lassú lekérdezés alatt áll.
+  if (data.detail !== undefined) document.getElementById('hw-detail').textContent = data.detail || '';
   if (data.sys_info) document.getElementById('sys-info').textContent = data.sys_info;
-  if (data.determinate) {
-    document.getElementById('hw-progress').classList.remove('progress-indeterminate');
-    const pct = data.total > 0 ? (data.current / data.total * 100) : 0;
-    document.getElementById('hw-progress-fill').style.width = pct + '%';
+  const bar = document.getElementById('hw-progress');
+  if (data.determinate && data.total > 0) {
+    bar.classList.remove('progress-indeterminate');
+    document.getElementById('hw-progress-fill').style.width =
+      Math.max(2, Math.min(100, data.current / data.total * 100)) + '%';
+  } else if (data.determinate === false) {
+    bar.classList.add('progress-indeterminate');
   }
 }
 function onHwScanResult(data) {
@@ -2564,8 +2636,11 @@ function onHwScanResult(data) {
   hwInstalled = data.installed || [];
   renderHwProblems(data.problems || []);
   document.getElementById('btn-hw-scan').disabled = false;
+  hwScanStop();
   document.getElementById('hw-progress').classList.remove('progress-indeterminate');
   document.getElementById('hw-progress-fill').style.width = '100%';
+  document.getElementById('hw-phase').textContent = '✅ Kész';
+  document.getElementById('hw-detail').textContent = '';
   document.getElementById('hw-status').textContent = '✅ ' + hwPool.length + ' letölthető + ' + hwInstalled.length + ' telepített driver' + (data.time ? ' (' + data.time + ')' : '');
   if (data.sys_info) document.getElementById('sys-info').textContent = data.sys_info;
   // Select all available by default - KIVÉVE (a) a downgrade-jelölteket (a WU a
@@ -2579,7 +2654,7 @@ function onHwScanResult(data) {
   hwPool.forEach((d, i) => { if (!d.downgrade && !d.risky && !d.prev_no_bind) hwSelectedIndices.add(i); });
   renderHwTree();
   updateHwButtons();
-  setTimeout(() => { document.getElementById('hw-progress').style.display = 'none'; }, 2000);
+  setTimeout(() => { document.getElementById('hw-live').style.display = 'none'; }, 2500);
 }
 function renderHwTree() {
   const container = document.getElementById('hw-tree');
@@ -2964,6 +3039,31 @@ async function downloadBlockScript() {
   } finally {
     btn.disabled = false;
     btn.textContent = '⬇️ block.bat Letöltése';
+  }
+}
+
+/* ========== CLI MÓDRA VÁLTÁS ========== */
+async function switchToCliMode() {
+  if (!confirm('Átváltasz szöveges (CLI) módra?\n\n'
+    + 'A program egy új konzolablakban indul újra — ugyanazokkal a funkciókkal, '
+    + 'de a nehéz grafikus réteg nélkül. Régi, lassú gépeken ez a használható mód.\n\n'
+    + 'Ez az ablak bezárul.')) return;
+  const btn = document.getElementById('btn-cli-mode');
+  btn.disabled = true; btn.textContent = '⏳ Indul...';
+  try {
+    const res = await api().switch_to_cli_mode();
+    if (res && res.success) {
+      // A konzolablaknak idő kell elindulni, mielőtt ez a folyamat kilép. Bőven mérve:
+      // pont a lassú gépek a célközönség, és egy korai kilépés a mutex-elengedés utáni
+      // pillanatban hagyná ott a felhasználót.
+      btn.textContent = '✅ CLI ablak indul...';
+      setTimeout(() => { api().exit_app(); }, 2500);
+    } else {
+      btn.disabled = false; btn.textContent = '🖥️ CLI mód';
+    }
+  } catch (e) {
+    toast('Nem sikerült CLI módra váltani: ' + e, 'error');
+    btn.disabled = false; btn.textContent = '🖥️ CLI mód';
   }
 }
 

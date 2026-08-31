@@ -1154,6 +1154,13 @@ class GuiAutofixMixin:
         # feladat argumentuma is a megszokott viselkedést adja.
         if not getattr(self, '_autofix_wu_pause', True) and '--no-wu-pause' not in resume_flag:
             resume_flag += ' --no-wu-pause'
+        # CLI MÓD TOVÁBBVITELE (2026-08-29). A lábak külön processzek, és a `--cli` nélkül
+        # az ütemezett feladat a GRAFIKUS felületet indítaná el - pont azon a régi gépen,
+        # ahol a technikus azért választotta a CLI-t, mert a GUI használhatatlan. Onnantól
+        # a lánc vagy elakad, vagy percekig tartó felületre vár. Ugyanaz az elv, mint a
+        # többi kapcsolónál: EGY helyen fűzzük hozzá, nem a hívási helyeken.
+        if '--cli' in sys.argv and '--cli' not in resume_flag:
+            resume_flag += ' --cli'
         exe_path = _app_exe_path()
         temp_env = os.environ.get('TEMP', '!!').lower()
         # Ha temp mappából fut a program, a következő indulásig törlődhet alóla az exe -

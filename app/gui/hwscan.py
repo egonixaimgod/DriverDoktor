@@ -156,7 +156,7 @@ class GuiHwScanMixin:
                 _start = time.monotonic()
                 
                 # Internet ellenőrzés
-                self.emit('hw_scan_progress', {'status': '⏳ Internetkapcsolat ellenőrzése...'})
+                self.emit('hw_scan_progress', {'status': '1/6 · Internetkapcsolat ellenőrzése', 'detail': '', 'determinate': False})
                 if not self._check_internet():
                     self.emit('toast', {'message': '❌ Nincs internetkapcsolat! Telepíts egy hálózati drivert!', 'type': 'error'})
                     self.emit('hw_scan_result', {'pool': [], 'installed': [], 'sys_info': '❌ Nincs Internet!', 'time': ''})
@@ -164,13 +164,13 @@ class GuiHwScanMixin:
                 
                 # Hardver változások frissítése szkennelés előtt
                 logging.info("[HW_SCAN] Eszközök újra-szkennelése (PnP)...")
-                self.emit('hw_scan_progress', {'status': '⏳ Hardver változások keresése...'})
+                self.emit('hw_scan_progress', {'status': '1/6 · Hardver-változások keresése', 'detail': 'pnputil /scan-devices'})
                 self._run(['pnputil', '/scan-devices'])
                 time.sleep(2)
                 
                 sys_info_text = "Ismeretlen PC / Laptop"
                 logging.info("[HW_SCAN] Rendszer info lekérdezése...")
-                self.emit('hw_scan_progress', {'status': '⏳ Rendszer információk lekérdezése...'})
+                self.emit('hw_scan_progress', {'status': '2/6 · Rendszer-információk lekérdezése', 'detail': ''})
 
                 # System info
                 try:
@@ -215,7 +215,7 @@ class GuiHwScanMixin:
                         sys_info_text = f"{prefix} | {man} - {mod}"
                 except Exception as e:
                     logging.debug(e)
-                self.emit('hw_scan_progress', {'sys_info': sys_info_text, 'status': '⏳ PnP eszközök lekérdezése...'})
+                self.emit('hw_scan_progress', {'sys_info': sys_info_text, 'status': '2/6 · Csatlakoztatott eszközök felderítése', 'detail': ''})
 
                 # PnP devices - a szűrés/kategorizálás a KÖZÖS _filter_wu_scan_devices-ben él
                 # (az AutoFix ugyanezt használja - ne ide írj eszköz-szűrési logikát!)
@@ -227,7 +227,7 @@ class GuiHwScanMixin:
                 except Exception as ex:
                     logging.error(f"PNP Query error: {ex}")
 
-                self.emit('hw_scan_progress', {'status': '📋 PnP eszközök szűrése...'})
+                self.emit('hw_scan_progress', {'status': '2/6 · Eszközlista szűrése', 'detail': ''})
 
                 devices_to_check = _filter_wu_scan_devices(pnp_data)
 
@@ -256,18 +256,18 @@ class GuiHwScanMixin:
 
                 # Telepített driver-verziók/dátumok egyszeri felmérése: a találatok melletti
                 # "Telepítve: X" kijelzéshez ÉS a katalógus-út már-telepítve szűréséhez.
-                self.emit('hw_scan_progress', {'status': '📋 Telepített driver-verziók felmérése...'})
+                self.emit('hw_scan_progress', {'status': '3/6 · Telepített driver-verziók felmérése', 'detail': 'dism /Get-Drivers — 15-50 mp'})
                 inst_info = self._get_installed_driver_info()
 
                 # Közvetlen WU API lekérdezés (a COM objektum ezen kulcs módosítása nélkül is látja a drivereket)
-                self.emit('hw_scan_progress', {'status': '🔎 Windows Update driver-keresés folyamatban...'})
+                self.emit('hw_scan_progress', {'status': '4/6 · Windows Update kérdezése', 'detail': 'Ez a leghosszabb szakasz — akár 2-5 perc is lehet, közben a Windows nem ad jelzést. Az óra fut: a program dolgozik.', 'determinate': False})
                 wu_results = self._search_wu_api()
                 wu_api_success = wu_results is not None
 
                 if wu_results is None:
                     wu_results = []
 
-                self.emit('hw_scan_progress', {'status': '📋 Eredmények feldolgozása...'})
+                self.emit('hw_scan_progress', {'status': '5/6 · A Windows Update válaszának feldolgozása', 'detail': ''})
 
                 # Párosítás a KÖZÖS _match_wu_updates_to_devices-szel (HWID prefix + név-tartalék,
                 # az AutoFix is pontosan ezt hívja - ne ide írj párosítási logikát!)
@@ -357,7 +357,9 @@ class GuiHwScanMixin:
                     # Teljes katalógus-fallback: a WU API elhasalt, minden eszközt a
                     # katalógusban keresünk.
                     self.wu_api_mode = False
-                    self.emit('hw_scan_progress', {'status': f'🌐 WU API hiba, katalógus keresés ({total_devs} eszköz)...'})
+                    self.emit('hw_scan_progress', {'status': f'6/6 · Microsoft Update Catalog — {total_devs} eszköz',
+                                                   'detail': 'A Windows Update nem válaszolt, ezért mindent a katalógusban keresünk.',
+                                                   'determinate': True, 'current': 0, 'total': total_devs})
                     self._catalog_search(devices_to_check, installed_info=inst_info)
                 else:
                     # HIBRID KIEGÉSZÍTÉS: a hibakódos (driver nélküli / hibás) eszközökre,
@@ -408,7 +410,9 @@ class GuiHwScanMixin:
                         extra = sum(1 for d in todo if d['id'] not in primary_ids)
                         if extra:
                             parts.append(f'{extra} mélykeresés')
-                        self.emit('hw_scan_progress', {'status': f'🌐 Katalógus-kiegészítés ({" + ".join(parts)} eszköz)...'})
+                        self.emit('hw_scan_progress', {'status': f'6/6 · Microsoft Update Catalog — {len(todo)} eszköz',
+                                                       'detail': f'Forrás: {" + ".join(parts)}',
+                                                       'determinate': True, 'current': 0, 'total': len(todo)})
                         self._catalog_search(todo, installed_info=inst_info)
 
                 # A "telepített/naprakész" lista: minden eszköz, amire végül nincs találat.
@@ -461,6 +465,9 @@ class GuiHwScanMixin:
                 # hónapokkal lemarad a gyári driverektől - NVIDIA-nál letöltés+csendes
                 # telepítés, AMD/Intel-nél verzió-összevetés + hivatalos oldal link-out.
                 # Mindnek saját hibakezelése van, a szken eredményét sosem boríthatják.
+                self.emit('hw_scan_progress', {'status': 'Gyári (NVIDIA/AMD/Intel) driverek ellenőrzése',
+                                               'detail': 'A gyártók szervereinek kérdezése — pár másodperc.',
+                                               'determinate': False})
                 self._check_nvidia_driver()
                 self._check_amd_driver()
                 self._check_intel_driver()
@@ -524,7 +531,7 @@ try {
                 return data if isinstance(data, list) else None
         except subprocess.TimeoutExpired:
             logging.error("[WU_API] WU API timeout (300s) - szolgáltatás-újraindítás, majd azonnali továbblépés (nincs második keresési kör)...")
-            self.emit('hw_scan_progress', {'status': '⚠️ A Windows Update API nem válaszol (5 perc) - áttérés a katalógus keresésre...'})
+            self.emit('hw_scan_progress', {'status': '⚠️ A Windows Update nem válaszolt (5 perc) — áttérés a katalógusra', 'detail': ''})
             # A 'autofix' csatornára CSAK akkor írunk, ha tényleg AutoFix fut: kézi
             # szkennelésnél ez a sor a logban ([EMIT:]) az AutoFix-hez tartozónak látszott,
             # és egy terepi bejelentés kivizsgálásakor pont ez viszi félre a nyomot.
@@ -1121,6 +1128,27 @@ try {
         for dev in devices_to_check:
             q.put(dev)
 
+        # ÉLŐ VISSZAJELZÉS (2026-08-29, explicit user decision). Ez a kör a szken leghosszabb
+        # szakasza: 90+ eszköz, eszközönként max 4 HTTP-lekérdezés, 10 szálon - percekig tart.
+        # Eddig EGYETLEN státuszsort küldött az elején, utána semmit, így a technikus nem
+        # tudta megkülönböztetni a dolgozó programot a beragadttól ("azt se latom h most keres
+        # e valamit vagy beragadt"). Eszközönként jelezünk vissza: hányadiknál tartunk, mennyi
+        # a találat, és épp melyik eszközt kérdezzük.
+        total_cat = len(devices_to_check)
+        progress = {'done': 0}
+
+        def _report(dev_name):
+            """Egy eszköz feldolgozása után jelez. A számlálót a `lock` védi: 10 szál írja."""
+            with lock:
+                progress['done'] += 1
+                done, hits = progress['done'], len(found)
+            self.emit('hw_scan_progress', {
+                'status': f'🌐 Katalógus-keresés: {done}/{total_cat} eszköz'
+                          + (f' · {hits} találat' if hits else ''),
+                'detail': dev_name,
+                'determinate': True, 'current': done, 'total': total_cat,
+            })
+
         def cat_worker():
             while not q.empty():
                 try:
@@ -1135,6 +1163,11 @@ try {
                             found.append(hit)
                 except Exception as e:
                     logging.debug(f"[CATALOG] Hiba: {dev.get('name')} - {e}")
+                try:
+                    _report(dev.get('name') or '')
+                except Exception as e:
+                    # A visszajelzés SOHA nem akaszthatja meg a keresést.
+                    logging.debug(f"[CATALOG] Folyamatjelzés hiba: {e}")
                 q.task_done()
 
         threads = [threading.Thread(target=cat_worker, daemon=True, name=f"catalog-{i}") for i in range(10)]
