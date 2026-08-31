@@ -2475,3 +2475,79 @@ def clear_wlan_backup():
         logging.info(f"[WLAN-BACKUP] A lánc végén törölve: {count} mentett WLAN-profil ({dest}).")
     except Exception as e:
         logging.warning(f"[WLAN-BACKUP] A mentés törlése sikertelen: {e}")
+
+
+# ============================================================================
+# CSAK AZ ILLESZKEDŐ INF-EK TELEPÍTÉSE (2026-08-31, terepi mérésre)
+# ----------------------------------------------------------------------------
+# MIÉRT: a `pnputil /add-driver <mappa>\*.inf /subdirs /install` a csomag MINDEN INF-jét
+# felstage-eli, akkor is, ha egyetlen eszköz sem használja őket. Terepen (ThinkPad T14
+# Gen 1) a katalógus egy Realtek hangdriver-csomagot adott **212 INF-fel** - ebből a gépnek
+# EGY kellett. Két baj lett belőle, mindkettő mérve:
+#   - a telepítés 31 percig futott (egy másik csomagnál 15,5 percig),
+#   - utána a takarítás 211 csomagot törölt egyenként, és az egyik törlés BERAGADT
+#     (42 perc, a gép újraindításáig).
+#
+# A megoldás nem új ötlet, csak a MEGLÉVŐ döntés előrehozása: a telepítés utáni takarítás
+# (`_cleanup_unused_staged_infs`) pontosan ugyanazt a kérdést teszi fel - "használja-e ezt
+# az INF-et bármelyik jelen lévő eszköz?" -, csak utólag. Ha előre válaszoljuk meg, a
+# végállapot ugyanaz, viszont nincs 212 felesleges stage + 211 törlés.
+#
+# BIZTONSÁG: ez a függvény SOSEM ad vissza üres listát találat nélkül - `None`-t ad, ami
+# azt jelenti: "nem tudom eldönteni, telepítsd az egészet" (a mai viselkedés). A hívó
+# ezen felül vissza is esik a teljes telepítésre, ha a szűkített után az eszköz nem kötött
+# rá - így a végeredmény soha nem lehet rosszabb a mainál.
+# ============================================================================
+
+# E fölött nincs értelme szűkíteni: a nyereség elolvad, a sok külön pnputil-hívás viszont
+# lassít. Ilyenkor marad a csillagos, egy hívásos telepítés.
+INF_SELECT_MAX = 20
+
+
+def select_applicable_infs(ext_dir, hwid_sets):
+    """A csomagból azok az INF-ek, amiket a gép valamelyik JELENLÉVŐ eszköze használhat.
+
+    `hwid_sets`: hardver-azonosító listák (a cél-eszközé és a gép többi eszközéé).
+
+    Visszatérés: (kiválasztott_útvonalak, összes_INF, indok) - vagy (None, összes, indok),
+    ha nem dönthető el, és a teljes csomagot kell telepíteni."""
+    dev_hwids = [h for hs in (hwid_sets or []) for h in (hs or []) if h]
+    if not dev_hwids:
+        return None, 0, 'nincs eszköz-azonosító'
+
+    infs, parsed_any = [], False
+    for root, _dirs, files in os.walk(ext_dir):
+        for fn in files:
+            if not fn.lower().endswith('.inf'):
+                continue
+            path = os.path.join(root, fn)
+            ids = extract_inf_hardware_ids(_read_text_best_effort(path))
+            if ids:
+                parsed_any = True
+            infs.append((path, fn, ids))
+
+    if not infs:
+        return None, 0, 'nincs INF a csomagban'
+    if not parsed_any:
+        # Egyetlen INF-ből sem sikerült azonosítót kiolvasni (kódolási gond) - a
+        # pnputil-ra bízzuk, ahogy az `inf_package_applies` is teszi.
+        return None, len(infs), 'egyetlen INF-ből sem sikerült azonosítót kiolvasni'
+
+    selected = []
+    for path, fn, ids in infs:
+        if not ids:
+            # Azonosító nélküli INF (pl. csak másolandó fájlokat definiál): NEM hagyjuk ki,
+            # mert lehet a fő INF társa. Egy fölösleges INF ára egy DriverStore-bejegyzés;
+            # egy hiányzóé egy nem működő eszköz.
+            selected.append(path)
+            continue
+        if any(_hwid_matches(i, d) for i in ids for d in dev_hwids):
+            selected.append(path)
+
+    if not selected:
+        return None, len(infs), 'egyetlen INF sem illeszkedik (a teljes csomag megy fel)'
+    if len(selected) >= len(infs):
+        return None, len(infs), 'a csomag minden INF-je illeszkedik'
+    if len(selected) > INF_SELECT_MAX:
+        return None, len(infs), f'{len(selected)} INF illeszkedik (a szűkítés nem érné meg)'
+    return selected, len(infs), f'{len(selected)}/{len(infs)} INF illeszkedik erre a gépre'

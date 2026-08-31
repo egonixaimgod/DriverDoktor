@@ -31,6 +31,7 @@ from app.wu_core import base_vendor_hwid
 from app.wu_core import mark_generic_replace_candidates
 from app.wu_core import deep_catalog_candidates as wu_core_deep_candidates
 from app.wu_core import inf_package_applies
+from app.wu_core import select_applicable_infs
 from app.wu_core import unoffered_requested_titles
 from app.wu_core import is_specific_hwid
 from app.wu_core import driver_model_rank
@@ -46,6 +47,7 @@ from app.wu_core import FIRMWARE_CLASS_WARNING
 from app.drivers_core import DELETE_DRIVER_TIMEOUT
 from app.drivers_core import INSTALL_DRIVER_TIMEOUT
 from app.common import CMD_TIMEOUT_RETURNCODE
+from app.common import CommandResult
 # === /AUTO-IMPORTS ===
 
 
@@ -1727,6 +1729,70 @@ try {
         except Exception as e:
             logging.warning(f"[CATALOG_INSTALL] A fel nem használt INF-ek kivezetése nem sikerült ({name}): {e}")
 
+    def _build_add_driver_cmd(self, ext_path, selected_infs=None):
+        """A `pnputil /add-driver` parancs(ok): szűkített INF-listával vagy a teljes csomaggal.
+
+        Több INF-et a pnputil egy hívásban nem fogad, ezért a szűkített ág INF-enként külön
+        parancsot ad - a hívó ezért listát is kaphat vissza. Egy-két hívás nagyságrendekkel
+        olcsóbb, mint 212 INF felstage-elése."""
+        if not selected_infs:
+            return [['pnputil', '/add-driver', f"{ext_path}\\*.inf", '/subdirs', '/install']]
+        return [['pnputil', '/add-driver', inf, '/install'] for inf in selected_infs]
+
+    def _run_add_driver(self, cmds, task_id, title):
+        """Egy vagy több `pnputil /add-driver` hívás lefuttatása, EGY összevont eredménnyel.
+
+        A szűkített telepítés INF-enként külön parancsot ad, a hívó logikája viszont egyetlen
+        eredményt vár (az `Added driver packages: N` és a blokkonkénti kimenet elemzését).
+        Ezért a kimeneteket összefűzzük, a visszatérési kód pedig a "legrosszabb" lesz: így
+        egy részleges hiba nem tűnhet el egy sikeres testvér-hívás mögött.
+
+        IDŐKORLÁT: terepen (2026-08-31, ThinkPad T14 Gen 1) egy `/add-driver` **31 percig**
+        futott. A határ bőkezű (INSTALL_DRIVER_TIMEOUT): nem a lassú, hanem a VÉGTELEN
+        telepítést kell megfogni."""
+        out, err, rc = [], [], 0
+        for c in cmds:
+            r = self._run(c, ok_codes=(0, 259, 3010), timeout=INSTALL_DRIVER_TIMEOUT)
+            out.append(r.stdout or '')
+            err.append(r.stderr or '')
+            if r.returncode == CMD_TIMEOUT_RETURNCODE:
+                rc = CMD_TIMEOUT_RETURNCODE
+                break
+            if r.returncode not in (0, 259) and rc in (0, 259):
+                rc = r.returncode          # 3010 vagy valódi hiba felülírja a semlegeset
+        return CommandResult(rc, '\n'.join(out), '\n'.join(err))
+
+    def _present_hwid_sets(self, drv):
+        """A cél-eszköz ÉS a gép többi jelenlévő eszközének hardver-azonosítói.
+
+        MIÉRT KELL A TÖBBI IS: egy csomag jogosan tartalmazhat INF-et a gép MÁSIK
+        eszközéhez is (pl. a hangchip mellé a hozzá tartozó effekt-komponens). Ha csak a
+        cél-eszközre szűkítenénk, azokat kihagynánk - miközben a telepítés utáni takarítás
+        (`_cleanup_unused_staged_infs`) is a "bármelyik jelenlévő eszköz használja"
+        kritériumot alkalmazza. A két helynek ugyanazt kell mondania, különben a szűkítés
+        olyat dobna el, amit a takarítás megtartana.
+
+        A lekérdezés egyszer fut és a példányon marad: egy telepítési kör több csomagot
+        dolgoz fel, és a gép eszközlistája közben nem változik érdemben."""
+        sets = [drv.get('all_hwids') or []]
+        cached = getattr(self, '_present_hwids_cache', None)
+        if cached is None:
+            cached = []
+            try:
+                res = self._run(["powershell", "-NoProfile", "-Command", WU_PNP_QUERY_PS],
+                                encoding='utf-8', timeout=180)
+                data = json.loads(res.stdout) if (res.stdout or '').strip() else []
+                for d in _filter_wu_scan_devices(data):
+                    if d.get('all_hwids'):
+                        cached.append(d['all_hwids'])
+                logging.info(f"[INF-SELECT] Eszközlista az INF-válogatáshoz: {len(cached)} eszköz.")
+            except Exception as e:
+                # Nem kritikus: enélkül csak a cél-eszközre szűkítünk (kevesebb INF
+                # minősül illeszkedőnek), a visszaesési ág pedig mindent helyrerak.
+                logging.warning(f"[INF-SELECT] Az eszközlista beolvasása sikertelen: {e}")
+            self._present_hwids_cache = cached
+        return sets + cached
+
     def _install_catalog_sync(self, selected_pool, task_id='wu_install'):
         """A kijelölt katalógusos (url-es) elemek telepítése: cab letöltés -> expand ->
         pnputil /add-driver /install (offline cél-OS-nél dism /Add-Driver); .msu csomagnál
@@ -2021,7 +2087,22 @@ try {
                     cmd = ['dism', f'/Image:{self.target_os_path}', '/Add-Driver', f'/Driver:{ext_path}', '/Recurse']
                     res = self._run(cmd)
                 else:
-                    cmd = ['pnputil', '/add-driver', f"{ext_path}\\*.inf", '/subdirs', '/install']
+                    # CSAK AZ ILLESZKEDŐ INF-EKET TELEPÍTJÜK, ha el tudjuk dönteni, melyek
+                    # azok (wu_core.select_applicable_infs). Terepen egy Realtek hangcsomag
+                    # 212 INF-fel jött, amiből EGY kellett: a teljes telepítés 31 percig
+                    # futott, majd a takarítás 211 csomagot törölt egyenként - és az egyik
+                    # törlés beragadt 42 percre. A szűkítés ugyanoda érkezik, csak a
+                    # felesleges kerülő nélkül. `None` = nem eldönthető -> marad a régi,
+                    # csillagos telepítés.
+                    sel, total_inf, why = select_applicable_infs(ext_path, self._present_hwid_sets(drv))
+                    if sel:
+                        logging.info(f"[CATALOG_INSTALL] {name}: {why} - csak azokat telepítjük: "
+                                     f"{[os.path.basename(x) for x in sel]}")
+                        self.emit('task_progress', {'task': task_id, 'log':
+                                  f'  ⓘ {name}: a csomag {total_inf} INF-jéből {len(sel)} való erre a gépre - csak azt telepítjük.'})
+                    elif total_inf > 1:
+                        logging.info(f"[CATALOG_INSTALL] {name}: teljes telepítés ({total_inf} INF) - {why}.")
+                    cmd = self._build_add_driver_cmd(ext_path, sel)
                     # 259 = a csomag már fent van / nincs rá kötő eszköz (lentebb no-op),
                     # 3010 = siker, de reboot kell - mindkettő VÁRT kimenet, WARNING nélkül
                     # (terepi log, 2026-07-28: 4 hamis WARNING egy hibátlan futásban).
@@ -2033,8 +2114,7 @@ try {
                     # (INSTALL_DRIVER_TIMEOUT): egy nagy chipset-csomag telepítése valóban
                     # lehet több perc, tehát nem szabad egy lassú, de HALADÓ telepítést
                     # elvágni - csak a végtelen lógást kell megfogni.
-                    res = self._run(cmd, ok_codes=(0, 259, 3010),
-                                    timeout=INSTALL_DRIVER_TIMEOUT)
+                    res = self._run_add_driver(cmd, task_id, title)
                     if res.returncode == CMD_TIMEOUT_RETURNCODE:
                         # Nem hallgatjuk el: a csomag állapota ilyenkor bizonytalan, és a
                         # technikusnak tudnia kell, melyik telepítés akadt el.
@@ -2044,6 +2124,22 @@ try {
                                   f'⏱️ A(z) "{title}" telepítése {INSTALL_DRIVER_TIMEOUT // 60} perc után '
                                   f'sem fejeződött be - továbblépünk. A csomag a következő '
                                   f'újraindítás után befejeződhet.'})
+                    elif sel and res.returncode != 3010:
+                        # VISSZAESÉS: ha a szűkített telepítés után a pnputil NEM jelenti,
+                        # hogy az eszköz megkapta a drivert, feltesszük a TELJES csomagot.
+                        # Így a szűkítés a legrosszabb esetben sem ronthat: vagy gyorsabb
+                        # ugyanazzal az eredménnyel, vagy visszaáll a korábbi viselkedésre.
+                        # (3010 = újraindítás kell -> a kötés a következő bootnál dől el,
+                        # ott most nem ítélkezünk.)
+                        if not package_bound_to_device_family(res.stdout or '', drv):
+                            logging.warning(f"[CATALOG_INSTALL] {name}: a szűkített telepítés után az "
+                                            f"eszköz nem kapta meg a drivert - teljes csomag telepítése.")
+                            self.emit('task_progress', {'task': task_id, 'log':
+                                      f'  ↻ {name}: a szűkített telepítés nem volt elég - a teljes csomag megy fel.'})
+                            full = self._run_add_driver(self._build_add_driver_cmd(ext_path), task_id, title)
+                            res = CommandResult(full.returncode,
+                                                (res.stdout or '') + '\n' + (full.stdout or ''),
+                                                (res.stderr or '') + '\n' + (full.stderr or ''))
                 # pnputil kimenet: "Added driver packages:  N". Ha N==0, semmi nem települt
                 # (a csomag már a store-ban van / up-to-date, kód 259) - ezt TILOS sikernek
                 # számolni: az AutoFix katalógus-záróköre soha be nem bind-elő eszközön
