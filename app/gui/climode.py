@@ -73,10 +73,46 @@ class GuiCliModeMixin:
             # látott. A `DETACHED_PROCESS` egyáltalán nem ad konzolt, így nincs mit
             # örökölni: az `AttachConsole` elbukik, és a program SAJÁT, LÁTHATÓ konzolt
             # nyit (`ensure_console`).
-            logging.info(f"[CLI-MODE] Indítás (DETACHED_PROCESS): {cmd}")
-            subprocess.Popen(cmd, creationflags=subprocess.DETACHED_PROCESS,
-                             cwd=os.path.dirname(exe) or None,
-                             close_fds=True)
+            # AZ ÚJ PÉLDÁNYNAK SAJÁT `_MEIxxxxx` MAPPA KELL - KÜLÖNBEN A MIÉNKBEN FUT.
+            #
+            # MÉRVE (2026-08-31, PyInstaller 6.20, külön diagnosztikai onefile exe-vel):
+            # egy onefile-exe bootloadere a `_PYI_APPLICATION_HOME_DIR` /
+            # `_PYI_PARENT_PROCESS_LEVEL` környezeti változókkal mondja meg a gyereknek,
+            # hogy "te már a kicsomagolt példány vagy". Ezek ÖRÖKLŐDNEK az általunk
+            # indított folyamatra is, tehát az ÚJ CLI példány NEM csomagol ki magának,
+            # hanem a MI temp mappánkat használja:
+            #     örökölt környezettel   -> gyerek _MEIPASS = _MEI176082  (= a szülőé!)
+            #     PYINSTALLER_RESET_...  -> gyerek _MEIPASS = _MEI109362  (saját)
+            #     a _PYI_* változók nélkül-> gyerek _MEIPASS = _MEI154882  (saját)
+            # Ezért kapta a felhasználó kilépéskor a
+            # "Failed to remove temporary directory: ...\\_MEIxxxxx" ablakot: a mi
+            # bootloaderünk törölni akarta a mappát, amiben ekkor MÁR A CLI FUTOTT.
+            # És ez nem csak csúnya: a CLI egy olyan mappából futott, amit épp törölni
+            # próbáltak - ha a törlés részben sikerül, a CLI menet közben elszáll.
+            #
+            # Mindkét bevált utat használjuk: a PyInstaller saját kapcsolóját ÉS a
+            # változók törlését. Egy jövőbeli PyInstaller átnevezheti valamelyiket,
+            # a másik akkor is megvédi.
+            child_env = {k: v for k, v in os.environ.items() if not k.startswith('_PYI_')}
+            child_env['PYINSTALLER_RESET_ENVIRONMENT'] = '1'
+            logging.info(f"[CLI-MODE] Indítás (DETACHED_PROCESS, saját _MEI mappával): {cmd}")
+            helper = subprocess.Popen(cmd, creationflags=subprocess.DETACHED_PROCESS,
+                                      cwd=os.path.dirname(exe) or None,
+                                      close_fds=True, env=child_env)
+            # MEGVÁRJUK, AMÍG A SEGÉD `cmd` KILÉP - a NAPLÓ miatt. A `start` után a `cmd`
+            # azonnal végez, tehát ez a gyakorlatban ezredmásodperc, cserébe viszont
+            # naplózható a visszatérési kódja. Ennek konkrét terepi haszna van: a "CLI mód"
+            # gomb kétszer is úgy hibázott, hogy a felhasználó csak annyit látott, hogy
+            # "nem indul el semmi" (előbb az egypéldányos mutex, majd az idézőjel-kezelés
+            # miatt) - egy nem nulla `cmd` visszatérési kód mindkettőt azonnal elárulta
+            # volna. Az időkorlát csak azért van, hogy egy bármi miatt beragadt `cmd` ne
+            # fagyassza be a felületet.
+            try:
+                helper.wait(timeout=10)
+                logging.info(f"[CLI-MODE] A segéd cmd kilépett (kód={helper.returncode}) - "
+                             f"a CLI ablak innentől önálló, árva folyamat.")
+            except Exception as e:
+                logging.warning(f"[CLI-MODE] A segéd cmd nem lépett ki 10 mp alatt ({e}).")
         except Exception as e:
             # Az indítás elhasalt: a mutexet VISSZA KELL VENNI, különben ez a példány
             # mutex nélkül futna tovább, és a program bárhányszor elindítható lenne.
@@ -101,22 +137,21 @@ class GuiCliModeMixin:
 
         SZÁNDÉKOSAN NINCS `taskkill /T` (folyamatfa-kilövés), amit a belépési pont
         `cleanup_zombies()`-a használ: itt épp azért lépünk ki, hogy egy MÁSIK folyamat
-        (a CLI ablak) átvegye a munkát. Igaz, hogy a `cmd /c start` miatt az már nem is
-        tartozik a fánkba, de két, egymásra épülő védelem közül az egyiket sem érdemes
-        feleslegesen kockáztatni - a fa-kilövés itt nem old meg semmit, viszont el tudná
-        vinni az imént indított ablakot."""
+        (a CLI ablak) átvegye a munkát, és a fa-kilövésnek itt nincs mit nyernie.
+
+        VISSZAVONVA (2026-08-31): egy korábbi változat `/T`-t tett ide azzal az
+        indoklással, hogy az "a bootloader szülőt is elviszi, így nem jut el a
+        `_MEIxxxxx` takarításáig". Ez KÉTSZERESEN téves volt: a `taskkill /T` a megadott
+        PID LESZÁRMAZOTTAIT lövi ki, nem az ŐSEIT, tehát a bootloader szülőt eleve nem is
+        érintette - és a "Failed to remove temporary directory" ablaknak nem is ez volt az
+        oka. A valódi ok (mérve, lásd `switch_to_cli_mode`): az új CLI példány örökölte a
+        `_PYI_*` környezeti változókat, ezért a MI temp mappánkban futott, és a
+        bootloaderünk azt nem tudta törölni. Ott van javítva, ahol keletkezett."""
         logging.info("[API] exit_app() - kilépés (CLI módra váltás után)")
         try:
             logging.shutdown()
         except Exception:
             pass
-        # `taskkill /F` A SAJÁT PID-RE, DE **/T NÉLKÜL**. A `/T` a folyamatfát vinné, abban
-        # pedig benne lenne az imént indított CLI ablak. A sima `/F` viszont kell: nélküle
-        # (csak `os._exit`) a PyInstaller bootloadere megpróbálja törölni a `_MEIxxxxx` temp
-        # mappát, ami a még betöltött DLL-ek miatt nem sikerül, és a felhasználó egy
-        # "Failed to remove temporary directory" figyelmeztetést kap - terepen pontosan ez
-        # jelent meg (2026-08-31). A program minden más kilépési pontja is így, azonnali
-        # kilövéssel zárul (lásd CLAUDE.md "Process model").
         try:
             subprocess.run(['taskkill', '/F', '/PID', str(os.getpid())],
                            creationflags=subprocess.CREATE_NO_WINDOW, timeout=5)

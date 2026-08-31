@@ -51,6 +51,12 @@ body::after{content:'';position:fixed;width:700px;height:700px;background:radial
 .sidebar-bottom{margin-top:auto;padding:10px 12px 4px;text-align:center;color:var(--green);font-size:11px;font-weight:600}
 .sidebar-datadir{padding:0 12px 12px;text-align:center;color:var(--text3);font-size:10.5px;cursor:pointer;transition:color var(--t)}
 .sidebar-datadir:hover{color:var(--accent)}
+/* "Napló törlése": szándékosan halvány és apró - hasznos, de ROMBOLÓ művelet, nem
+   szabad a menüpontokkal egyenrangúnak látszania. Pirosra vált hovernél, hogy a
+   kattintás előtt egyértelmű legyen, mi következik. */
+.sidebar-clearlog{padding:0 12px 2px;text-align:center;color:var(--text3);font-size:10.5px;cursor:pointer;transition:color var(--t)}
+.sidebar-clearlog:hover{color:var(--red)}
+.sidebar-clearlog.busy{opacity:.5;pointer-events:none}
 
 .main{flex:1;display:flex;flex-direction:column;overflow:hidden}
 
@@ -536,6 +542,52 @@ td input[type="checkbox"]{accent-color:var(--accent);width:16px;height:16px;curs
 .modal-counter{text-align:center;font-size:16px;font-weight:700;color:var(--green)}
 .modal-status{color:var(--text2);font-size:13px;text-align:center}
 .modal-time{color:var(--text3);font-size:12px;text-align:center}
+
+/* ===== MODERN FOLYAMAT-FEJLÉC =====
+   Terepi visszajelzés (2026-08-31): "nincs progress bar nincs szazalek nincs ido nincs
+   semmi csak plain szöveg... nem latom h eppen mi a tosz tortenik". A napló megmarad
+   (ez a projekt elsődleges diagnózis-eszköze), de FÖLÉ kerül egy fejléc, ami egy
+   pillantásra megmondja: hol tartunk, mennyi van hátra, épp mi fut. */
+.mp-head{display:flex;align-items:center;gap:16px;margin-bottom:10px}
+/* A százalék-korong: SVG-gyűrű, mert egy szám + gyűrű messziről is olvasható, és
+   határozatlan szakaszban is tud pörögni (ekkor a szám helyett pontok jelennek meg). */
+.mp-ring{position:relative;width:74px;height:74px;flex:0 0 auto}
+.mp-ring svg{transform:rotate(-90deg);width:74px;height:74px}
+.mp-ring .trk{fill:none;stroke:rgba(180,100,255,.18);stroke-width:7}
+.mp-ring .bar{fill:none;stroke:url(#mpGrad);stroke-width:7;stroke-linecap:round;
+  transition:stroke-dashoffset .45s ease}
+.mp-ring .pct{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;
+  font-size:17px;font-weight:800;color:var(--green);letter-spacing:-.5px}
+.mp-ring.indet svg{animation:mpSpin 1.4s linear infinite}
+.mp-ring.indet .pct{font-size:13px;color:var(--text3)}
+@keyframes mpSpin{to{transform:rotate(270deg)}}
+.mp-headinfo{flex:1;min-width:0}
+/* Az ÉPP FUTÓ művelet - ez a fejléc legfontosabb sora, ezért nagy és mindig egy sor
+   (a hosszú csomagnevek különben szétdobnák a fejlécet). */
+.mp-now{font-size:14px;font-weight:600;color:var(--text);white-space:nowrap;
+  overflow:hidden;text-overflow:ellipsis}
+.mp-sub{font-size:11.5px;color:var(--text3);margin-top:3px;white-space:nowrap;
+  overflow:hidden;text-overflow:ellipsis}
+.mp-stats{display:flex;gap:8px;margin-top:7px;flex-wrap:wrap}
+.mp-stat{font-size:11px;color:var(--text2);background:rgba(180,100,255,.10);
+  border:1px solid rgba(180,100,255,.20);border-radius:6px;padding:2px 8px;white-space:nowrap}
+.mp-stat b{color:var(--text);font-weight:700}
+.mp-stat.ok{color:var(--green);border-color:rgba(120,255,180,.28);background:rgba(120,255,180,.08)}
+.mp-stat.bad{color:var(--red);border-color:rgba(255,107,91,.30);background:rgba(255,107,91,.08)}
+
+/* ===== STRUKTURÁLT NAPLÓ =====
+   Ugyanaz a szöveg, de soronként megformázva: a vezető jel ikonként balra kerül, a
+   sor pedig típus szerint színt kap. Így a hibák/kihagyások kiugranak a folyamból,
+   ahelyett hogy egy egybefüggő txt-ben kellene keresgélni. */
+.mp-line{display:flex;gap:7px;align-items:flex-start;padding:1px 0}
+.mp-ico{flex:0 0 auto;width:15px;text-align:center;opacity:.95}
+.mp-txt{flex:1;min-width:0;white-space:pre-wrap;word-break:break-word}
+.mp-line.ok .mp-txt{color:var(--green)}
+.mp-line.warn .mp-txt{color:var(--yellow)}
+.mp-line.bad .mp-txt{color:var(--red)}
+.mp-line.mute .mp-txt{color:var(--text3)}
+.mp-line.head .mp-txt{color:var(--accent);font-weight:700}
+.mp-line.step .mp-txt{color:var(--text2)}
 .modal-log{flex:1;min-height:160px;max-height:320px;overflow-y:auto;background:rgba(5,15,12,0.8);border-radius:var(--r-sm);padding:12px;font-family:var(--mono);font-size:11px;color:var(--accent);line-height:1.7;white-space:pre-wrap;word-break:break-all;scrollbar-width:thin;scrollbar-color:rgba(180,100,255,0.3) transparent;border:1px solid rgba(180,100,255,0.2)}
 .modal-log::-webkit-scrollbar{width:5px}
 .modal-log::-webkit-scrollbar-thumb{background:rgba(180,100,255,0.3);border-radius:3px}
@@ -585,6 +637,7 @@ td input[type="checkbox"]{accent-color:var(--accent);width:16px;height:16px;curs
     <button class="nav-btn" onclick="switchView('winact')" data-view="winact"><span class="icon">🎫</span>Windows &amp; Office</button>
     <button class="nav-btn" onclick="switchView('logs')" data-view="logs"><span class="icon">📥</span>Naplók letöltése</button>
     <div class="sidebar-bottom" id="build-label">Build ---</div>
+    <div class="sidebar-clearlog" id="clear-log-label" title="Törli a gép saját debug-naplóit (DriverVarázsló_debug.log és a rotált másai), hogy a következő futás tisztán olvasható legyen. A Naplók nézetbe letöltött, MÁS gépekről származó naplókat nem bántja." onclick="clearDebugLogs()">🧹 napló törlése</div>
     <div class="sidebar-datadir" id="data-dir-label" title="Ide menti a program a debug naplót és a Rendszer Riport HTML fájlokat - kattints a megnyitáshoz" onclick="openAppDataDir()">📁 ...</div>
   </nav>
 
@@ -865,6 +918,10 @@ td input[type="checkbox"]{accent-color:var(--accent);width:16px;height:16px;curs
           <div id="intel-card" style="display:none"></div>
           <div id="oem-card" style="display:none"></div>
           <div id="hw-problems"></div>
+          <!-- Windows-alapdriveren maradt eszközök: a szken legcsendesebb kimenetele -
+               az eszköz hibakód nélkül működik, csak épp a Microsoft általános driverén,
+               tehát a találati listán SEHOL nem jelenik meg. -->
+          <div id="hw-inbox"></div>
           <div class="hw-tree" id="hw-tree"></div>
         </div>
       </div>
@@ -1383,8 +1440,35 @@ td input[type="checkbox"]{accent-color:var(--accent);width:16px;height:16px;curs
       <span class="modal-phase" id="mp-phase"></span>
     </div>
     <div class="modal-body">
-      <div class="modal-counter" id="mp-counter"></div>
+      <!-- MODERN FEJLÉC: egy pillantásra megmondja, hol tartunk és mi fut épp.
+           A régi elemek (mp-counter / mp-status / mp-time) MEGMARADTAK, mert több
+           helyről íródnak - csak átkerültek ide, a fejléc alá/mellé. -->
+      <div class="mp-head">
+        <div class="mp-ring indet" id="mp-ring">
+          <svg viewBox="0 0 74 74">
+            <defs><linearGradient id="mpGrad" x1="0" y1="0" x2="1" y2="1">
+              <stop offset="0%" stop-color="#b060ff"/><stop offset="100%" stop-color="#7dffb8"/>
+            </linearGradient></defs>
+            <circle class="trk" cx="37" cy="37" r="31"/>
+            <circle class="bar" id="mp-ring-bar" cx="37" cy="37" r="31"
+                    stroke-dasharray="194.8" stroke-dashoffset="194.8"/>
+          </svg>
+          <div class="pct" id="mp-pct">•••</div>
+        </div>
+        <div class="mp-headinfo">
+          <div class="mp-now" id="mp-now">Indítás…</div>
+          <div class="mp-sub" id="mp-sub"></div>
+          <div class="mp-stats">
+            <span class="mp-stat" id="mp-st-time">⏱ <b>0 mp</b></span>
+            <span class="mp-stat" id="mp-st-eta" style="display:none">hátra: <b>—</b></span>
+            <span class="mp-stat" id="mp-st-step" style="display:none">lépés: <b>—</b></span>
+            <span class="mp-stat ok" id="mp-st-ok" style="display:none">✅ <b>0</b></span>
+            <span class="mp-stat bad" id="mp-st-bad" style="display:none">❌ <b>0</b></span>
+          </div>
+        </div>
+      </div>
       <div class="progress" id="mp-progress"><div class="progress-fill" id="mp-progress-fill"></div></div>
+      <div class="modal-counter" id="mp-counter"></div>
       <div class="modal-status" id="mp-status"></div>
       <div class="modal-time" id="mp-time"></div>
       <div class="modal-log" id="mp-log"></div>
@@ -1539,6 +1623,9 @@ let hwProblems = [];  // a legutóbbi szken problémás (hibakódos) eszközei -
 let confirmResolver = null;
 let progressStartTime = 0;
 let progressTimer = null;
+// A folyamat-fejlec allapota (szazalek, lepes, sikeres/hibas darab) - a modal
+// megnyitasakor nullazodik, lasd showProgressModal.
+let mpProg = {pct: null, cur: 0, total: 0, ok: 0, bad: 0};
 let currentTask = null;  // Track current running task
 
 /* ========== PYWEBVIEW BRIDGE ========== */
@@ -1633,9 +1720,17 @@ document.addEventListener('change', function(ev) {
 
 function api() { return window.pywebview ? window.pywebview.api : null; }
 
+/* Ez a példány az AutoFix-lánc egyik LÁBA-e (a --resume-* kapcsolóval indult)?
+   Ilyenkor a felületet SENKI nem nézi: a technikus kávézik, a gép magától dolgozik.
+   Minden olyan háttérmunka, ami csak a képernyőn látszana, tiszta veszteség - mérve
+   (2026-08-31, ThinkPad T14 Gen 1): a nyomtató-felderítés így 8-szor futott le egy
+   láncban, 6,4 PERCET elvéve úgy, hogy az eredményét soha senki nem látta. */
+let isResumeLeg = false;
+
 window.addEventListener('pywebviewready', async () => {
   try {
     const data = await api().get_init_data();
+    isResumeLeg = !!(data.resume_mode || data.resume_step1);
     document.getElementById('build-label').textContent = 'Build ' + String(data.build).padStart(3, '0');
     appDataDir = data.app_data_dir || '';
     document.getElementById('data-dir-label').textContent = '📁 ' + (appDataDir || 'Naplók/Riportok');
@@ -1805,6 +1900,10 @@ function switchView(name) {
   document.querySelector('.nav-btn[data-view="'+name+'"]').classList.add('active');
   currentView = name;
   if (name === 'stress') refreshServiceTools();
+  // AutoFix-lábon a nyomtató-felderítés kimarad (senki nem nézi a felületet), de ha a
+  // technikus mégis IDEJÖN, itt utólag lefuttatjuk - így a szűrő ugyanúgy működik, csak
+  // nem fizetünk érte a láncban. Nulla ára van: ha már megvan, azonnal visszatér.
+  if (name === 'drivers' && printerInfs === null) loadPrinterDriverInfs(true);
   if (name === 'benchmark') loadBenchmarkView();
   if (name === 'display') loadDisplayView();
   if (name === 'logs') loadLogsViewInfo();
@@ -2358,6 +2457,9 @@ function filterDrivers() {
    e nélkül egy korábban kipipált nyomtató-driver a szűrő bekapcsolása után is bent maradna
    a törlési listában - vagyis pont azt törölnénk, amit a kapcsoló megvédeni hivatott. */
 function togglePrinterFilter() {
+  // Ha a felderítés még nem futott le (AutoFix-lábon szándékosan kimarad), a kattintás
+  // maga kéri el: enélkül a bekapcsolt kapcsoló nem rejtene el semmit, ami néma hazugság.
+  if (printerInfs === null) loadPrinterDriverInfs(true);
   const visible = new Set(getFilteredDriverIndices());
   let dropped = 0;
   selectedDrivers.forEach(i => { if (!visible.has(i)) { selectedDrivers.delete(i); dropped++; } });
@@ -2372,9 +2474,20 @@ function togglePrinterFilter() {
    utóbb eltérne, és a technikus itt törölne ki valamit, amit a fix megvédett volna. */
 let printerInfs = null;
 
-async function loadPrinterDriverInfs() {
+async function loadPrinterDriverInfs(force) {
   const lbl = document.getElementById('lbl-hide-printers');
   if (!drivers.length) { printerInfs = new Set(); return; }
+  // AUTOFIX-LÁBON KIHAGYVA (hacsak nem a technikus kérte: `force`). A felderítés drága
+  // (Get-Printer/Get-PrinterDriver a nyomtatósoron át; terepen 9-121 mp hívásonként), és
+  // kizárólag a Driverek nézet táblázatát szűri - amit egy ember nélkül futó láncban
+  // senki nem néz. Mérve (2026-08-31, ThinkPad T14): 8 hívás, 6,4 PERC egyetlen láncban,
+  // úgy hogy az eredményét senki nem látta. A szűrő NEM kapcsol ki, csak elhalasztódik:
+  // ha a technikus a Driverek nézetre lép, a switchView utólag lefuttatja.
+  if (isResumeLeg && !force) {
+    printerInfs = null;
+    if (lbl) lbl.classList.remove('toggle-busy');
+    return;
+  }
   printerInfs = null;
   if (lbl) lbl.classList.add('toggle-busy');
   try {
@@ -2549,6 +2662,7 @@ async function startHwScan() {
   hwPool = []; hwInstalled = []; hwSelectedIndices.clear(); hwProblems = [];
   document.getElementById('hw-tree').innerHTML = '';
   document.getElementById('hw-problems').innerHTML = '';
+  const _ib = document.getElementById('hw-inbox'); if (_ib) _ib.innerHTML = '';
   document.getElementById('hw-rescan-offer').innerHTML = '';
   document.getElementById('nvidia-card').style.display = 'none';
   document.getElementById('nvidia-card').innerHTML = '';
@@ -2635,6 +2749,7 @@ function onHwScanResult(data) {
   hwPool = data.pool || [];
   hwInstalled = data.installed || [];
   renderHwProblems(data.problems || []);
+  renderHwInbox(data.inbox);
   document.getElementById('btn-hw-scan').disabled = false;
   hwScanStop();
   document.getElementById('hw-progress').classList.remove('progress-indeterminate');
@@ -2774,6 +2889,46 @@ function renderHwProblems(problems) {
     + 'border-radius:10px;padding:10px 14px;margin-bottom:10px">'
     + '<div style="font-weight:700;margin-bottom:4px">⚠️ Problémás eszközök ('+hwProblems.length+' db)</div>'
     + rows + '</div>';
+}
+/* MI MARADT A WINDOWS BEÉPÍTETT (GENERIKUS) DRIVERÉN?
+   A szken listája csak azt mutatja, amire VAN találat. Egy eszköz viszont futhat
+   hibakód nélkül a Microsoft általános driverén - ilyenkor sehol nem jelenik meg,
+   pedig pont ez az, amiről a technikusnak tudnia kell ("mik nem kapnak drivert").
+   A Python oldal ugyanazzal a szűrővel válogat, amit az 1 kattintásos fix záró
+   jelentése használ, tehát a két helyen látott lista nem mondhat ellent egymásnak. */
+function renderHwInbox(inbox) {
+  const box = document.getElementById('hw-inbox');
+  if (!box) return;
+  box.innerHTML = '';
+  if (!inbox || !inbox.total) return;
+  const items = inbox.items || [];
+  // A "van rá találat a listán" eseteket külön jelöljük: ott nincs teendő, elég
+  // feltelepíteni, amit a szken talált.
+  const rows = items.map(d =>
+    '<div style="display:flex;gap:8px;align-items:center;padding:4px 0;font-size:12px;flex-wrap:wrap">'
+    + '<span>' + (d.has_offer ? '🟢' : '🏭') + '</span>'
+    + '<span style="font-weight:600" title="' + esc(d.hwid || '') + '">' + esc(d.name) + '</span>'
+    + (d.cat ? '<span style="color:var(--text3)">' + esc(d.cat) + '</span>' : '')
+    + '<span style="color:var(--text3)">— most: ' + esc(d.inf || '?')
+    + (d.provider ? ' (' + esc(d.provider) + ')' : '') + '</span>'
+    + '<span style="margin-left:auto;color:' + (d.has_offer ? 'var(--green)' : 'var(--text3)') + '">'
+    + (d.has_offer ? 'van rá driver a listában ⬇' : 'nincs rá találat — gyártói oldalról kell')
+    + '</span></div>').join('');
+  box.innerHTML =
+    '<div style="border:1px solid rgba(180,120,255,.35);background:rgba(180,120,255,.07);'
+    + 'border-radius:10px;padding:10px 14px;margin-bottom:10px">'
+    + '<div style="font-weight:700;margin-bottom:4px">🏭 ' + inbox.total
+    + ' eszköz fut a Windows beépített (generikus) driverén</div>'
+    + (items.length
+        ? '<div style="color:var(--text3);font-size:11.5px;margin-bottom:6px">Ezek működnek, '
+          + 'de nem a gyártó saját driverével — itt lehet teendő:</div>' + rows
+        : '')
+    + (inbox.by_design
+        ? '<div style="color:var(--text3);font-size:11.5px;margin-top:6px">ℹ️ További '
+          + inbox.by_design + ' eszköz szintén Windows-driveren fut, de ez így HELYES — '
+          + 'buszvezérlők, hidak, általános egér/billentyűzet: ezekhez gyári driver nem is létezik.</div>'
+        : '')
+    + '</div>';
 }
 async function quickFixDevice(i) {
   const p = hwProblems[i];
@@ -3136,10 +3291,27 @@ function renderActivationStatus(data) {
     offEl.innerHTML = '<div style="opacity:.7">Nem található licencelt Office ezen a gépen. '
       + '(A Microsoft 365 / Store-os Office fiókhoz kötött, az itt nem jelenik meg.)</div>';
   } else {
+    // AZ OKOT IS KIÍRJUK, és megmondjuk, ha a termék ettől még MŰKÖDIK.
+    // Terepi visszajelzés (2026-08-31): a nézet "aktiválás szükséges"-t írt, miközben a
+    // Word "Aktivált termék"-et - a technikus a programot hitte hibásnak. A gépen mérve
+    // az állapot valós volt (MAK-kulcs, státusz 5, ok 0xC004F009 = lejárt türelmi idő),
+    // csak épp megmagyarázhatatlan: az 5-ös állapot LICENCELT terméket jelent, ami fut
+    // és aktiváltnak mutatja magát, amíg be nem áll a csökkentett működés.
     offEl.innerHTML = o.products.map(p =>
       '<div style="margin-bottom:10px"><b>' + esc(p.name || p.description) + '</b><br>'
       + '<span class="winact-badge ' + esc(p.status_color) + '">' + esc(p.status_text) + '</span>'
       + (p.partial_key ? ' <span class="winact-key">…' + esc(p.partial_key) + '</span>' : '')
+      + ((p.reason_text || p.reason_hex)
+          ? '<div style="font-size:12px;color:var(--text3);margin-top:4px">Ok: '
+            + esc(p.reason_text || '—') + (p.reason_hex ? ' <span class="winact-key">'
+            + esc(p.reason_hex) + '</span>' : '') + '</div>'
+          : '')
+      + (p.licensed_but_stale
+          ? '<div style="font-size:12px;color:var(--text3);margin-top:4px">ℹ️ A termék '
+            + '<b>licencelt és működik</b> — az Office ezért mutathatja magát aktiváltnak '
+            + '(Word → Fiók). Újraaktiválás nélkül viszont egy idő után figyelmeztetni fog, '
+            + 'majd csökkentett működésre vált.</div>'
+          : '')
       + '</div>').join('')
       + (o.ospp ? '<div class="winact-note">Kézi beavatkozáshoz: <span class="winact-key">' + esc(o.ospp) + '</span></div>' : '');
   }
@@ -3777,6 +3949,36 @@ async function openAppDataDir() {
   }
 }
 
+/* A gép saját debug-naplóinak törlése (oldalsáv, a build szám alatt).
+   MEGERŐSÍTÉSSEL: a napló ennek a programnak az EGYETLEN hibajelentési csatornája
+   (lásd CLAUDE.md Rule 0), tehát a törlése visszafordíthatatlanul megsemmisíti egy
+   futás bizonyítékait. Egy véletlen kattintás az oldalsávon nem viheti el. */
+async function clearDebugLogs() {
+  const el = document.getElementById('clear-log-label');
+  const ok = await showConfirm('Napló törlése',
+    'Töröljem a gép debug-naplóit?\n\n' +
+    'Ezzel a mostani és a korábbi futások naplói VÉGLEG eltűnnek - ha egy hibát még ' +
+    'elemezni kellene, előbb töltsd fel vagy mentsd ki őket.\n\n' +
+    'A Naplók nézetbe letöltött, más gépekről származó naplókat nem érinti.');
+  if (!ok) return;
+  if (el) { el.classList.add('busy'); el.textContent = '🧹 törlés...'; }
+  try {
+    const r = await api().clear_debug_logs();
+    if (r && r.success) {
+      toast(r.removed ? `🧹 Napló törölve (${r.removed} fájl, ${r.mb} MB felszabadítva)`
+                      : 'Nem volt törölhető naplófájl', 'success');
+    } else {
+      // Nem hallgatjuk el: a leggyakoribb ok az, hogy a fájlt fogja valami - és a
+      // technikusnak tudnia kell, hogy a napló MEGMARADT, nem tűnt el csendben.
+      toast('❌ A napló törlése nem sikerült: ' + (((r && r.errors) || []).join('; ') || 'ismeretlen hiba'), 'error');
+    }
+  } catch (e) {
+    toast('❌ A napló törlése nem sikerült: ' + e, 'error');
+  } finally {
+    if (el) { el.classList.remove('busy'); el.textContent = '🧹 napló törlése'; }
+  }
+}
+
 /* ========== PROGRESS MODAL ========== */
 /* ESZKÖZ-ÚJRAKÖTÉS: azokat az eszközöket köti vissza a MÁR TELEPÍTETT gyári driverre,
    amik a Windows alapdriverén ragadtak (mert a driver felment, de az eszköz nem indult el
@@ -3814,7 +4016,7 @@ function showProgressModal(title, phase) {
   document.getElementById('mp-counter').textContent = '';
   document.getElementById('mp-status').textContent = 'Inicializálás...';
   document.getElementById('mp-time').textContent = '';
-  document.getElementById('mp-log').textContent = '';
+  document.getElementById('mp-log').innerHTML = '';
   document.getElementById('mp-progress-fill').style.width = '0%';
   document.getElementById('mp-progress').classList.remove('progress-indeterminate');
   
@@ -3834,17 +4036,31 @@ function showProgressModal(title, phase) {
   
   document.getElementById('modal-progress').classList.add('active');
   progressStartTime = Date.now();
+  mpProg = {pct: null, cur: 0, total: 0, ok: 0, bad: 0};
+  mpSetHead({now: title || 'Folyamat', sub: phase || '', pct: null, step: '', eta: '', ok: 0, bad: 0});
   if (progressTimer) clearInterval(progressTimer);
   progressTimer = setInterval(() => {
     const s = Math.floor((Date.now() - progressStartTime) / 1000);
     const m = Math.floor(s / 60);
     document.getElementById('mp-time').textContent = '⏱ ' + (m > 0 ? m + ':' + String(s%60).padStart(2,'0') : s + ' mp');
+    // Az ELTELT IDŐ ÓRÁJA A LEGFONTOSABB ELEM (ugyanaz az érv, mint a szken-jelzőnél):
+    // a hosszú, néma szakaszokban (WU-keresés, nagy csomag telepítése) a százalék és a
+    // szöveg is percekig áll - egy másodpercenként lépő óra viszont bizonyítja, hogy a
+    // program él. A HÁTRALÉVŐ időt csak akkor írjuk ki, ha van mihez viszonyítani:
+    // legalább egy kész lépés és eltelt 5 mp, különben az első becslés nevetségesen
+    // pontatlan lenne (és egy rossz szám rosszabb, mint a hiánya).
+    const el = document.getElementById('mp-st-time');
+    if (el) el.innerHTML = '⏱ <b>' + mpFmtSecs(s) + '</b>';
+    if (mpProg.total > 0 && mpProg.cur > 0 && s >= 5 && mpProg.cur < mpProg.total) {
+      const eta = (s / mpProg.cur) * (mpProg.total - mpProg.cur);
+      mpSetHead({eta: mpFmtSecs(eta)});
+    }
   }, 1000);
 }
 function updateProgressModal(data) {
   if (data.phase) document.getElementById('mp-phase').textContent = data.phase;
   if (data.title) document.getElementById('mp-title').textContent = data.title;
-  
+
   if (data.status) document.getElementById('mp-status').textContent = data.status;
   if (data.counter) document.getElementById('mp-counter').textContent = data.counter;
   if (data.log) appendLog(data.log);
@@ -3856,11 +4072,116 @@ function updateProgressModal(data) {
     const pct = Math.min(100, (data.current || 0) / data.total * 100);
     document.getElementById('mp-progress-fill').style.width = pct + '%';
   }
+
+  // ---- A MODERN FEJLÉC ----
+  const head = {};
+  // "Épp mi fut": elsősorban a status, másodsorban a legutóbbi értelmes naplósor.
+  // A napló sorai vezető jellel és behúzással jönnek - a fejlécbe tisztán kell.
+  if (data.status) head.now = String(data.status).replace(/\s+/g, ' ').trim();
+  else if (data.log) {
+    // CSAK LÉPÉS-SORT veszünk át. A napló tele van magyarázó, felsoroló és záró
+    // sorokkal ("→ ...", "• ...", "--- Katalógus: ... ---", "Ezekhez a gyártó..."),
+    // és ha azok is felülírnák a fejlécet, a "mi fut most" a művelet végén egy
+    // tanácsot mutatna a művelet helyett - pontosan ez látszott az első renderen.
+    const t = String(data.log).split('\n')
+      .filter(x => x.trim() && /^\s*(⬇|📦|🧹|🔧|🔎|↻|🏭|🌐|🔄|🛡️|⚙️)/.test(x)).pop();
+    if (t) head.now = t.replace(/\s+/g, ' ').trim().slice(0, 120);
+  }
+  if (data.counter) head.sub = String(data.counter);
+  if (data.indeterminate) {
+    head.pct = null;
+    head.eta = '';                       // határozatlan szakaszban NEM találgatunk
+  } else if (data.total && data.total > 0) {
+    mpProg.cur = data.current || 0;
+    mpProg.total = data.total;
+    head.pct = mpProg.cur / mpProg.total * 100;
+    head.step = mpProg.cur + ' / ' + mpProg.total;
+  }
+  // A KÉSZ/HIBA SZÁMOKAT CSAK EXPLICIT MEZŐBŐL VESSZÜK ÁT, sosem a naplószövegből.
+  // Az első változat a sor eleji ✅/❌ jelekből számolt, és rögtön hazudott is: a
+  // visszaállítási pont "✅ kész" sorát sikeres driver-telepítésnek vette, így a
+  // fejléc "1 kész"-t mutatott egy olyan futásban, ahol semmi nem települt fel.
+  // Egy rossz szám a képernyőn rosszabb, mint a hiánya - a Python most külön
+  // `ok`/`fail` mezőt küld (app/gui/hwscan.py).
+  if (data.ok !== undefined) mpProg.ok = data.ok;
+  if (data.fail !== undefined) mpProg.bad = data.fail;
+  if (data.ok !== undefined || data.fail !== undefined) {
+    head.ok = mpProg.ok; head.bad = mpProg.bad;
+  }
+  mpSetHead(head);
+}
+/* ===== A NAPLÓSOR TÍPUSA A VEZETŐ JELBŐL =====
+   A Python oldal évek óta emoji-val kezdi a sorait (✅ ⚠️ ❌ ⬇ ↷ 🧹 …). Ezt eddig
+   egyetlen szürke szövegfolyamként jelenítettük meg, amiben a hiba ugyanúgy nézett ki,
+   mint a rutinsor. Itt a vezető jelet ikonná emeljük, a sort pedig típus szerint
+   színezzük — a szöveg maga változatlan, tehát a napló és a képernyő nem csúszhat szét. */
+const MP_KIND = [
+  [/^\s*(✅|🎉)/,            'ok'],
+  [/^\s*(❌|🛑)/,            'bad'],
+  [/^\s*(⚠️|⏱️|⏱)/,         'warn'],
+  [/^\s*(↷|ℹ️|•)/,          'mute'],
+  [/^\s*(---|===)/,          'head'],
+  [/^\s*(⬇|📦|🧹|🔧|🔎|↻|🏭|🌐|🔄)/, 'step'],
+];
+function mpClassify(line) {
+  for (const [re, cls] of MP_KIND) if (re.test(line)) return cls;
+  return '';
 }
 function appendLog(line) {
   const el = document.getElementById('mp-log');
-  el.textContent += line + '\n';
-  el.scrollTop = el.scrollHeight;
+  // Több soros üzenet (a Python \n-t is küld): soronként dolgozzuk fel.
+  String(line).split('\n').forEach(raw => {
+    const cls = mpClassify(raw);
+    // A vezető jelet leválasztjuk ikonnak; a maradék behúzása megmarad, mert a
+    // Python a szóközökkel jelzi a hierarchiát (fő lépés / al-lépés).
+    const m = raw.match(/^(\s*)(\S)️?\s?(.*)$/u);
+    const div = document.createElement('div');
+    div.className = 'mp-line' + (cls ? ' ' + cls : '');
+    let ico = '', txt = raw;
+    if (m && /\p{Extended_Pictographic}|[↷↻•—-]/u.test(m[2])) {
+      ico = m[2]; txt = m[1] + m[3];
+    }
+    div.innerHTML = '<span class="mp-ico">' + esc(ico) + '</span>'
+                  + '<span class="mp-txt">' + esc(txt) + '</span>';
+    el.appendChild(div);
+  });
+  // Csak akkor görgetünk, ha a felhasználó amúgy is az alján állt - különben
+  // visszarántanánk a képet, miközben ő épp feljebb olvas valamit.
+  if (el.scrollHeight - el.scrollTop - el.clientHeight < 80) el.scrollTop = el.scrollHeight;
+}
+
+/* A fejléc frissítése. Minden mező opcionális: amiről nincs adat, azt nem írjuk felül,
+   és amit nem tudunk (pl. hátralévő idő határozatlan szakaszban), azt EL IS REJTJÜK -
+   egy kitalált szám rosszabb, mint a hiánya. */
+function mpSetHead(o) {
+  const $ = id => document.getElementById(id);
+  if (o.now) $('mp-now').textContent = o.now;
+  if (o.sub !== undefined) $('mp-sub').textContent = o.sub || '';
+  const ring = $('mp-ring'), bar = $('mp-ring-bar'), C = 2 * Math.PI * 31;
+  if (o.pct === null || o.pct === undefined) {
+    ring.classList.add('indet');
+    $('mp-pct').textContent = '•••';
+    bar.setAttribute('stroke-dashoffset', C * 0.75);
+  } else {
+    const p = Math.max(0, Math.min(100, o.pct));
+    ring.classList.remove('indet');
+    $('mp-pct').textContent = Math.round(p) + '%';
+    bar.setAttribute('stroke-dashoffset', C * (1 - p / 100));
+  }
+  const chip = (id, show, html) => {
+    const e = $(id); if (!e) return;
+    e.style.display = show ? '' : 'none';
+    if (show) e.innerHTML = html;
+  };
+  chip('mp-st-step', !!o.step, 'lépés: <b>' + esc(o.step || '') + '</b>');
+  chip('mp-st-eta', !!o.eta, 'hátra: <b>' + esc(o.eta || '') + '</b>');
+  chip('mp-st-ok', o.ok > 0, '✅ <b>' + (o.ok || 0) + '</b> kész');
+  chip('mp-st-bad', o.bad > 0, '❌ <b>' + (o.bad || 0) + '</b> hiba');
+}
+function mpFmtSecs(s) {
+  s = Math.max(0, Math.round(s));
+  const m = Math.floor(s / 60);
+  return m > 0 ? m + ':' + String(s % 60).padStart(2, '0') + ' perc' : s + ' mp';
 }
 function onTaskComplete(data) {
   if (progressTimer) { clearInterval(progressTimer); progressTimer = null; }
@@ -3881,6 +4202,10 @@ function onTaskComplete(data) {
   }
   document.getElementById('mp-progress').classList.remove('progress-indeterminate');
   document.getElementById('mp-progress-fill').style.width = '100%';
+  // A fejlec is zarjon le: 100%, "Kesz", es a hatralevo ido chip eltunik.
+  mpProg.total = mpProg.total || 1; mpProg.cur = mpProg.total;
+  mpSetHead({pct: 100, eta: '', now: (data && data.status) ? String(data.status) : '✅ Kész',
+             ok: mpProg.ok, bad: mpProg.bad});
   
   // Show close button, hide cancel button
   document.getElementById('mp-close-btn').style.display = 'inline-flex';

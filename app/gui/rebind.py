@@ -134,7 +134,7 @@ class GuiRebindMixin:
     # ------------------------------------------------------------------
     # KÖZÖS MAG - ezt hívja az AutoFix regresszió-javítója ÉS a kézi gomb is
     # ------------------------------------------------------------------
-    def _rebind_device(self, pnp, inf_path, dev_name, dev_class, task_id):
+    def _rebind_device(self, pnp, inf_path, dev_name, dev_class, task_id, verify=True):
         """Egy eszköz visszakötése a stage-elt gyári driverre.
 
         Visszatérés: 'fixed' | 'needs_reboot' | 'failed'.
@@ -185,6 +185,10 @@ class GuiRebindMixin:
                   "Enable-PnpDevice -InstanceId $id -Confirm:$false -EA SilentlyContinue")
             r2 = self._run(["powershell", "-NoProfile", "-Command", ps], timeout=300)
             removed = getattr(r2, 'returncode', 1) == 0
+        if not verify:
+            # KÖTEGELT MÓD: a felderítés + ellenőrzés a KÖR VÉGÉN, egyszer fut le mindenkire
+            # (lásd `_rebind_sweep`). Itt csak annyit mondunk, hogy a csomópont eltűnt-e.
+            return 'removed' if removed else 'failed'
         self._run(['pnputil', '/scan-devices'], timeout=300)
         time.sleep(REBIND_SETTLE_SECONDS)
         if self._device_on_vendor_driver(pnp):
@@ -364,6 +368,9 @@ class GuiRebindMixin:
         a gomb és a lánc előbb-utóbb más eszközöket kötne újra, és a terepi jelentésből
         nem lehetne megmondani, melyik futott."""
         fixed, failed, pending = 0, [], []
+        # Amiknek a csomópontját eltávolítottuk: a verdiktjük a kör VÉGÉN, egyetlen
+        # kötegelt felderítéssel + lekérdezéssel dől el (lásd a ciklus utáni blokkot).
+        removed_devs = []
         self._rebind_pkg_cache = {}           # friss kör = friss INF-olvasás
         self.emit('task_progress', {'task': task_id, 'log': 'Eszközök és telepített driverek felmérése...', 'indeterminate': True})
         res = self._run(["powershell", "-NoProfile", "-Command", WU_PNP_QUERY_PS], encoding='utf-8')
@@ -410,17 +417,48 @@ class GuiRebindMixin:
             name = d.get('name') or d.get('pnp_id')
             self.emit('task_progress', {'task': task_id, 'log': f'\n({i}/{len(todo)}) {name}\n   most: {info.get("inf")} ({info.get("provider")}) → gyári: {orig}',
                                         'current': i, 'total': len(todo)})
-            state = self._rebind_device(d.get('pnp_id'), path, name, d.get('pclass'), task_id)
+            # KÖTEGELT ELLENŐRZÉS (verify=False). Az eltávolítás UTÁNI, eszközönkénti
+            # `/scan-devices` + 5 mp várakozás + TELJES WMI-kiíratás mérhetően soha nem
+            # talál semmit: terepen 26 eszközből 0 (2026-08-31, T14), korábban 8-ból 0
+            # (Build 273, T580) - a kötés a futó rendszerben nem épül újra, csak az
+            # újraindításnál. Eszközönként ~10 mp-be került, összesen 4-5 percbe.
+            # A verdiktet ezért a kör VÉGÉN, egyetlen felderítéssel + egyetlen
+            # lekérdezéssel hozzuk meg - a kimenet ugyanaz, a kerülő marad el.
+            state = self._rebind_device(d.get('pnp_id'), path, name, d.get('pclass'),
+                                        task_id, verify=False)
             if state == 'fixed':
+                # Az ÚJRATELEPÍTÉSI ág sikere (ott a kötés menet közben is felépülhet, ezt
+                # az ellenőrzést szándékosan meghagytuk) - itt már nem kell újra kérdezni.
                 fixed += 1
-                after = (self._get_installed_driver_info() or {}).get(d.get('pnp_id')) or {}
-                self.emit('task_progress', {'task': task_id, 'log': f'   ✅ Sikerült - most a gyári driveren fut ({after.get("inf")}).'})
-            elif state == 'needs_reboot':
-                pending.append(name)
+                self.emit('task_progress', {'task': task_id, 'log': '   ✅ Sikerült - a gyári driver újratelepítéssel felkötött.'})
+            elif state == 'removed':
+                removed_devs.append((d, name))
                 self.emit('task_progress', {'task': task_id, 'log': '   🔄 Eltávolítva - a Windows az ÚJRAINDÍTÁS után deríti fel újra (ez a lemez visszadugásának megfelelője).'})
             else:
                 failed.append(name)
                 self.emit('task_progress', {'task': task_id, 'log': '   ❌ Nem sikerült - az eszköz a Windows alapdriverén marad.'})
+
+        # EGYETLEN záró felderítés + EGYETLEN állapot-lekérdezés az összes eltávolítottra.
+        # Ritka, de nem lehetetlen, hogy a Windows menet közben mégis felköt egyet; ha igen,
+        # itt kiderül, és nem a "vár az újraindításra" listán marad.
+        if removed_devs:
+            self._run(['pnputil', '/scan-devices'], timeout=300)
+            time.sleep(REBIND_SETTLE_SECONDS)
+            after_all = {}
+            try:
+                after_all = self._get_installed_driver_info() or {}
+            except Exception as e:
+                # Nem baj: ilyenkor mindenkit "újraindításra vár"-ként kezelünk, ami a
+                # mért valóság (0/26, 0/8) - és az újraindítás úgyis jön.
+                logging.warning(f"[REBIND] A záró állapot-lekérdezés nem sikerült: {e}")
+            for d, name in removed_devs:
+                info = after_all.get(d.get('pnp_id')) or {}
+                if info and not _is_inbox_driver(info):
+                    fixed += 1
+                    logging.warning(f"[REBIND] SIKER (újrafelderítéssel): {name} -> {info.get('inf')}")
+                    self.emit('task_progress', {'task': task_id, 'log': f'   ✅ {name}: mégis felkötött a gyári driverre ({info.get("inf")}).'})
+                else:
+                    pending.append(name)
         logging.info(f"[REBIND] Kör vége: {fixed} azonnal visszakötve, {len(pending)} újraindításra vár, "
                      f"{len(failed)} sikertelen.")
         return fixed, failed, pending

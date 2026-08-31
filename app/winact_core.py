@@ -35,6 +35,42 @@ LICENSE_STATUS = {
     6: ('Meghosszabbított türelmi idő', 'warning'),
 }
 
+# A LICENCÁLLAPOT OKA (`LicenseStatusReason`), emberi nyelven.
+#
+# MIÉRT KELL (terepi visszajelzés, 2026-08-31): a nézet kiírta, hogy az Office
+# "Értesítési állapot (aktiválás szükséges)", miközben a Wordben ott állt, hogy
+# "Aktivált termék" - a technikus jogosan hitte a programot hibásnak. A gépen mérve a
+# valódi állapot: `Office24ProPlus2024VL_MAK_AE1`, státusz 5, ok **0xC004F009**, azaz a
+# MAK-kulcs TÜRELMI IDEJE JÁRT LE. Az 5-ös állapot nem azt jelenti, hogy nincs licenc:
+# a termék licencelt, csak újraaktiválás kell - ezért fut és mutatja magát aktiváltnak
+# az Office is, amíg be nem áll a csökkentett működés. A puszta állapotszöveg tehát
+# igaz volt, de megmagyarázhatatlan; az OK az, ami a két képernyő ellentmondását
+# feloldja, és megmondja a teendőt.
+LICENSE_REASON = {
+    0x00000000: 'rendben',
+    0xC004F009: 'a türelmi idő lejárt - újraaktiválás kell (a termék licencelt, ezért még működik)',
+    0xC004F00F: 'a kulcs a hardverhez van kötve, és a hardver megváltozott',
+    0xC004F014: 'nincs telepítve termékkulcs ehhez a kiadáshoz',
+    0xC004F034: 'a licenc kiadása sikertelen (jellemzően nem érhető el a KMS-kiszolgáló)',
+    0xC004C060: 'a kulcsot a Microsoft aktiválási szolgáltatása blokkolta',
+    0xC004C003: 'a kulcsot az aktiválási kiszolgáló blokkolta',
+    0x4004F00C: 'türelmi időben, aktiválható',
+    0x4004F040: 'aktiválva (KMS-kiszolgálóval)',
+    0x4004F041: 'aktiválva (KMS-kiszolgálóval)',
+}
+
+
+def license_reason_text(raw):
+    """A `LicenseStatusReason` szám -> (hexa kód, magyar magyarázat vagy '').
+
+    A kód akkor is kimegy a felületre, ha nem ismerjük a szövegét: egy `0xC004xxxx`
+    kereshető, egy hiányzó sor nem."""
+    try:
+        code = int(raw) & 0xFFFFFFFF
+    except (TypeError, ValueError):
+        return '', ''
+    return f'0x{code:08X}', LICENSE_REASON.get(code, '')
+
 # A licenc CSATORNÁJA - ez dönti el, hogy újratelepítés után magától aktiválódik-e.
 CHANNEL_HINTS = {
     'oem': 'OEM (gyári, a BIOS-ban van a kulcs)',
@@ -312,7 +348,8 @@ OFFICE_WMI_PS = (
     "[Console]::OutputEncoding = [System.Text.Encoding]::UTF8; "
     f"Get-CimInstance SoftwareLicensingProduct -Filter \"ApplicationId<>'{WINDOWS_APP_ID}' "
     "AND PartialProductKey IS NOT NULL\" | "
-    "Select-Object Name, Description, LicenseStatus, PartialProductKey | ConvertTo-Json -Compress"
+    "Select-Object Name, Description, LicenseStatus, LicenseStatusReason, "
+    "PartialProductKey | ConvertTo-Json -Compress"
 )
 
 
@@ -342,12 +379,18 @@ def collect_office_activation(run):
         except (TypeError, ValueError):
             code = -1
         text, color = LICENSE_STATUS.get(code, ('Ismeretlen állapot', 'unknown'))
+        reason_hex, reason_text = license_reason_text(row.get('LicenseStatusReason'))
         out['products'].append({
             'name': str(row.get('Name') or ''),
             'description': str(row.get('Description') or ''),
             'partial_key': str(row.get('PartialProductKey') or ''),
             'status_code': code, 'status_text': text, 'status_color': color,
             'activated': code == 1,
+            # AZ OK - e nélkül az 5-os allapot megmagyarazhatatlan a technikusnak,
+            # kulonosen ugy, hogy az Office kozben aktivaltnak mutatja magat.
+            'reason_hex': reason_hex, 'reason_text': reason_text,
+            # A licencelt-de-ujraaktivalando allapotok: a termek MUKODIK.
+            'licensed_but_stale': code in (3, 5, 6),
         })
     logging.info(f"[WINACT] Office/egyéb licencelt termék: {len(out['products'])} db "
                  f"({', '.join(p['name'][:40] for p in out['products']) or 'nincs'})")

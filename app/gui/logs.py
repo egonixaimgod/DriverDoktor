@@ -33,6 +33,21 @@ class GuiLogsMixin:
         """A letöltési mappa útvonala - a nézet ezt írja ki (szinkron, olcsó hívás)."""
         return logupload_core.download_dir()
 
+    def clear_debug_logs(self):
+        """A gép SAJÁT debug-naplóinak törlése (az oldalsáv "napló törlése" gombja).
+
+        SZINKRON, mert gyors (néhány fájl törlése) és a felület a visszatérési értékből
+        írja ki, mennyit szabadított fel. A tényleges munka - és a nyitva tartott fájl
+        kezelése - a magban: logupload_core.clear_logs()."""
+        logging.info("[API] clear_debug_logs()")
+        try:
+            removed, freed, errors = logupload_core.clear_logs()
+            return {'success': not errors, 'removed': removed,
+                    'mb': round(freed / 1048576.0, 1), 'errors': errors}
+        except Exception as e:
+            logging.error(f"[LOGCLEAR] A napló törlése nem sikerült: {e}", exc_info=True)
+            return {'success': False, 'removed': 0, 'mb': 0, 'errors': [str(e)]}
+
     def download_uploaded_logs(self, password, only_new=True):
         """A Drive-ra feltöltött naplók letöltése kicsomagolva, háttérszálon.
 

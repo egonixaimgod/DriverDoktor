@@ -94,6 +94,55 @@ CATALOG_SORT_QS = '&scol=DateComputed&sdir=desc'
 # NIC-re) - viszont bőven megéri: pár KB-os kérésekkel kerülünk el egy rossz, akár
 # 1,2 GB-os letöltést, és csak azoknál az eszközöknél fut, ahol tényleg telepítenénk.
 CATALOG_MODEL_PROBE_MAX = 10
+# ---------------------------------------------------------------------------
+# A KATALÓGUS-SOROK GYORSÍTÓTÁRA (2026-08-31, terepi mérésre)
+# ---------------------------------------------------------------------------
+# MIÉRT: a katalógus-zárókör MINDEN LÁBON újra lefut, lényegében ugyanazzal az
+# eszközlistával, és eszközönként max 4 HWID-et kérdez le. Mérve egy 3 órás láncon
+# (ThinkPad T14 Gen 1, Build 284): **952 HTTP-lekérdezés, ebből mindössze 194 EGYEDI
+# HWID-re** - vagyis a kérések 80%-a szó szerint ugyanaz a kérdés volt, összesen
+# ~11 PERCET elvéve. Az öt zárókörből három NULLA csomagot eredményezett, a negyedik
+# egyet (amiről addigra már tudtuk, hogy nem köt rá).
+#
+# MIÉRT BIZTONSÁGOS: ez TISZTA HÁLÓZATI OLVASÁS-gyorsítótár. Nem dönt semmiről, csak a
+# szerver válaszát teszi el; a döntés (dátum-elsőbbség, kiadás-kapu, INF-vizsgálat,
+# no-bind lista) változatlanul lefut a sorokon, a TELEPÍTETT állapotot pedig továbbra is
+# frissen kérdezzük le. Amit a gyorsítótár nem láthat, az egy MENET KÖZBEN közzétett új
+# katalógus-csomag - a gyártók hetes-havi ritmusban publikálnak, egy lánc pedig 1-3 óra.
+#
+# MIÉRT FÁJLBAN ÉS NEM MEMÓRIÁBAN: a lánc minden lába KÜLÖN FOLYAMAT, és a mérés szerint
+# az ismétlődések szinte kizárólag lábak KÖZÖTT vannak (láboknként egy zárókör). Egy
+# memóriabeli gyorsítótár tehát pont a valódi veszteséget nem fogná meg.
+#
+# HIBÁT SOSEM TESZÜNK EL: `_catalog_fetch_rows` kivételt dob, ha a lekérdezés elhasal
+# (pl. a láncban terepen mért hálózat-kiesés alatt), és a hívó kapja el - így egy üres
+# válasz csak akkor kerül a tárba, ha a szerver tényleg azt mondta: nincs találat.
+CATALOG_ROWS_TTL = 6 * 3600
+# Ennél több bejegyzést nem tartunk (a legrégebbiek esnek ki): egy gép ~200 egyedi HWID-et
+# kérdez, tehát ez több gép nyomát is elbírja, a fájl mérete mégis kordában marad.
+CATALOG_ROWS_MAX = 2000
+# A gyorsítótárat 10 szál írja/olvassa (a katalógus-kör szálkészlete), ezért zárral.
+_CATALOG_ROWS_LOCK = threading.Lock()
+
+
+def _device_stem(pnp_id):
+    """Egy eszköz TARTÓS azonosítója: a példány-azonosító utolsó `\\` előtti része.
+
+    MIÉRT NEM A TELJES PÉLDÁNY-AZONOSÍTÓ (2026-08-31, mérve a fejlesztői gépen): annak a
+    farkában ott a PnP példányszám, amit a Windows LÉPTET, ha egy eszköz-csomópontot
+    eltávolítanak és újra felderítenek - vagyis pontosan akkor, amikor ez a program
+    `pnputil /remove-device`-t futtat (újrakötés-kör, regresszió-javítás). A tartós
+    no-bind tár emiatt a saját újrafelderítéseinktől vált halottá: a 4 feljegyzésből 2
+    már nem illeszkedett semmire, így ugyanazt a bizonyítottan NEM alkalmazható csomagot
+    a felület újra előre bejelölve ajánlotta, az AutoFix pedig újra letöltötte.
+
+        USB\\VID_041E&PID_3274&MI_03\\7&887C350&0&0003 -> ...&1&0003
+        HDAUDIO\\...&REV_1003\\5&337FEF56&0&0001       -> ...&1&0001
+
+    A törzs maga a hardver-azonosító, ami újrafelderítés után is ugyanaz. Két azonos
+    eszköznél közös - ez helyes: ami az egyikre nem alkalmazható, az az ikertestvérére
+    sem. Régi bejegyzésekhez is működik, nem kell séma-váltás."""
+    return (pnp_id or '').upper().rsplit('\\', 1)[0]
 # Ha az INF-vizsgálat elveti a nyertes csomagot, ennyi TARTALÉK jelöltet próbálunk még
 # (a nyertessel együtt ennyi letöltés lehet összesen). Csak azonos dátumú jelöltek
 # jönnek szóba, tehát a tartalék sosem lehet régebbi kiadás - lásd _catalog_find_driver.
@@ -459,10 +508,50 @@ class GuiHwScanMixin:
                                     f"(kapcsold be a pipát, ha ezekre is keressen)")
                     final_sys += f" | ⛔ {skipped_note}"
 
+                # MI MARADT A WINDOWS BEÉPÍTETT (INBOX) DRIVERÉN? (2026-08-31, explicit
+                # user decision: "írja már ki a program hogy hány driver fut a windows
+                # beépített generikus driverén... hogy tudjam mik nem kapnak drivereket").
+                #
+                # Ez a szken legcsendesebb kimenetele: az eszköz hibakód nélkül működik,
+                # csak épp a Microsoft általános driverén - a listán tehát SEHOL nem
+                # jelenik meg, mert nincs rá találat. Eddig ezt csak az AutoFix záró
+                # jelentése mondta ki; a kézi szken után a technikusnak nem volt honnan
+                # tudnia.
+                #
+                # UGYANAZ A SZŰRŐ, amit a záró jelentés használ (`_health_report_worth_listing`,
+                # app/gui/autofix.py) - két külön lista előbb-utóbb ellentmondana egymásnak
+                # ugyanarról a gépről. A szűrő SZÁNDÉKOSAN szűkebb, mint a keresésé: a
+                # katalógust mindenre megkérdezzük, de csak azt írjuk ki, amivel a
+                # szerelőnek TEENDŐJE lehet. A többit egyetlen szám összegzi - mérve
+                # (dev gép): 98 eszközből 71 fut inbox driveren, és ebből 3 az érdekes.
+                inbox_worth, inbox_by_design = [], 0
+                for dev in devices_to_check:
+                    if dev.get('err_code'):
+                        continue        # a hibakódosakat a "Problémás eszközök" listázza
+                    inst = inst_info.get((dev.get('pnp_id') or '').upper()) or {}
+                    if not inst or not _is_inbox_driver(inst):
+                        continue
+                    if self._health_report_worth_listing(dev, inst):
+                        inbox_worth.append({
+                            'name': dev.get('name') or dev.get('id'),
+                            'cat': dev.get('cat') or '', 'hwid': dev.get('id') or '',
+                            'inf': inst.get('inf') or '', 'provider': inst.get('provider') or '',
+                            # Van-e rá MOST találat a listán? Ha igen, a technikusnak
+                            # nincs teendője: elég feltelepíteni, amit a szken talált.
+                            'has_offer': (dev.get('id') in pool_hwids),
+                        })
+                    else:
+                        inbox_by_design += 1
+                inbox = {'total': len(inbox_worth) + inbox_by_design,
+                         'by_design': inbox_by_design, 'items': inbox_worth}
+                logging.info(f"[HW_SCAN] Windows-alapdriveren: {inbox['total']} eszköz "
+                             f"({len(inbox_worth)} érdemi, {inbox_by_design} ehhez gyári driver "
+                             f"nem is létezik). Érdemiek: {[i['name'] for i in inbox_worth]}")
+
                 self.emit('hw_scan_result', {
                     'pool': self.hw_updates_pool, 'installed': self._hw_installed_devs,
                     'problems': problems, 'sys_info': final_sys, 'time': time_str,
-                    'skipped_risky': skipped_note
+                    'skipped_risky': skipped_note, 'inbox': inbox
                 })
                 self._hw_loaded = True
 
@@ -660,9 +749,67 @@ try {
             rows.append((guid, title, row_text.lower(), date_iso))
         return rows
 
-    def _catalog_fetch_rows(self, hwid, ssl_ctx, max_pages=CATALOG_MAX_PAGES):
+    # ------------------------------------------------------------------
+    # A katalógus-sorok gyorsítótára (lásd CATALOG_ROWS_TTL fenti indoklását)
+    # ------------------------------------------------------------------
+    def _catalog_rows_store_path(self):
+        return os.path.join(_app_data_dir(), 'catalog_rows.json')
+
+    def _catalog_rows_cache(self):
+        """A lemezről egyszer beolvasott gyorsítótár {HWID: {'t': idő, 'rows': [...]}}.
+
+        A hívó a `_CATALOG_ROWS_LOCK`-ot tartja: `_catalog_fetch_rows` 10 szálon fut."""
+        cache = getattr(self, '_cat_rows', None)
+        if cache is not None:
+            return cache
+        cache = {}
+        try:
+            with open(self._catalog_rows_store_path(), 'r', encoding='utf-8') as f:
+                data = json.load(f)
+            if isinstance(data, dict):
+                cache = data
+            logging.info(f"[CATALOG] Katalógus-gyorsítótár beolvasva: {len(cache)} HWID "
+                         f"({self._catalog_rows_store_path()}).")
+        except FileNotFoundError:
+            pass
+        except Exception as e:
+            # Nem hiba: gyorsítótár nélkül a régi viselkedést kapjuk (minden lekérdezés kimegy).
+            logging.debug(f"[CATALOG] catalog_rows.json nem olvasható: {e}")
+        self._cat_rows = cache
+        self._cat_rows_dirty = False
+        return cache
+
+    def _catalog_rows_flush(self):
+        """A gyorsítótár kiírása. A katalógus-kör VÉGÉN hívjuk, nem lekérdezésenként:
+        egy kör 200-950 találatot ad, körönként egy írás bőven elég."""
+        with _CATALOG_ROWS_LOCK:
+            cache = getattr(self, '_cat_rows', None)
+            if not cache or not getattr(self, '_cat_rows_dirty', False):
+                return
+            try:
+                # Túlcsordulásnál a LEGRÉGEBBI bejegyzések esnek ki - azok a legkevésbé
+                # frissek, tehát úgyis ők járnának le leghamarabb.
+                if len(cache) > CATALOG_ROWS_MAX:
+                    keep = sorted(cache.items(), key=lambda kv: kv[1].get('t', 0),
+                                  reverse=True)[:CATALOG_ROWS_MAX]
+                    cache = dict(keep)
+                    self._cat_rows = cache
+                with open(self._catalog_rows_store_path(), 'w', encoding='utf-8') as f:
+                    json.dump(cache, f)
+                self._cat_rows_dirty = False
+                logging.info(f"[CATALOG] Katalógus-gyorsítótár kiírva: {len(cache)} HWID.")
+            except Exception as e:
+                # A gyorsítótár kényelmi funkció: ha nem megy, a keresés attól még helyes.
+                logging.debug(f"[CATALOG] catalog_rows.json nem írható: {e}")
+
+    def _catalog_fetch_rows(self, hwid, ssl_ctx, max_pages=CATALOG_MAX_PAGES, deep=False):
         """Egy HWID katalógus-keresése, DÁTUM SZERINT CSÖKKENŐ sorrendben, szükség esetén
         LAPOZVA. Visszatérés: [(guid, cím, sor_szöveg_kisbetűs, dátum_iso)].
+
+        GYORSÍTÓTÁRAZOTT (2026-08-31): ugyanarra a HWID-re a szerver válasza órákon belül
+        nem változik, a lánc viszont MINDEN LÁBON újra végigkérdezi ugyanazt a ~190
+        eszközt. Mérve: 952 lekérdezésből 758 (80%) szó szerinti ismétlés, ~11 perc.
+        Részletes indoklás a CATALOG_ROWS_TTL konstansnál.
 
         MIÉRT NEM ELÉG EGY LAPOT LEKÉRNI (terepi log + élő mérés, 2026-08-06):
         a katalógus laponként 25 sort ad, a régi kód pedig egyetlen, RENDEZETLEN lapot
@@ -690,6 +837,24 @@ try {
         (mérve). Ha a rendezett kérés bármiért elhasal, visszaesünk a rendezetlenre -
         az a régi viselkedés, nem rosszabb a mainál."""
         import urllib.request, urllib.parse
+        # A gyorsítótár csak az ALAPÉRTELMEZETT lapszámra érvényes: más max_pages más
+        # sorhalmazt adna, és egy szűkebb találatot nem szabad bőségesként visszaadni.
+        # A gyorsítótár kulcsa tartalmazza a LEKÉRÉS MÉLYSÉGÉT is: egy sekélyebb
+        # lekérdezés eredményét nem szabad bőségesként visszaadni egy mélyebb kérésre.
+        cache_key = f"{(hwid or '').upper()}|{max_pages}|{1 if deep else 0}"
+        # VALÓDI IDŐBÉLYEG, ezért time.time() és nem monotonic: a tár FOLYAMATOKON ÁTÍVELŐ
+        # (a lánc minden lába külön folyamat), márpedig a monotonic óra folyamatonként
+        # nullázódik. Ugyanaz az eset, mint a gui/nvidia.py fájl-mtime frissességénél.
+        # Óraugrás legrosszabb esetben egy fölösleges lekérdezést jelent, hibát nem.
+        now = time.time()
+        if cache_key:
+            with _CATALOG_ROWS_LOCK:
+                ent = self._catalog_rows_cache().get(cache_key)
+                if ent and 0 <= (now - ent.get('t', 0)) < CATALOG_ROWS_TTL:
+                    rows = [tuple(r) for r in (ent.get('rows') or [])]
+                    logging.debug(f"[CATALOG] Gyorsítótárból: {hwid} -> {len(rows)} sor "
+                                  f"({(now - ent['t']) / 60:.0f} perce kérdeztük le).")
+                    return rows
         base = ('https://www.catalog.update.microsoft.com/Search.aspx?q='
                 + urllib.parse.quote(hwid))
 
@@ -715,8 +880,19 @@ try {
             # Amíg a lap UTOLSÓ sora is a legfrissebb dátumú csoportba tartozik, a csoport
             # átlóghat a következő lapra - azt is le kell kérni, különben a holtverseny
             # egy részét (és talán épp az eszközhöz valót) nem is látjuk.
+            # A `deep` ág a DÁTUM-HOLTVERSENY feltételt hagyja el. Alaphelyzetben csak
+            # akkor kérünk következő lapot, ha a legfrissebb dátumú csoport ÁTLÓG a lap
+            # végén - és ez pont ott állítja meg a lapozást, ahol a legtöbbet érne:
+            # mérve az ASRock ALC892-n a saját SUBSYS-kulcs **41 sort** ad 2 lapon, az
+            # 1. lap viszont 2019-03-04 .. 2021-03-22 (különböző dátumok), tehát a
+            # program a 41-ből csak 25-öt látott. Ez az egyetlen ág, ahol a régebbi
+            # sorok érnek is valamit: Windows-alapdriveren futó eszköz SAJÁT, gyártó-
+            # specifikus kulcsán MINDEN sor ehhez a géphez való, csak régebbi kiadás -
+            # márpedig a régi gyári driver jobb a generikusnál (explicit user decision).
+            # Az általános kulcsra SOSEM mélyítünk: ott 1000 sor van, mind más gyártó
+            # OEM-változata, tehát csak kérésekbe kerülne (ezt a fájl korábban is mérte).
             while (pages < max_pages and len(rows) >= CATALOG_PAGE_SIZE * pages
-                   and (rows[-1][3] or '') == top_date and len(rows) < total):
+                   and (deep or (rows[-1][3] or '') == top_date) and len(rows) < total):
                 try:
                     more = self._catalog_parse_rows(fetch(f"{base}{CATALOG_SORT_QS}&p={pages}"))
                 except Exception as e:
@@ -744,6 +920,13 @@ try {
                    f"(a katalógusban összesen {total}, {pages} lap, "
                    f"{'dátum szerint csökkenő' if sorted_ok else 'RENDEZETLEN'}; {stop})")
             (logging.info if (pages > 1 or not sorted_ok) else logging.debug)(msg)
+        # Eltesszük - de CSAK a rendezett (teljes értékű) választ. Egy rendezetlen
+        # tartalék-lekérdezés a régi, gyengébb mintát adja; azt hat órára bebetonozni
+        # rosszabb lenne, mint legközelebb újra megkérdezni.
+        if cache_key and sorted_ok:
+            with _CATALOG_ROWS_LOCK:
+                self._catalog_rows_cache()[cache_key] = {'t': now, 'rows': [list(r) for r in rows]}
+                self._cat_rows_dirty = True
         return rows
 
     def _catalog_driver_models(self, guid, ssl_ctx):
@@ -874,10 +1057,17 @@ try {
         # az Acer-csomag nyert, az INF-ellenőrzés jogosan elvetette, a helyes (de régebbi)
         # csomaghoz pedig soha nem jutottunk el - a hangkártya a Windows alapdriverén maradt.
         spec_by_guid = {}
+        # MÉLYEBB LAPOZÁS a Windows-alapdriveren futó eszköz SAJÁT, SUBSYS-es kulcsain
+        # (lásd `_catalog_fetch_rows(deep=...)`). Csak ott, mert csak ott van értelme:
+        # egy SUBSYS-re szűkített kulcs minden sora ehhez a géphez való, tehát a régebbi
+        # kiadások is valódi jelöltek - az általános kulcson viszont ezerszám állnak más
+        # gyártók OEM-változatai, ott a mélyítés puszta kéréspazarlás lenne.
+        deep_ok = _is_inbox_driver(inst)
         for spec, hwid in enumerate(hwids[:4]):
+            deep = deep_ok and 'SUBSYS_' in (hwid or '').upper()
             try:
-                logging.debug(f"[CATALOG] Keresés: {item['name']} ({hwid})")
-                for (g, t, row_l, d) in self._catalog_fetch_rows(hwid, ssl_ctx):
+                logging.debug(f"[CATALOG] Keresés: {item['name']} ({hwid}{', MÉLY' if deep else ''})")
+                for (g, t, row_l, d) in self._catalog_fetch_rows(hwid, ssl_ctx, deep=deep):
                     rows_by_guid.setdefault(g, (t, row_l, d))
                     if spec < spec_by_guid.get(g, 99):
                         spec_by_guid[g] = spec
@@ -913,7 +1103,7 @@ try {
         # telepítő oldalán spóroljuk meg (_install_catalog_sync: _proven_wrong), ami a
         # csomagcsalád régebbi kiadását is felismeri.
         bad_guids = {rec.get('guid') for rec in
-                     ((known_no_bind or {}).get((item.get('pnp_id') or '').upper()) or [])
+                     ((known_no_bind or {}).get(_device_stem(item.get('pnp_id'))) or [])
                      if rec.get('guid')}
         if bad_guids:
             usable = [c for c in cands if c[1] not in bad_guids]
@@ -1058,11 +1248,25 @@ try {
         # szerint deduplikál, és a korábban megbukott csomagokat le sem tölti.
         if _is_inbox_driver(inst):
             have = {best_id} | {a[0] for a in alts}
-            extra = [c for c in cands if c[1] not in have]
-            # Két menetben, a Python STABIL rendezésére építve: előbb dátum szerint
-            # csökkenőbe, majd a specifikusság szerint növekvőbe - így a legspecifikusabb
-            # kulcs sorai kerülnek előre, azon belül a legfrissebb dátum.
+            # A TARTALÉK-KÉSZLET A TELJES `scored` HALMAZ, NEM CSAK A `cands`.
+            #
+            # `cands` csak a LEGJOBB OS-pontszámú sorokat tartja meg - és pont ez vágta le
+            # a keresett csomagokat. A pontozó (`_catalog_row_score`) `None`-t ad a valóban
+            # KIZÁRT sorokra (arm64 x64-en, Win11-only Win10-en), a 0-3 viszont csak
+            # PREFERENCIA: Windows 11-es gépen a "windows 11" sor 3 pont, a "windows 10"
+            # csak 1. Mérve ezen a gépen (ASRock B450M + ALC892): a saját SUBSYS-kulcs
+            # 41 sora mind 2019-2021-es, "Windows 10"-es Realtek csomag, tehát 3 helyett
+            # 1 pontot kap - így a `cands`-ból kiesett, és a tartalékok mind a 2026-os,
+            # MÁS gyártóknak szóló sorok lettek (élőben ellenőrizve: 5 tartalék, egyik
+            # sem ASRock). Egy Windows 10-es gyári driver viszont Windows 11-en is
+            # felmegy, és minden szempontból jobb a generikusnál.
+            extra = [c for c in scored if c[1] not in have]
+            # Három menetben, a Python STABIL rendezésére építve (a legutolsó a
+            # legerősebb): dátum csökkenő -> pontszám csökkenő -> specifikusság növekvő.
+            # Így a LEGSPECIFIKUSABB kulcs sorai jönnek elöl (ott minden sor ehhez a
+            # géphez való), azon belül a jobb OS-illeszkedés, azon belül a frissebb.
             extra.sort(key=lambda c: (c[3] or ''), reverse=True)
+            extra.sort(key=lambda c: c[0], reverse=True)
             extra.sort(key=lambda c: spec_by_guid.get(c[1], 99))
             room = max(0, CATALOG_INBOX_FALLBACK_CANDIDATES - 1 - len(alts))
             if extra and room:
@@ -1084,6 +1288,19 @@ try {
             # meg, melyik konkrét csomag bukott meg ezen az eszközön.
             "cat_guid": best_id,
             "alt_candidates": alts,
+            # WINDOWS-ALAPDRIVEREN FUT-E MOST? A telepítő ebből tudja, hogy a hosszabb
+            # (CATALOG_INBOX_FALLBACK_CANDIDATES) jelölt-listát kell végigjárnia.
+            #
+            # ENÉLKÜL A 2026-08-26-I TARTALÉK-SZABÁLY HATÁSTALAN VOLT: a kereső itt
+            # gondosan 6 jelöltet állított sorba (a legspecifikusabb kulcs felől,
+            # RÉGEBBI kiadásokat is beengedve), a telepítő viszont fixen a rövid,
+            # 3-as korlátot használta - vagyis pont azokat a tartalékokat vágta le,
+            # amikért az egész szabály született. Terepen mérve (ASRock B450M + ALC892):
+            # az eszköz SAJÁT SUBSYS-kulcsa 25 sort ad (2019-2021, ASRock-specifikus
+            # Realtek csomagok), az általános kulcs viszont a 2026-os, MÁS gyártóknak
+            # szóló változatokat - a napló pedig "a katalógus 3 jelöltjéből egyik sem"
+            # üzenettel zárult, holott a 4-6. jelölt lett volna a jó.
+            "inbox_now": bool(_is_inbox_driver(inst)),
             "installed_version": inst_ver_str,
             "installed_date": inst.get('date', ''),
             # A telepítés UTÁNI kötés-ellenőrzéshez: az eszköz ÖSSZES valódi hardver-
@@ -1126,7 +1343,7 @@ try {
         known_records = self._no_bind_load()
         bad_by_pnp = {}
         for rec in known_records:
-            bad_by_pnp.setdefault((rec.get('pnp') or '').upper(), []).append(rec)
+            bad_by_pnp.setdefault(_device_stem(rec.get('pnp')), []).append(rec)
         found = []
         lock = threading.Lock()
         q = queue.Queue()
@@ -1190,6 +1407,10 @@ try {
         if alive:
             logging.warning(f"[CATALOG] {len(alive)} szál még fut a {join_timeout}s plafon után - "
                             f"a találati lista hiányos lehet ({len(found)} db).")
+        # A kör alatt összegyűlt katalógus-válaszok kiírása, EGY írással. Ez az, ami a
+        # következő láb zárókörének megspórolja ugyanezt a néhány száz HTTP-kérést -
+        # a lábak külön folyamatok, memóriában semmi nem élné túl az újraindítást.
+        self._catalog_rows_flush()
         # UGYANAZ A CSOMAG TÖBB ESZKÖZRE: egy chipset-csomag jellemzően több PnP-eszközt
         # szolgál ki (élő mérés: az "AMD PCI" kétszer szerepelt, azonos letöltési URL-lel),
         # és enélkül ugyanazt a cab-ot kétszer töltenénk le és telepítenénk. A második
@@ -1220,14 +1441,31 @@ try {
         #      kulcs nem fogta, és a program letöltötte ugyanazt a Clevo-csomagot még
         #      egyszer. Egy ÚJABB kiadás viszont továbbra sem maszkolható (szándékos:
         #      lehet, hogy a gyártó épp kijavította) - ezért a release_rank-összevetés.
+        #
+        # AZ ESZKÖZ AZONOSÍTÁSA A HARDVER-AZONOSÍTÓ TÖRZSE, NEM A PÉLDÁNY-AZONOSÍTÓ
+        # (2026-08-31, mérve a fejlesztői gépen). A tár a TELJES példány-azonosítót
+        # tárolta, annak a farkában viszont ott a PnP példányszám, amit a Windows LÉPTET,
+        # ha egy eszköz-csomópontot eltávolítanak és újra felderítenek - vagyis pontosan
+        # akkor, amikor a program `pnputil /remove-device`-t futtat (újrakötés-kör,
+        # regresszió-javítás). A gép saját no-bind emlékezetét tehát a saját maga által
+        # kiváltott újrafelderítés törölte el. A 4 feljegyzésből 2 így vált halottá:
+        #     USB\VID_041E&PID_3274&MI_03\7&887C350&0&0003 -> ...&1&0003
+        #     HDAUDIO\...&REV_1003\5&337FEF56&0&0001       -> ...&1&0001
+        # Következmény: ugyanazt a bizonyítottan nem illeszkedő csomagot a felület újra
+        # ELŐRE BEJELÖLVE ajánlotta, az AutoFix pedig újra letöltötte.
+        #
+        # A törzs (az utolsó `\` előtti rész) maga a hardver-azonosító, ami újrafelderítés
+        # után is ugyanaz. Két azonos eszköznél közös a törzs - ez helyes: ami az egyikre
+        # nem alkalmazható, az az ikertestvérére sem. Régi bejegyzésekhez is működik,
+        # nem kell séma-váltás.
         if known_records:
             marked = []
             for hit in deduped:
-                pnp = (hit.get('pnp_id') or '').upper()
+                pnp = _device_stem(hit.get('pnp_id'))
                 title = hit.get('wu_title') or ''
                 hit_rank = release_rank(hit.get('wu_date'), title)
                 for rec in known_records:
-                    if (rec.get('pnp') or '').upper() != pnp:
+                    if _device_stem(rec.get('pnp')) != pnp:
                         continue
                     same = (rec.get('guid') and rec['guid'] == hit.get('cat_guid')) or \
                            (rec.get('title') or '') == title
@@ -1413,17 +1651,17 @@ try {
                     self._wu_reboot_required = True
                     done = success + fail
                     self.emit('task_progress', {'task': 'wu_install', 'log': f'  ✅ {line[5:].strip()} (⚠️ újraindítás szükséges)',
-                                                'current': done, 'total': install_total, 'counter': f'{done}/{install_total} (✅{success} ❌{fail})'})
+                                                'current': done, 'total': install_total, 'counter': f'{done}/{install_total}', 'ok': success, 'fail': fail})
                 elif line.startswith("OK:"):
                     success += 1
                     done = success + fail
                     self.emit('task_progress', {'task': 'wu_install', 'log': f'  ✅ {line[3:].strip()}',
-                                                'current': done, 'total': install_total, 'counter': f'{done}/{install_total} (✅{success} ❌{fail})'})
+                                                'current': done, 'total': install_total, 'counter': f'{done}/{install_total}', 'ok': success, 'fail': fail})
                 elif line.startswith("FAIL:"):
                     fail += 1
                     done = success + fail
                     self.emit('task_progress', {'task': 'wu_install', 'log': f'  ❌ {line[5:].strip()}',
-                                                'current': done, 'total': install_total, 'counter': f'{done}/{install_total} (✅{success} ❌{fail})'})
+                                                'current': done, 'total': install_total, 'counter': f'{done}/{install_total}', 'ok': success, 'fail': fail})
                 elif line.startswith("DONE:"):
                     self.emit('task_progress', {'task': 'wu_install', 'log': f'\n--- {line[5:].strip()} ---'})
                 elif line.startswith("EMPTY:"):
@@ -1490,19 +1728,19 @@ try {
         """Nem-kötő csomagok feljegyzése + igazoltan átvett telepítések kivezetése."""
         try:
             existing = self._no_bind_load()
-            bound_keys = {((d.get('pnp_id') or '').upper(), d.get('wu_title') or '')
+            bound_keys = {(_device_stem(d.get('pnp_id')), d.get('wu_title') or '')
                           for d in (bound_ok_items or [])}
             removed = [t.get('name') or t.get('title') for t in existing
-                       if ((t.get('pnp') or '').upper(), t.get('title') or '') in bound_keys]
+                       if (_device_stem(t.get('pnp')), t.get('title') or '') in bound_keys]
             if removed:
                 existing = [t for t in existing
-                            if ((t.get('pnp') or '').upper(), t.get('title') or '') not in bound_keys]
+                            if (_device_stem(t.get('pnp')), t.get('title') or '') not in bound_keys]
                 logging.info(f"[CATALOG] {len(removed)} bejegyzés törölve a tartós no-bind listáról "
                              f"(az eszköz most már átvette a csomagot): {removed}")
-            keys = {((t.get('pnp') or '').upper(), t.get('title') or '') for t in existing}
+            keys = {(_device_stem(t.get('pnp')), t.get('title') or '') for t in existing}
             added = []
             for d in (no_bind_items or []):
-                k = ((d.get('pnp_id') or '').upper(), d.get('wu_title') or '')
+                k = (_device_stem(d.get('pnp_id')), d.get('wu_title') or '')
                 if not k[1] or k in keys:
                     continue
                 keys.add(k)
@@ -1814,6 +2052,10 @@ try {
         fail = 0
         skipped = 0
         cancelled = False
+        # Azok az eszközök, amikre a katalógus MINDEN jelöltje alkalmatlan volt. A záró
+        # összegzés nevesíti őket: egy görgethető naplóban eltűnő "kihagyva" sor nem
+        # visszakereshető információ, márpedig ez konkrét teendő (gyártói driver-oldal).
+        no_source = []
         # Generikus -> gyári cserék: (pool-elem, [publikált oemNN.inf]) párok. A telepítés
         # UTÁN ellenőrizzük őket, és ha az eszköz hibakódos lett, visszaállunk (lásd
         # _verify_generic_replacements). Csak itt gyűjtjük, a kiértékelés a szálak után fut.
@@ -1837,7 +2079,7 @@ try {
         prev_bad = {}
         if not self.target_os_path:
             for rec in self._no_bind_load():
-                prev_bad.setdefault((rec.get('pnp') or '').upper(), []).append(rec)
+                prev_bad.setdefault(_device_stem(rec.get('pnp')), []).append(rec)
 
         def _proven_wrong(pnp, guid, title, date, url):
             """Bizonyítottan NEM ehhez az eszközhöz való-e már ez a csomag? Három kulcs:
@@ -1900,7 +2142,19 @@ try {
                 # zárta a láncot, hogy "a katalógusban nincs jobb driver".
                 candidates = [(drv.get('cat_guid') or '', drv.get('wu_title') or '',
                                drv.get('wu_date') or '', url)]
-                for (g, t, d) in (drv.get('alt_candidates') or [])[:CATALOG_MAX_CANDIDATES - 1]:
+                # HÁNY JELÖLTET JÁRUNK VÉGIG: Windows-alapdriveren futó eszköznél
+                # többet, mert ott a tét más. Egy gyári driveren futó eszköznél a
+                # tartalék csak "egy másik, ugyanolyan friss csomag" - ott a 3-as korlát
+                # bőven elég, és minden további jelölt egy fölösleges, akár 1 GB-os
+                # letöltés. Inbox driveren viszont az alternatíva a GENERIKUS driver,
+                # tehát a lista végén álló RÉGEBBI gyári csomag is nyereség
+                # (explicit user decision: "a gyári driver mindig jobb mint az alap
+                # inbox windowsos generic driver"). A kereső ilyenkor eleve a
+                # legspecifikusabb HWID felől rendezi a tartalékokat, tehát a jó csomag
+                # jellemzően az első néhány között van.
+                max_cand = (CATALOG_INBOX_FALLBACK_CANDIDATES if drv.get('inbox_now')
+                            else CATALOG_MAX_CANDIDATES)
+                for (g, t, d) in (drv.get('alt_candidates') or [])[:max_cand - 1]:
                     candidates.append((g, t, d, None))
 
                 self.emit('task_progress', {'task': task_id, 'log': f'-> {name} letöltése...'})
@@ -2046,11 +2300,32 @@ try {
                     break
 
                 if chosen is None:
+                    # NEM ELÉG ANNYIT MONDANI, HOGY "KIHAGYVA" (2026-08-31, terepi
+                    # visszajelzés: *"itt nem próbál és ennyi kihagyva és kész, ez így nem
+                    # jó"*). A program ilyenkor VÉGIGPRÓBÁLTA az összes jelöltet - a
+                    # naplóban ott is van soronként -, de a záró sor ezt nem mondta ki, és
+                    # teendőt sem adott. Márpedig ez a kimenetel egy konkrét, cselekvő
+                    # választ jelent: erre az eszközre a Microsoft katalógusában NINCS
+                    # megfelelő csomag, tehát a gyártó saját oldaláról kell.
+                    #
+                    # Mérve ezen a gépen: az ALC892 `SUBSYS_18496893` (1849 = ASRock), és a
+                    # katalógus mindhárom Realtek-jelöltje MÁS gyártó OEM-változata volt -
+                    # az ASRock ugyanis egyáltalán nem publikál a Windows Update-re (ezt a
+                    # CLAUDE.md már rögzíti). Nem hiba tehát, hanem a katalógus határa.
                     logging.warning(f"[CATALOG_INSTALL] {name}: mind a(z) {len(candidates)} katalógus-jelölt "
                                     f"INF-je más eszközre való - nincs telepíthető csomag.")
-                    self.emit('task_progress', {'task': task_id, 'log': f'  ↷ {name}: a katalógus {len(candidates)} jelöltjéből egyik sem ehhez az eszközhöz való - kihagyva.'})
+                    self.emit('task_progress', {'task': task_id, 'log':
+                              f'  ↷ {name}: mind a(z) {len(candidates)} katalógus-jelöltet végigpróbáltuk, '
+                              f'egyik INF-je sem ismeri ezt az eszközt - nincs telepíthető csomag.'})
+                    self.emit('task_progress', {'task': task_id, 'log':
+                              f'     → Ehhez az eszközhöz a Microsoft katalógusában nincs való csomag. '
+                              f'A gyártó (alaplap/laptop) saját driver-oldaláról kell - a szken '
+                              f'végén ott a hivatkozás.'})
                     with counter_lock:
                         skipped += 1
+                        # A záró összegzés nevesíti őket: egy eltűnő "kihagyva" sor a
+                        # görgethető naplóban nem visszakereshető információ.
+                        no_source.append(name)
                     return
                 if chosen[1] != (drv.get('wu_title') or ''):
                     # Ez a sor a bizonyíték, hogy a tartalék-logika dolgozott: enélkül a
@@ -2202,8 +2477,34 @@ try {
                                   or 'reboot is needed' in (res.stdout or '').lower())
                     self._cleanup_unused_staged_infs(res.stdout or '', name, task_id, defer=pkg_reboot)
 
+            # HALADÁS-JELZÉS CSOMAGONKÉNT (2026-08-31, terepi visszajelzés: *"nincs
+            # progress bar nincs szazalek nincs ido nincs semmi csak plain szöveg"*).
+            # Ez a kör eddig EGYETLEN haladás-eseményt sem küldött: a felület csak a
+            # naplósorokat kapta, tehát a sáv végig üresen állt, miközben a program
+            # több száz MB-ot töltött le. A `process_catalog_driver` több ágon is
+            # visszatér (nincs URL, már naprakész, INF-veto, hiba...), ezért a jelzés
+            # egy BURKOLÓBAN van, `finally`-vel: így minden kimenetel után pontosan
+            # egyszer lép a számláló, akkor is, ha az elem kivétellel végződött.
+            done_count = [0]
+
+            def _process_and_report(idx, drv):
+                try:
+                    process_catalog_driver(idx, drv)
+                finally:
+                    with counter_lock:
+                        done_count[0] += 1
+                        d, s, f, sk = done_count[0], success, fail, skipped
+                    self.emit('task_progress', {
+                        'task': task_id, 'current': d, 'total': total,
+                        'counter': f'{d} / {total}',
+                        # KÜLÖN MEZŐBEN, nem a szövegből visszafejtve: a felület fejléce
+                        # ezekből rajzolja a "kész / hiba" jelzőket, és egy szövegből
+                        # kitalált szám előbb-utóbb hazudna (pl. a visszaállítási pont
+                        # "✅ kész" sorát is sikeres telepítésnek számolná).
+                        'ok': s, 'fail': f, 'skipped': sk})
+
             with concurrent.futures.ThreadPoolExecutor(max_workers=3) as executor:
-                futures = [executor.submit(process_catalog_driver, i, drv) for i, drv in enumerate(selected_pool)]
+                futures = [executor.submit(_process_and_report, i, drv) for i, drv in enumerate(selected_pool)]
                 concurrent.futures.wait(futures)
 
             if self._check_cancel():
@@ -2298,6 +2599,16 @@ try {
         logging.info(f"[CATALOG_INSTALL] Kész - Sikeres: {success}/{total}, Sikertelen: {fail}, Kihagyott: {skipped}")
         self.emit('task_progress', {'task': task_id, 'current': total, 'total': total,
                                     'log': f'\n--- Katalógus: Sikeres: {success}, Sikertelen: {fail}' + (f', Kihagyott: {skipped}' if skipped else '') + ' ---'})
+        if no_source:
+            logging.warning(f"[CATALOG_INSTALL] Nincs való csomag a katalógusban: {no_source}")
+            self.emit('task_progress', {'task': task_id, 'log':
+                      f'\n⚠️ {len(no_source)} eszközhöz a Microsoft katalógusában NINCS megfelelő csomag:'})
+            for n in no_source:
+                self.emit('task_progress', {'task': task_id, 'log': f'   • {n}'})
+            self.emit('task_progress', {'task': task_id, 'log':
+                      '   Ezekhez a gyártó saját driver-oldaláról kell a driver (a szken végén ott a '
+                      'gép/alaplap gyártójának hivatkozása). Nem hiba: a katalógus egyszerűen nem '
+                      'tartalmaz ilyen csomagot ehhez a konkrét alaplap-változathoz.'})
         return success, fail, cancelled
 
     def _verify_generic_replacements(self, generic_installs, task_id='wu_install'):

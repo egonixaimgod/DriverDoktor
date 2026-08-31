@@ -371,3 +371,95 @@ def download_logs(run, url, password, rows, dest_dir=None, http=None,
             logging.warning(f"[LOGDL] Nem sikerült letölteni ({row.get('name')}): {e}")
     logging.info(f"[LOGDL] Kész: {done} letöltve, {skipped} már megvolt, {len(errors)} hiba.")
     return done, skipped, errors
+
+
+# ===========================================================================
+# A DEBUG-NAPLÓK TÖRLÉSE (2026-08-31, explicit user decision: "clear log" gomb)
+# ===========================================================================
+# MIÉRT KELL: a napló 5 MB x 3 fájl, és a technikus gyakran EGY konkrét gép futását
+# akarja tisztán látni. Kézzel törölni azért nem lehet, mert a fájl FUT KÖZBEN NYITVA
+# van - az Explorerből "A fájlt egy másik program használja" hibát ad.
+#
+# EZÉRT NEM ELÉG AZ os.remove(): a Windows nem engedi törölni a rotáló handler által
+# nyitva tartott fájlt. A helyes sorrend: a handlert LEZÁRJUK (elengedi a fájlt) ->
+# törlünk -> a handlert ÚJRANYITJUK. Az újranyitás a handler saját `_open()`-jén megy,
+# tehát a `_BomRotatingFileHandler` UTF-8 BOM-ja is a helyére kerül (enélkül a friss
+# napló a Jegyzettömbben ékezet-szemétként jelenne meg - lásd driver_tool.py).
+#
+# ÉS A TÖRLÉS TÉNYE BEKERÜL AZ ÚJ NAPLÓBA (Rule 0): egy üres napló önmagában nem árulja
+# el, hogy törölték-e vagy sosem futott a program - és pont ez a különbség dönti el egy
+# hibajelentésnél, hogy hiányzó bizonyítékot vagy hiányzó futást keresünk.
+
+def clear_logs():
+    """A debug-naplók (`DriverVarázsló_debug.log` + rotált másai) törlése.
+
+    Visszatérés: (törölt_fájlok_száma, felszabadított_bájt, hibák_listája).
+
+    A letöltött IDEGEN naplókat (`letoltott_naplok`) SZÁNDÉKOSAN nem bántja: azok más
+    gépek bizonyítékai, amiket a technikus külön kért le - egy "napló törlése" gombtól
+    senki nem várja, hogy azokat is elviszi."""
+    import glob as _glob
+    base = os.path.join(_app_data_dir(), LOG_BASENAME)
+    # A rotált fájlok `.1`, `.2` végűek (backupCount=2), de gyűjtsük mintával, hogy egy
+    # későbbi backupCount-változás se hagyjon itt fájlt.
+    targets = sorted(set([base] + _glob.glob(base + '.*')))
+    targets = [p for p in targets if os.path.isfile(p)]
+    if not targets:
+        logging.info("[LOGCLEAR] Nincs törölhető naplófájl.")
+        return 0, 0, []
+
+    sizes = {}
+    for p in targets:
+        try:
+            sizes[p] = os.path.getsize(p)
+        except OSError:
+            sizes[p] = 0
+    # Még a régi naplóba: ha valaki később ezt a fájlt menti ki, lássa a szándékot.
+    logging.warning(f"[LOGCLEAR] NAPLÓ-TÖRLÉS kérve: {[os.path.basename(p) for p in targets]} "
+                    f"({sum(sizes.values()) / 1048576:.1f} MB).")
+
+    # A fájlt nyitva tartó handlerek lezárása. Csak azok, amik TÉNYLEG ezekre a fájlokra
+    # mutatnak - egy jövőbeli másik fájl-handlert nem szabad mellékesen elkaszálni.
+    handlers = []
+    try:
+        for h in list(logging.getLogger().handlers):
+            fn = getattr(h, 'baseFilename', None)
+            if fn and os.path.normcase(fn) == os.path.normcase(base):
+                handlers.append(h)
+    except Exception as e:
+        logging.warning(f"[LOGCLEAR] A naplóző handlerek felderítése nem sikerült: {e}")
+
+    for h in handlers:
+        try:
+            h.acquire()
+            h.close()          # elengedi a fájlt: enélkül a törlés WinError 32-vel bukna
+        except Exception as e:
+            logging.debug(f"[LOGCLEAR] A handler lezárása nem sikerült: {e}")
+
+    removed, freed, errors = 0, 0, []
+    try:
+        for p in targets:
+            try:
+                os.remove(p)
+                removed += 1
+                freed += sizes.get(p, 0)
+            except Exception as e:
+                errors.append(f"{os.path.basename(p)}: {e}")
+    finally:
+        # ÚJRANYITÁS MINDENKÉPPEN, akkor is, ha a törlés elhasalt - egy naplózás nélkül
+        # továbbfutó program a lehető legrosszabb kimenet ebben a projektben.
+        for h in handlers:
+            try:
+                h.stream = h._open()
+            except Exception as e:
+                errors.append(f"a naplózás újraindítása: {e}")
+            finally:
+                try:
+                    h.release()
+                except Exception:
+                    pass
+
+    # Az ÚJ naplóba (ezért van a handler-újranyitás után): mi tűnt el és mikor.
+    logging.warning(f"[LOGCLEAR] Napló törölve: {removed} fájl, {freed / 1048576:.1f} MB "
+                    f"felszabadítva. Hibák: {errors or 'nincs'}")
+    return removed, freed, errors
