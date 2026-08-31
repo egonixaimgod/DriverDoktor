@@ -159,6 +159,20 @@ td input[type="checkbox"]{accent-color:var(--accent);width:16px;height:16px;curs
 .pw-input:focus{outline:none;border-color:var(--glass-border-hover);box-shadow:0 0 0 3px rgba(180,100,255,0.15)}
 /* Windows & Office nézet */
 .winact-btnrow{display:flex;gap:8px;flex-wrap:wrap}
+/* Kockázatos-osztály kapcsolók a Driver Keresés nézetben. Pirosas keret, mert ezek nem
+   kényelmi beállítások: bekapcsolva boot-kritikus és visszafordíthatatlan csomagok is
+   megjelenhetnek a listán. */
+.hw-risk-row{display:flex;gap:10px;flex-wrap:wrap;margin:-4px 0 12px}
+.hw-risk-row label{display:inline-flex;align-items:center;gap:8px;font-size:12px;
+  color:var(--text2);cursor:pointer;padding:7px 12px;border-radius:999px;
+  background:rgba(255,90,90,0.07);border:1px solid rgba(255,120,120,0.28);transition:all var(--t)}
+.hw-risk-row label:hover{background:rgba(255,90,90,0.13);border-color:rgba(255,120,120,0.5)}
+.hw-risk-row input[type="checkbox"]{accent-color:#ff7676;width:15px;height:15px;cursor:pointer}
+.hw-risk-row b{color:#ff9a9a;font-weight:700}
+/* "Még dolgozik" jelzés a nyomtató-szűrő kapcsolóján: amíg a felderítés fut, a kapcsoló
+   be van pipálva, de még nem rejt el semmit - ezt látnia kell a technikusnak. */
+.toggle-busy{opacity:.6}
+.toggle-busy::after{content:' ⏳ felderítés...';font-size:11px;color:var(--text3);white-space:nowrap}
 /* A BIOS-ba égetett gyári kulcs - szándékosan a nézet leghangsúlyosabb eleme: ha van,
    az dönti el az egész aktiválást, és a technikusnak első pillantásra látnia kell. */
 .winact-oem{margin-bottom:18px;padding:20px 24px;border-radius:14px;
@@ -602,6 +616,16 @@ td input[type="checkbox"]{accent-color:var(--accent);width:16px;height:16px;curs
               <span class="toggle-track"></span>
               Újraindítás törlés után
             </label>
+            <!-- NYOMTATÓ-SZŰRŐ: ugyanaz a védelem kézzel, mint az AutoFix pipája. Alapból BE,
+                 mert egy törölt nyomtató-driver a nyomtató nélkül nem telepíthető vissza. A
+                 felismerés a wu_core._collect_printer_protection-ből jön (ugyanaz, amit a fix
+                 használ) - az osztály-alapú egyeztetés önmagában kevés lenne. -->
+            <label class="toggle" id="lbl-hide-printers"
+                   title="Alapból bekapcsolva: a nyomtató-driverek nem jelennek meg a listában, így véletlenül sem törlöd ki őket. Ugyanaz a felismerés fut, mint az 1 kattintásos fix nyomtató-pipájánál - az osztály mellett a jelenlévő nyomtatók által ténylegesen használt INF-eket és a gyártót is nézi (a multifunkciós nyomtatók csomagjai USB/Ports/SYSTEM osztályban is szétszóródnak). Kapcsold ki, ha látni és törölni akarod őket.">
+              <input type="checkbox" id="hide-printer-drivers" checked onchange="togglePrinterFilter()">
+              <span class="toggle-track"></span>
+              🖨️ Nyomtató-driverek elrejtése
+            </label>
             <div class="search-box">
               <span class="icon">🔎</span>
               <input type="text" id="driver-search" placeholder="Keresés név/gyártó/típus szerint..." oninput="filterDrivers()">
@@ -774,6 +798,19 @@ td input[type="checkbox"]{accent-color:var(--accent);width:16px;height:16px;curs
                    title="Bekapcsolva a program a Microsoft Update Catalogot MINDEN eszközre megkérdezi, nem csak a hibásakra és a Windows-alapdriveren futókra. Így egy régi, de működő gyári driver is frissülhet - a Windows Update ilyet nem ajánl fel. Cserébe a szken 1-2 perccel hosszabb.">
               <input type="checkbox" id="hw-deep-scan" checked>
               <span>🌐 Mély keresés (a katalógus minden eszközre - lassabb, de a régi gyári drivereket is frissíti)</span>
+            </label>
+          </div>
+          <!-- KOCKÁZATOS OSZTÁLYOK: ugyanaz a két kapcsoló, mint az 1 kattintásos fix
+               megerősítő ablakában, és itt is ALAPBÓL KI. Bekapcsolva a találatok pirosan,
+               ELŐRE BE NEM JELÖLVE jelennek meg - a telepítés így is külön döntés marad. -->
+          <div class="hw-risk-row">
+            <label title="Bekapcsolva a program a tárolóvezérlőkre (NVMe/AHCI/RAID) és a lemezekre is keres drivert. FIGYELEM: rossz tároló-driver után a Windows nem indul el (INACCESSIBLE_BOOT_DEVICE), és azt már csak helyreállító adathordozóról lehet javítani. A találatok pirosan, előre be nem jelölve jelennek meg.">
+              <input type="checkbox" id="hw-allow-storage">
+              <span>💾 Tároló-driverek keresése is <b>(kockázatos)</b></span>
+            </label>
+            <label title="Bekapcsolva a program firmware-frissítéseket is keres (UEFI/BIOS, SSD-vezérlő, TPM, dokkoló). FIGYELEM: a firmware-írás visszafordíthatatlan - nincs az a visszaállítási pont vagy Windows-újratelepítés, ami visszacsinálja, és egy megszakadt írás hardveresen tönkreteheti az eszközt. A találatok pirosan, előre be nem jelölve jelennek meg.">
+              <input type="checkbox" id="hw-allow-firmware">
+              <span>⚡ Firmware-frissítések keresése is <b>(kockázatos)</b></span>
             </label>
           </div>
           <!-- ESZKÖZ-ÚJRAKÖTÉS: nem keres és nem tölt le semmit - azokat az eszközöket
@@ -1626,6 +1663,9 @@ window.handlePyEvent = function(payload) {
       drivers = data.drivers || [];
       selectedDrivers.clear();
       renderDriverTable();
+      // A nyomtató-felderítés a lista MEGJELENÍTÉSE UTÁN indul, háttérben: néhány
+      // PowerShell-hívás, és a táblázatnak nem kell rá várnia.
+      loadPrinterDriverInfs();
       if (data.error) {
         document.getElementById('driver-status').innerHTML = '<span class="status-dot" style="background:#e74c3c"></span> ❌ Hiba a driverek betöltésekor: ' + esc(data.error);
         toast('❌ Hiba a driverek betöltésekor: ' + data.error, 'error');
@@ -1749,6 +1789,15 @@ function switchView(name) {
   
   if (name === 'wu') checkWuStatus();
   if (name === 'bitlocker') checkBitlockerStatus();
+  if (name === 'hw') {
+    // A két kockázati kapcsoló minden belépéskor visszaáll KI-re. Ugyanaz az érv, mint az
+    // AutoFix dialógusán: ez gépenkénti, boot-kritikus döntés, nem megjegyzendő beállítás -
+    // egy ottfelejtett pipa a KÖVETKEZŐ gépen tenne fel tároló-/firmware-csomagot.
+    ['hw-allow-storage', 'hw-allow-firmware'].forEach(id => {
+      const el = document.getElementById(id);
+      if (el) el.checked = false;
+    });
+  }
   if (name === 'hw' && !hwPool.length && !hwInstalled.length) { /* first visit, don't auto-scan */ }
 }
 
@@ -2247,6 +2296,13 @@ function getFilteredDriverIndices() {
       if (hay.includes(q)) out.push(i);
     });
   }
+  // NYOMTATÓ-SZŰRŐ. Amíg a felderítés fut (printerInfs === null), nem rejtünk el semmit:
+  // egy üres halmazzal szűrni azt a hamis benyomást keltené, hogy a gépen nincs
+  // nyomtató-driver. A gomb melletti felirat közben kiírja, hogy még tart.
+  const hideEl = document.getElementById('hide-printer-drivers');
+  if (hideEl && hideEl.checked && printerInfs && printerInfs.size) {
+    out = out.filter(i => !printerInfs.has((drivers[i].published || '').toLowerCase()));
+  }
   const dir = driverSortDir === 'desc' ? -1 : 1;
   out.sort((a, b) => {
     const va = (drivers[a][driverSortKey] || '').toLowerCase();
@@ -2264,6 +2320,46 @@ function getFilteredDriverIndices() {
 function filterDrivers() {
   driverFilterText = document.getElementById('driver-search').value.trim();
   renderDriverTable();
+}
+
+/* A nyomtató-szűrő kapcsolója. A ki-be kapcsolás ELDOBJA az elrejtett sorok kijelölését:
+   e nélkül egy korábban kipipált nyomtató-driver a szűrő bekapcsolása után is bent maradna
+   a törlési listában - vagyis pont azt törölnénk, amit a kapcsoló megvédeni hivatott. */
+function togglePrinterFilter() {
+  const visible = new Set(getFilteredDriverIndices());
+  let dropped = 0;
+  selectedDrivers.forEach(i => { if (!visible.has(i)) { selectedDrivers.delete(i); dropped++; } });
+  renderDriverTable();
+  updateDeleteBtn();
+  if (dropped) toast(dropped + ' elrejtett nyomtató-driver kijelölése törölve', 'info');
+}
+
+/* A nyomtató-driverek publikált INF-neve (kisbetűvel), vagy null, amíg a felderítés fut.
+   A Python oldalon UGYANAZ a felismerés fut, amit az AutoFix nyomtató-pipája használ
+   (wu_core._collect_printer_protection + _is_printer_protected) - két külön logika előbb-
+   utóbb eltérne, és a technikus itt törölne ki valamit, amit a fix megvédett volna. */
+let printerInfs = null;
+
+async function loadPrinterDriverInfs() {
+  const lbl = document.getElementById('lbl-hide-printers');
+  if (!drivers.length) { printerInfs = new Set(); return; }
+  printerInfs = null;
+  if (lbl) lbl.classList.add('toggle-busy');
+  try {
+    const res = await api().get_printer_driver_infs(drivers);
+    printerInfs = new Set(((res && res.published) || []).map(p => (p || '').toLowerCase()));
+    // A kijelöléseket eldobjuk: egy elrejtett sor kijelölve maradva bekerülne a törlésbe,
+    // vagyis pont azt törölnénk, amit a szűrő megvédeni hivatott.
+    selectedDrivers.clear();
+    renderDriverTable();
+    updateDeleteBtn();
+  } catch (e) {
+    // Fail-safe: nem rejtünk el semmit, és megmondjuk, miért.
+    printerInfs = new Set();
+    toast('A nyomtató-driverek felderítése nem sikerült, a szűrő most nem rejt el semmit: ' + e, 'warning');
+  } finally {
+    if (lbl) lbl.classList.remove('toggle-busy');
+  }
 }
 function sortDriversBy(key) {
   if (driverSortKey === key) {
@@ -2438,9 +2534,15 @@ async function startHwScan() {
   updateHwButtons();
   try {
     /* Mély keresés: a katalógust minden eszközre megkérdezzük (lásd a checkbox title-jét
-       és app/gui/hwscan.py: start_hw_scan(deep=...)). Alapértelmezés: be. */
+       és app/gui/hwscan.py: start_hw_scan(deep=...)). Alapértelmezés: be.
+       A két kockázati kapcsoló alapból KI - ugyanaz a szerződés, mint az AutoFix
+       megerősítő ablakában. */
     const deepEl = document.getElementById('hw-deep-scan');
-    await api().start_hw_scan(deepEl ? !!deepEl.checked : true);
+    const stEl = document.getElementById('hw-allow-storage');
+    const fwEl = document.getElementById('hw-allow-firmware');
+    await api().start_hw_scan(deepEl ? !!deepEl.checked : true,
+                              stEl ? !!stEl.checked : false,
+                              fwEl ? !!fwEl.checked : false);
   } catch (e) {
     document.getElementById('hw-status').textContent = '❌ Hiba: ' + e;
     document.getElementById('hw-progress').style.display = 'none';

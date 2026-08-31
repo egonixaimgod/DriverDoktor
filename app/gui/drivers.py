@@ -14,6 +14,45 @@ from app import drivers_core
 class GuiDriversMixin:
     """Driverek kezelése nézet: listázás (online/offline) és törlés. A DriverToolApi része (összerakás: app/gui/api.py)."""
 
+    def get_printer_driver_infs(self, known_drivers=None):
+        """Melyik listázott csomagok számítanak NYOMTATÓ-drivernek (a lista szűréséhez).
+
+        MIÉRT UGYANAZ A FÜGGVÉNY, AMIT AZ AUTOFIX HASZNÁL (`wu_core._collect_printer_protection`
+        + `_is_printer_protected`): ha ez a szűrő saját logikát kapna, a kézi lista és az
+        AutoFix védelme előbb-utóbb eltérne, és a technikus itt kitörölne valamit, amit a
+        fix megvédett volna. Az OSZTÁLY-alapú egyeztetés önmagában KEVÉS - terepen bizonyított,
+        hogy a multifunkciós nyomtatók csomagjai USB/Ports/SYSTEM osztályban szóródnak szét
+        (`mvusbews.inf`, `hppscnd.inf`, `hpbuio70l.inf`), ezért kell a jelenlévő nyomtatási
+        komponensek tényleges INF-jei + a gyártó-kulcsszavak is.
+
+        `known_drivers`: a felület MÁR BETÖLTÖTT listája - ugyanaz a fogás, mint az AutoFix
+        törlés-előnézeténél: egy friss `dism /Get-Drivers` 15-50 mp, és a felületnek pont
+        ugyanaz az adat már a kezében van.
+
+        Visszatérés: {'published': [...], 'count': N} - a publikált (oemXX.inf) nevek, mert a
+        felület ezzel azonosítja a táblázat sorait."""
+        logging.info(f"[API] get_printer_driver_infs({len(known_drivers or [])} csomag)")
+        try:
+            from app.wu_core import (_collect_printer_protection, _is_printer_protected,
+                                     AUTOFIX_PRINTER_SKIP_CLASSES)
+            drivers = known_drivers or []
+            if not drivers:
+                logging.info("[PRINTER-FILTER] Nincs betöltött driver-lista, nincs mit szűrni.")
+                return {'published': [], 'count': 0}
+            protected_infs, printing_vendors = _collect_printer_protection(self._run)
+            hits = [d for d in drivers
+                    if _is_printer_protected(d, protected_infs, printing_vendors,
+                                             AUTOFIX_PRINTER_SKIP_CLASSES)]
+            # Nevesítve: a "miért tűnt el a listáról ez a csomag?" kérdésre ez a válasz.
+            logging.info(f"[PRINTER-FILTER] {len(hits)} nyomtató-driver a(z) {len(drivers)} "
+                         f"csomagból: {[d.get('published') for d in hits]}")
+            return {'published': [d.get('published', '') for d in hits], 'count': len(hits)}
+        except Exception as e:
+            # Fail-safe: hiba esetén NEM rejtünk el semmit. Egy néma szűrő, ami többet rejt
+            # el a kelleténél, rosszabb, mint a szűretlen lista.
+            logging.warning(f"[PRINTER-FILTER] A nyomtató-driverek felderítése sikertelen: {e}")
+            return {'published': [], 'count': 0, 'error': str(e)}
+
     # ================================================================
     # DRIVER LISTING
     # ================================================================

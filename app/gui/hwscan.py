@@ -40,6 +40,7 @@ from app.wu_core import is_composite_parent
 from app.wu_core import device_risk_marker
 from app.wu_core import mark_device_risk
 from app.wu_core import is_firmware_update
+from app.wu_core import filter_autofix_risky_devices
 from app.wu_core import FIRMWARE_CLASS_LABEL
 from app.wu_core import FIRMWARE_CLASS_WARNING
 # === /AUTO-IMPORTS ===
@@ -109,14 +110,23 @@ CATALOG_INBOX_FALLBACK_CANDIDATES = 6
 class GuiHwScanMixin:
     """Driver Keresés és Telepítés nézet: hardver-szken, WU/Catalog keresés, kiválasztott driverek telepítése. A DriverToolApi része (összerakás: app/gui/api.py)."""
 
-    def start_hw_scan(self, deep=True):
+    def start_hw_scan(self, deep=True, allow_storage=False, allow_firmware=False):
         """Hardver-szken. deep=True (alapértelmezés): a Microsoft Update Catalogot MINDEN
         olyan eszközre megkérdezzük, amire a WU Agent nem adott ajánlatot - nem csak a
         hibakódosakra és a Windows-alapdriveren futókra. Lassabb (eszközönként max 4 HTTP
         lekérdezés, 10 szálon), cserébe ez az egyetlen mód, amivel egy RÉGI, de hibátlanul
-        működő gyári driver is frissülni tud. deep=False: a korábbi, szűk kiegészítés."""
-        logging.info(f"[API] start_hw_scan(deep={deep}) hívás")
+        működő gyári driver is frissülni tud. deep=False: a korábbi, szűk kiegészítés.
+
+        allow_storage / allow_firmware (2026-08-28, explicit user decision): a kockázatos
+        osztályok kapcsolói, UGYANÚGY ALAPBÓL KI, mint az AutoFix megerősítő dialógusán.
+        Korábban a kézi szken MINDIG kereste őket (piros jelöléssel, előre be nem jelölve);
+        most a technikus dönti el, hogy egyáltalán bekerüljenek-e a keresésbe. Bekapcsolva a
+        régi viselkedés jön vissza: benne vannak, de PIROSAN és ELŐRE BE NEM JELÖLVE."""
+        logging.info(f"[API] start_hw_scan(deep={deep}, allow_storage={allow_storage}, "
+                     f"allow_firmware={allow_firmware}) hívás")
         deep = bool(deep)
+        allow_storage = bool(allow_storage)
+        allow_firmware = bool(allow_firmware)
         if self.target_os_path:
             self.emit('toast', {'message': '❌ Hiba: Hardver keresés csak Élő rendszeren működik!', 'type': 'error'})
             self.emit('hw_scan_result', {'pool': [], 'installed': [], 'sys_info': '❌ Offline módban nem elérhető', 'time': ''})
@@ -221,6 +231,19 @@ class GuiHwScanMixin:
 
                 devices_to_check = _filter_wu_scan_devices(pnp_data)
 
+                # KOCKÁZATOS OSZTÁLYOK KAPUJA - A TELJES ESZKÖZLISTÁRA, EGY HELYEN.
+                # Ugyanaz a lecke, mint az AutoFix katalógus-zárókörében (CLAUDE.md,
+                # 2026-07-28): ez a szken HÁROM forrásból tölti a katalógus-kört (hibakódos
+                # + generikus-driveres + mély szken), és ha a kapu ágakként ülne, egyetlen
+                # hibakód elég lenne a megkerüléséhez. Ezért itt, a legelején, mielőtt
+                # bármelyik ág hozzáérne a listához.
+                risky_dropped = {}
+                if not (allow_storage and allow_firmware):
+                    devices_to_check, risky_dropped = filter_autofix_risky_devices(
+                        devices_to_check, allow_storage=allow_storage,
+                        allow_firmware=allow_firmware, log_tag='HW-SCAN',
+                        context='a kézi driver-keresésből')
+
                 logging.info(f"PnP szürés: {len(devices_to_check)} eszköz átment")
                 total_devs = len(devices_to_check)
                 # WU COM API search
@@ -254,7 +277,10 @@ class GuiHwScanMixin:
                 matched_uids = set()
                 for m in matches:
                     dev = m['device']
-                    matched_hwids.add(dev['id'])
+                    # A `matched_uids` itt frissül (a csomag TÉNYLEG párosult, akkor is, ha
+                    # utána kiszűrjük), a `matched_hwids` viszont csak lentebb, a
+                    # firmware-kapu UTÁN: az kizárja az eszközt a katalógus-körből, és egy
+                    # kiszűrt firmware-csomag miatt nem eshet el az eszköz VALÓDI drivere.
                     matched_uids.add(m['uid'])
                     inst = inst_info.get((dev.get('pnp_id') or '').upper()) or {}
                     wu_date = _iso_date_or_none((wu_by_uid.get(m['uid']) or {}).get('DriverVerDate')) or ''
@@ -271,7 +297,15 @@ class GuiHwScanMixin:
                     # tehát az eszközosztály önmagában nem fogná meg (lásd
                     # wu_core.filter_firmware_updates ugyanezt az AutoFix oldalán).
                     risky, risk_label, risk_reason = device_risk_marker(dev)
-                    if not risky and is_firmware_update(wu_by_uid.get(m['uid']) or {}):
+                    pkg_firmware = is_firmware_update(wu_by_uid.get(m['uid']) or {})
+                    if not allow_firmware and pkg_firmware:
+                        # A CSOMAG firmware, akkor is, ha az ESZKÖZ osztálya nem az - és a
+                        # fenti eszköz-kapu ezt nem foghatja meg. Kihagyva, nevesítve.
+                        logging.info(f"[HW-SCAN] Firmware-csomag kihagyva (a kapcsoló ki van "
+                                     f"kapcsolva): '{m['title']}' -> {dev['name']}")
+                        continue
+                    matched_hwids.add(dev['id'])
+                    if not risky and pkg_firmware:
                         risky, risk_label, risk_reason = True, FIRMWARE_CLASS_LABEL, FIRMWARE_CLASS_WARNING
                     if risky:
                         logging.warning(f"[HW_SCAN] KOCKÁZATOS WU-találat, előre BE NEM jelölve: "
@@ -309,11 +343,13 @@ class GuiHwScanMixin:
                 # sajátja. A jelölést a KÖZÖS wu_core.mark_generic_replace_candidates
                 # végzi - ugyanez fut az AutoFix katalógus-zárókörében is, hogy a két út
                 # pontosan ugyanazokat az eszközöket találja meg.
-                # allow_storage/allow_firmware=True: a MANUÁLIS szken - ahogy a hibakódos és
-                # a mély körben is - megkeresi a kockázatos eszközökre is a gyári drivert,
-                # de a találat pirosan és ELŐRE BE NEM JELÖLVE jelenik meg. Itt ember dönt.
+                # allow_storage/allow_firmware: a kockázatos eszközöket a FENTI kapu már
+                # kiszűrte a `devices_to_check`-ből, ha a technikus nem engedélyezte őket.
+                # Itt ezért a kapcsolók értékét adjuk tovább (nem fix True-t): bekapcsolva a
+                # találat pirosan és ELŐRE BE NEM JELÖLVE jelenik meg - itt ember dönt.
                 generic_devs = mark_generic_replace_candidates(
-                    devices_to_check, inst_info, allow_storage=True, allow_firmware=True)
+                    devices_to_check, inst_info,
+                    allow_storage=allow_storage, allow_firmware=allow_firmware)
                 if generic_devs:
                     logging.info(f"[CATALOG] Generikus driveren futó eszközök: {[d['name'] for d in generic_devs]}")
 
@@ -347,14 +383,15 @@ class GuiHwScanMixin:
                     # kérdeztük rá. A csomagok szűrése változatlan (a _catalog_find_driver
                     # verzió-kapuja csak SZIGORÚAN újabb csomagot enged át), tehát a mély
                     # szken nem hoz downgrade-et, csak lefedettséget.
-                    # include_risky=True: a MANUÁLIS szken a tárolóvezérlő/lemez drivereket is
-                    # megkeresi (az AutoFix soha) - de `risky` jelzővel, piros
-                    # figyelmeztetéssel és ELŐRE BE NEM JELÖLVE. Itt ember dönt, és a
-                    # szerelőnek látnia kell, HOGY LÉTEZIK csomag, még ha a telepítése
-                    # mérlegelendő is. Lásd wu_core.DEEP_CATALOG_RISKY_CLASSES.
+                    # include_risky/include_firmware: a technikus kapcsolói (2026-08-28).
+                    # Bekapcsolva a tárolóvezérlő/lemez/firmware eszközök is bekerülnek -
+                    # de `risky` jelzővel, piros figyelmeztetéssel és ELŐRE BE NEM JELÖLVE.
+                    # Itt ember dönt, és a szerelőnek látnia kell, HOGY LÉTEZIK csomag, még
+                    # ha a telepítése mérlegelendő is. Lásd wu_core.DEEP_CATALOG_RISKY_CLASSES.
                     rest = wu_core_deep_candidates(
                         [d for d in devices_to_check if d['id'] not in matched_hwids],
-                        inst_info, include_risky=True, include_firmware=True) if deep else []
+                        inst_info, include_risky=allow_storage,
+                        include_firmware=allow_firmware) if deep else []
                     todo, todo_ids = [], set()
                     for d in leftover + generic_devs + rest:
                         if d['id'] in matched_hwids or d['id'] in todo_ids:
@@ -401,9 +438,22 @@ class GuiHwScanMixin:
                 found = len(self.hw_updates_pool)
                 final_sys = f"{sys_info_text} | ✅ Kész ({mode})! {found} frissítés ({total_devs} eszköz)"
 
+                # A KIHAGYOTT ESZKÖZÖK A KÉPERNYŐN IS LÁTSZANAK, nem csak a naplóban: e
+                # nélkül a "miért nem talált a gépem SSD-jéhez drivert?" kérdésre a technikus
+                # a felületen semmit nem látna, és hibának hinné a kikapcsolt kapcsolót.
+                skipped_note = ''
+                n_st, n_fw = (len(risky_dropped.get('tároló') or []),
+                              len(risky_dropped.get('firmware') or []))
+                if n_st or n_fw:
+                    parts = ([f'{n_st} tároló'] if n_st else []) + ([f'{n_fw} firmware'] if n_fw else [])
+                    skipped_note = (f"{' és '.join(parts)}-eszköz kihagyva "
+                                    f"(kapcsold be a pipát, ha ezekre is keressen)")
+                    final_sys += f" | ⛔ {skipped_note}"
+
                 self.emit('hw_scan_result', {
                     'pool': self.hw_updates_pool, 'installed': self._hw_installed_devs,
-                    'problems': problems, 'sys_info': final_sys, 'time': time_str
+                    'problems': problems, 'sys_info': final_sys, 'time': time_str,
+                    'skipped_risky': skipped_note
                 })
                 self._hw_loaded = True
 
