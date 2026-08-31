@@ -264,7 +264,17 @@ td input[type="checkbox"]{accent-color:var(--accent);width:16px;height:16px;curs
 .hw-item{display:grid;grid-template-columns:24px 1fr 1.2fr 0.8fr;gap:8px;align-items:center;padding:7px 10px;border-radius:6px;font-size:12px;transition:background var(--t)}
 .hw-item:hover{background:rgba(180,100,255,0.08)}
 .hw-item .name{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--text)}
-.hw-item .wu{color:var(--text2);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+/* A `.wu` cella két sorból áll: fent az egy sorba tördelt csomagcím, alatta a
+   JELÖLÉSEK. Korábban minden egy `nowrap` sorban volt, ezért a cím elvitte a helyet és
+   a jelölések (⚠️ régebbi / 🏭 gyári elérhető / ⛔ kockázatos / ↷ korábban nem vette át)
+   egyszerűen levágódtak - vagyis pont az az információ tűnt el, amiért a sor nincs
+   előre bejelölve. A technikus így azt látta, hogy a program "kidobál" valamit ok
+   nélkül (terepi visszajelzés, 2026-09-01). */
+.hw-item{align-items:start}
+.hw-item .wu{color:var(--text2);min-width:0}
+.hw-item .wu-title{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.hw-item .hw-badges{display:block;margin-top:3px;white-space:normal;line-height:1.5}
+.hw-item .hw-badges > span{margin-right:8px}
 .hw-item .hwid{color:var(--text3);font-family:var(--mono);font-size:11px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .hw-separator{padding:14px;text-align:center;color:var(--green);font-size:13px;font-weight:700;border-top:2px solid var(--glass-border);border-bottom:2px solid var(--glass-border);margin:10px 0;background:rgba(60,35,90,0.3)}
 .hw-installed .hw-item{opacity:0.6}
@@ -2795,14 +2805,15 @@ function renderHwTree() {
           '<div class="hw-item">'
           + '<input type="checkbox" data-idx="'+it.idx+'" '+(hwSelectedIndices.has(it.idx)?'checked':'')+' onchange="toggleHwItem('+it.idx+')">'
           + '<span class="name" title="'+esc(it.name)+'">'+esc(it.name)+'</span>'
-          + '<span class="wu" title="'+esc(it.wu_title||'')+'">'+esc(it.wu_title||'')
+          + '<span class="wu"><span class="wu-title" title="'+esc(it.wu_title||'')+'">'+esc(it.wu_title||'')
           + (it.wu_date ? ' <span style="color:var(--text3);font-size:11px" title="A felajánlott driver dátuma">['+esc(it.wu_date)+']</span>' : '')
           + (it.installed_version ? ' <span style="color:var(--text3);font-size:11px" title="Jelenleg telepített driver-verzió/dátum ehhez az eszközhöz">(telepítve: '+esc(it.installed_version)+(it.installed_date?' · '+esc(it.installed_date):'')+')</span>' : '')
+          + '</span><span class="hw-badges">'
           + (it.downgrade ? ' <span style="color:#ffb454;font-size:11px;font-weight:700" title="A felajánlott driver RÉGEBBI a jelenleg telepítettnél - telepítése visszabutítás lenne, ezért alapból nincs kijelölve">⚠️ régebbi, mint a telepített!</span>' : '')
           + (it.generic_replace ? ' <span style="color:#5fb2ff;font-size:11px;font-weight:700" title="Ezen az eszközön most a Windows beépített, generikus drivere fut. A chip gyártójának saját drivere elérhető a Microsoft Update Catalogban - jellemzően többet tud (hang-DSP, energiakezelés, offload). Ha a csere után az eszköz hibás lenne, a program automatikusan visszaáll a Windows driverére.">🏭 most Windows alapdriver → gyári elérhető</span>' : '')
           + (it.risky ? ' <span style="color:#ff5f6d;font-size:11px;font-weight:800" title="'+esc(it.risk_reason||'')+'">'+esc(it.risk_label||'⛔ KOCKÁZATOS - telepítése tudatos döntést kíván!')+'</span>' : '')
           + (it.prev_no_bind ? ' <span style="color:#b9a7e8;font-size:11px;font-weight:700" title="Egy korábbi futásban ez a csomag már feltelepült vagy kipróbáltuk, de az eszköz nem vette át'+(it.prev_no_bind_reason?' ('+esc(it.prev_no_bind_reason)+')':'')+' - jellemzően más gépgyártóra szabott változat. Bejelölhető és újrapróbálható, de várhatóan most sem ezt választaná a Windows. GPU-nál a lenti NVIDIA/AMD/Intel gyártói kártya, alaplapi eszköznél az alaplapgyártó oldala a jobb forrás.">↷ korábban nem vette át az eszköz</span>' : '')
-          + '</span>'
+          + '</span></span>'
           + '<span class="hwid">'+esc(it.hwid||'')+'</span></div>'
         ).join('') + '</div>';
       container.appendChild(catDiv);

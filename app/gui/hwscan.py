@@ -159,6 +159,20 @@ CATALOG_MAX_CANDIDATES = 3
 # deduplikál (mérve: 25 katalógus-bejegyzés ugyanarra az 1,2 GB-os cab-ra mutatott), és a
 # korábban megbukott csomagokat le sem tölti (tartós no-bind tár).
 CATALOG_INBOX_FALLBACK_CANDIDATES = 6
+# EGY ESZKÖZRE ENNYI BÁJTNÁL TÖBBET NEM TÖLTÜNK LE A TARTALÉKOK VÉGIGPRÓBÁLÁSÁRA.
+#
+# MIÉRT KELL (2026-09-01): a fenti 6-os korlát a hangkártyán ártalmatlan - a helyes
+# ASRock-csomag mérve **11,2 MB**, tehát mind a 6 jelölt végigpróbálása pár perc. Egy
+# Windows-alapdriveren (Microsoft Basic Display Adapter) ragadt VIDEOKÁRTYA viszont
+# ugyanezen az ágon megy, és ott egy csomag **1,2 GB** (ezt a fájl korábban mérte) -
+# 6 jelölt akár 7 GB és órák lennének, ami az "1 kattintásos fix" elfogadási
+# feltételét (20-60 perc, kávészünet) borítaná fel.
+#
+# A korlát a MÁR ELKÖLTÖTT bájtokra néz, a következő jelölt indítása ELŐTT - az első
+# jelöltet tehát mindig végigvisszük. Így: kis csomagoknál mind a 6 jelölt sorra kerül,
+# egy 1,2 GB-osnál viszont a második után megállunk. Nem néma: a technikus látja, hogy
+# a program azért hagyta abba, mert elérte a letöltési korlátot.
+CATALOG_FALLBACK_MAX_BYTES = 2 * 1024 * 1024 * 1024
 
 
 class GuiHwScanMixin:
@@ -1977,7 +1991,7 @@ try {
             return [['pnputil', '/add-driver', f"{ext_path}\\*.inf", '/subdirs', '/install']]
         return [['pnputil', '/add-driver', inf, '/install'] for inf in selected_infs]
 
-    def _run_add_driver(self, cmds, task_id, title):
+    def _run_add_driver(self, cmds):
         """Egy vagy több `pnputil /add-driver` hívás lefuttatása, EGY összevont eredménnyel.
 
         A szűkített telepítés INF-enként külön parancsot ad, a hívó logikája viszont egyetlen
@@ -2180,9 +2194,24 @@ try {
                 chosen = None        # (guid, cím, dátum, url) - amit végül telepítünk
                 # UGYANAZT A CSOMAGOT NEM TÖLTJÜK LE KÉTSZER (lásd lent).
                 tried_urls = set()
+                spent_bytes = 0          # amit ERRE az eszközre már letöltöttünk
                 for cand_i, (cand_guid, cand_title, cand_date, cand_url) in enumerate(candidates):
                     if self._check_cancel():
                         return
+                    # LETÖLTÉSI KORLÁT a tartalékok végigpróbálására (az ELSŐ jelöltet
+                    # mindig végigvisszük). Lásd CATALOG_FALLBACK_MAX_BYTES: kis
+                    # csomagoknál sosem lép be, egy 1,2 GB-os videokártya-csomagnál
+                    # viszont a második után megállít - különben a hosszabb jelölt-lista
+                    # a lánc idejét vinné el.
+                    if cand_i and spent_bytes >= CATALOG_FALLBACK_MAX_BYTES:
+                        logging.warning(f"[CATALOG_INSTALL] {name}: a tartalékok próbálgatása "
+                                        f"leállt, mert erre az eszközre már {spent_bytes / 1048576:.0f} MB "
+                                        f"letöltés ment el ({cand_i}/{len(candidates)} jelölt után).")
+                        self.emit('task_progress', {'task': task_id, 'log':
+                                  f'  ⏹ {name}: {spent_bytes / 1048576:.0f} MB letöltés után megálltunk a '
+                                  f'tartalékok próbálgatásával (a maradék {len(candidates) - cand_i} jelölt '
+                                  f'kimarad) - a gyártó saját oldala a következő lépés.'})
+                        break
                     # KORÁBBI FUTÁSBAN MÁR MEGBUKOTT? Még az URL feloldása előtt eldönthető,
                     # ha a GUID vagy a csomagcsalád egyezik - ilyenkor egy kérés sem megy ki.
                     if _proven_wrong(drv.get('pnp_id'), cand_guid, cand_title, cand_date, cand_url):
@@ -2231,6 +2260,10 @@ try {
                                 raise IOError(f"csonka letöltés: {got_len}/{expected_len} byte jött le")
                             logging.debug(f"[CATALOG_INSTALL] Letöltve: {cab_path} ({got_len} byte, "
                                           f"{attempt}. próbálkozásra)")
+                            # A ténylegesen lejött bájtok - ebből dönt a tartalék-korlát
+                            # (CATALOG_FALLBACK_MAX_BYTES). Az újrapróbálkozások is
+                            # beleszámítanak: az adatforgalom akkor is elment.
+                            spent_bytes += got_len
                             if file_ext == '.msu':
                                 pkg_ok = True   # az .msu-t a wusa/dism ellenőrzi, expand-kör nincs
                                 break
@@ -2389,14 +2422,14 @@ try {
                     # (INSTALL_DRIVER_TIMEOUT): egy nagy chipset-csomag telepítése valóban
                     # lehet több perc, tehát nem szabad egy lassú, de HALADÓ telepítést
                     # elvágni - csak a végtelen lógást kell megfogni.
-                    res = self._run_add_driver(cmd, task_id, title)
+                    res = self._run_add_driver(cmd)
                     if res.returncode == CMD_TIMEOUT_RETURNCODE:
                         # Nem hallgatjuk el: a csomag állapota ilyenkor bizonytalan, és a
                         # technikusnak tudnia kell, melyik telepítés akadt el.
                         logging.error(f"[CATALOG_INSTALL] IDŐTÚLLÉPÉS ({INSTALL_DRIVER_TIMEOUT}s) "
-                                      f"a telepítéskor: {title}")
+                                      f"a telepítéskor: {name}")
                         self.emit('task_progress', {'task': task_id, 'log':
-                                  f'⏱️ A(z) "{title}" telepítése {INSTALL_DRIVER_TIMEOUT // 60} perc után '
+                                  f'⏱️ A(z) "{name}" telepítése {INSTALL_DRIVER_TIMEOUT // 60} perc után '
                                   f'sem fejeződött be - továbblépünk. A csomag a következő '
                                   f'újraindítás után befejeződhet.'})
                     elif sel and res.returncode != 3010:
@@ -2411,7 +2444,7 @@ try {
                                             f"eszköz nem kapta meg a drivert - teljes csomag telepítése.")
                             self.emit('task_progress', {'task': task_id, 'log':
                                       f'  ↻ {name}: a szűkített telepítés nem volt elég - a teljes csomag megy fel.'})
-                            full = self._run_add_driver(self._build_add_driver_cmd(ext_path), task_id, title)
+                            full = self._run_add_driver(self._build_add_driver_cmd(ext_path))
                             res = CommandResult(full.returncode,
                                                 (res.stdout or '') + '\n' + (full.stdout or ''),
                                                 (res.stderr or '') + '\n' + (full.stderr or ''))
@@ -2488,8 +2521,28 @@ try {
             done_count = [0]
 
             def _process_and_report(idx, drv):
+                nonlocal fail
                 try:
                     process_catalog_driver(idx, drv)
+                except Exception as e:
+                    # EGY ELNYELT KIVÉTEL A LEGROSSZABB KIMENETEL - ezt terepen mérve
+                    # bizonyítottuk (2026-09-01). A `concurrent.futures.wait()` NEM dobja
+                    # tovább a szálban keletkezett kivételt, csak eltárolja a Future-ben,
+                    # és mivel `process_catalog_driver` egy beágyazott függvény, az
+                    # `install_call_logging` sem fogja meg. Következmény: a hangkártya
+                    # telepítése egy `NameError`-rel elszállt, a kör pedig derűsen
+                    # "Sikeres: 0, Sikertelen: 0" összegzéssel zárult - az eszköz se a
+                    # sikeres, se a hibás, se a kihagyott listán nem szerepelt, egyszerűen
+                    # ELTŰNT. Néma hamis siker, pontosan az a hibaosztály, amit ez a
+                    # projekt mindenhol üldöz. Innentől: naplóba teljes veremmel, a
+                    # képernyőre érthető sorral, és HIBÁNAK számít.
+                    logging.error(f"[CATALOG_INSTALL] KIVÉTEL a(z) '{drv.get('name')}' "
+                                  f"feldolgozásakor: {e}", exc_info=True)
+                    self.emit('task_progress', {'task': task_id, 'log':
+                              f'  ❌ {drv.get("name")}: váratlan hiba a telepítés közben ({e}) - '
+                              f'a részletek a naplóban.'})
+                    with counter_lock:
+                        fail += 1
                 finally:
                     with counter_lock:
                         done_count[0] += 1

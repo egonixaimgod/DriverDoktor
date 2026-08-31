@@ -33,6 +33,8 @@ DriverVarázsló is a Windows driver-management utility (Hungarian UI/comments) 
 
 **Do NOT build the exe yourself — the user builds it when they want to** (explicit user decision). They have the two build scripts in the project folder (`build.bat`, `rebuild_verzioszam_novelessel_es_github_pushal.bat`) and run them by hand. Make and verify your code changes (syntax check + importing the API classes + driving the pure/mixin logic against live data — see below), then tell the user it's ready; leave the actual PyInstaller build/release to them unless they explicitly ask you to build. This is the build-side twin of the "never commit/push on your own initiative" rule.
 
+**Futtasd a `python -m pyflakes app/ driver_tool.py`-t minden változtatás után** (`pip install pyflakes`). Nem stílus-ellenőrzésért: 2026-09-01-én **három valódi, éles hibát** talált, amit sem a `py_compile`, sem az import-teszt nem fog meg, mert csak futáskor és csak egy ritka ágon sülnek el — `_run_add_driver(cmd, task_id, title)` egy nem létező `title`-re (emiatt SOSEM települt katalógus-csomag), és a lánc végi napló-feltöltés `common` + `chain_total` névre (emiatt SOSEM ment fel napló). A zajt szűrd: `| grep -viE "imported but unused|redefinition|f-string is missing"`.
+
 There is **no test suite, no linter config, and no `requirements.txt`** in this repo — "verifying a change" ultimately means building the exe and running it, but that build is the *user's* step, not yours.
 
 ```bash
@@ -41,6 +43,7 @@ python driver_tool.py --cli      # run from source, force the text-menu CLI
 python -m PyInstaller --clean --noconfirm DriverVarazslo.spec   # build -> dist/DriverVarazslo.exe
 python -m py_compile app/gui/autofix.py             # cheapest syntax check while editing
 python -c "import app.gui.api, app.cli.api"         # both API classes still assemble
+python -m pyflakes app/ driver_tool.py              # UNDEFINED NAMES - a py_compile ezt NEM fogja meg
 cmd /c rebuild_verzioszam_novelessel_es_github_pushal.bat < nul   # FULL RELEASE - only on explicit request
 ```
 
@@ -480,6 +483,8 @@ The adapter is identified with `Get-NetAdapter`/`Get-NetConnectionProfile` (stru
 2. **A tartalék-készlet csak a LEGJOBB OS-pontszámú sorokból állt** (`cands = [c for c in scored if c[0] == best_score]`). A pontozó `None`-t ad a valóban KIZÁRT sorokra (arm64 x64-en, Win11-only Win10-en), a 0-3 viszont csak **preferencia**: Win11-es gépen a „windows 11" sor 3 pont, a „windows 10" csak 1. Mérve: a gép saját SUBSYS-kulcsának mind a 41 sora 2019-2021-es, „Windows 10"-es Realtek csomag — tehát a `cands`-ból kiesett, és a tartalékok mind a 2026-os, MÁS gyártóknak szóló sorok lettek (élőben ellenőrizve: 5 tartalék, egyik sem ASRock). Egy Win10-es gyári driver Win11-en is felmegy. Inbox-eszköznél a tartalék-készlet ezért a teljes `scored`, rendezve: **specifikusság → OS-pontszám → dátum**.
 3. **A lapozás megállt az 1. lapon.** Alaphelyzetben csak akkor kérünk következő lapot, ha a legfrissebb dátumú csoport átlóg a lap végén — a SUBSYS-kulcs 41 sora viszont 2019-03-04 .. 2021-03-22 között szóródik, tehát a program a 41-ből **25-öt** látott. `_catalog_fetch_rows(deep=True)` elhagyja a holtverseny-feltételt, de **CSAK** Windows-alapdriveres eszköz SAJÁT, `SUBSYS_`-es kulcsán: ott minden sor ehhez a géphez való. Az általános kulcsra sosem mélyítünk (mérve: **1000 sor / 40 lap**, mind más gyártó OEM-változata — ott a mélyítés puszta kéréspazarlás). A gyakorlati költség csekély: egy SUBSYS-kulcs jellemzően 25 sor alatt marad, akkor pedig nincs 2. lap.
 
+**ÉS A HOSSZABB JELÖLT-LISTÁNAK ÁRA IS VAN — `CATALOG_FALLBACK_MAX_BYTES` = 2 GB.** A 6-os korlát a hangkártyán ártalmatlan (a helyes csomag **11,2 MB**), egy Windows-alapdriveren ragadt **videokártya** viszont ugyanezen az ágon megy, és ott egy csomag **1,2 GB** — 6 jelölt akár 7 GB és órák lennének, ami az [elfogadási feltételt](#the-acceptance-criterion-for-the-one-click-fix-press-it-walk-away-come-back-to-a-finished-machine) (20-60 perc, kávészünet) borítaná fel. A korlát a MÁR ELKÖLTÖTT bájtokra néz a következő jelölt indítása ELŐTT, tehát az elsőt mindig végigvisszük. Számokban: 11 MB-os csomagnál mind a 6 jelölt lefut (0,07 GB), 250 MB-osnál is mind a 6 (1,46 GB), 1,2 GB-osnál a második után megáll (2,34 GB). A leállás nem néma - a technikus látja, hogy letöltési korlát miatt maradt ki a többi jelölt.
+
 **A záró bizonyíték** (letöltve + `inf_package_applies`-szal ellenőrizve, telepítés nélkül): a `Realtek - MEDIA - 6.0.9136.1 [2021-03-22]` csomag **11,2 MB**, 135 INF, és `inf_package_applies = True` erre a hangkártyára — vagyis a telepítő most felrakja, a kártya pedig lekerül a generikus `hdaudio.inf`-ről. Ugyanebben a futásban az `ISA bridge` SUBSYS-kulcsa **0 sort** ad: arra tényleg nincs csomag a katalógusban, és ezt a program most ki is mondja (lásd a „Nincs rá való csomag" szekciót). **A gyorsítótár kulcsa ezért tartalmazza a lekérés mélységét is** (`hwid|max_pages|deep`): egy sekélyebb lekérdezés eredményét tilos bőségesként visszaadni egy mélyebb kérésre.
 
 **A TARTÓS NO-BIND TÁR KULCSA A HARDVER-AZONOSÍTÓ TÖRZSE, NEM A PÉLDÁNY-AZONOSÍTÓ — a program a saját emlékezetét törölte** (`_device_stem`, 2026-08-31, mérve a fejlesztői gépen). A `catalog_no_bind.json` a TELJES példány-azonosítót tárolta, annak a farkában viszont ott a PnP **példányszám**, amit a Windows LÉPTET, ha egy eszköz-csomópontot eltávolítanak és újra felderítenek — vagyis pontosan akkor, amikor ez a program `pnputil /remove-device`-t futtat (újrakötés-kör, regresszió-javítás). A gépen a 4 feljegyzésből **2 vált halottá** egyetlen karakteren:
@@ -632,6 +637,25 @@ Három tanulság, mindhárom javítva:
 - **A „mi fut most" sor CSAK lépés-sort vesz át** (`⬇ 📦 🧹 🔧 🔎 ↻ 🏭 🌐 🔄 🛡️`). Az első render pont ezen bukott: a napló magyarázó/felsoroló záró sorait is átvette, így a művelet végén egy tanácsot mutatott a művelet helyett.
 - A napló soronként formázódik: a vezető jel ikonná válik, a sor típus szerint színt kap (siker/hiba/figyelmeztetés/kihagyás/elválasztó). A **szöveg maga változatlan**, tehát a képernyő és a `DriverVarázsló_debug.log` nem csúszhat szét. Az automatikus görgetés csak akkor fut, ha a felhasználó amúgy is az alján állt — különben visszarántaná a képet, miközben ő feljebb olvas.
 - Offline tesztelhető: a modál függvényei DOM-csonkkal meghajthatók (`test_modal.js` mintája), a vizuális ellenőrzés pedig headless renderelés a valódi esemény-sorral. **A böngészős render önmagában megtévesztő lehet**: az első képen a sáv 30%-on állt, ami időzítési műtermék volt (a kép a sorozat vége előtt készült) — a `getComputedStyle` kiíratása mutatta meg, hogy valójában 100%. Számot a DOM-ból olvass, ne a képpontokból.
+
+### EGY SZÁLBAN ELNYELT KIVÉTEL = NÉMA HAMIS SIKER (2026-09-01, terepen mérve)
+
+A legdrágább hiba ebben a projektben nem a hibás működés, hanem az, amit senki nem lát. Terepi futás (Build 286, ASRock B450M): a katalógus-kör megtalálta a hangkártyához a helyes ASRock-csomagot, ki is választotta belőle a **`HDXAsrok.inf`**-et — és a kör **`Sikeres: 0, Sikertelen: 0, Kihagyott: 2`** összegzéssel zárult. A hangkártya se a sikeres, se a hibás, se a kihagyott listán nem szerepelt: **egyszerűen eltűnt**. A naplóban semmi. Két, egymást erősítő ok:
+
+- **`concurrent.futures.wait()` NEM dobja tovább a szálban keletkezett kivételt** — eltárolja a Future-ben, és ha senki nem hívja a `.result()`-ot, örökre ott is marad.
+- **`process_catalog_driver` beágyazott függvény**, tehát az `install_call_logging` (ami minden API-metódust becsomagol) sem fogja meg.
+
+A konkrét kivétel egy **`NameError: title`** volt: a Build 285-ben bevezetett `_run_add_driver(cmd, task_id, title)` hívás egy nem létező változóra hivatkozott (a függvényben `name` a neve), ráadásul a `task_id`/`title` paramétert a `_run_add_driver` **soha nem is használta**. A hiba a kiadás óta ott volt, de csak most sült el: addig minden csomagot elvetett az INF-vizsgálat, tehát a program soha nem jutott el a `pnputil` hívásig. **Bizonyíték: az egész naplóban NULLA `pnputil /add-driver` hívás van, és a hangkártya változatlanul `hdaudio.inf`-en fut.**
+
+Három szabály ebből:
+
+1. **Szálban futó munkát mindig `try/except`-tel kell körbevenni, ami NAPLÓZ (teljes veremmel) és HIBÁNAK SZÁMÍT.** A `finally`-s haladásjelzés önmagában kevés volt: az látszott, hogy „3/3 kész", csak azt nem, hogy egyikük elszállt.
+2. **Ne adj át egy függvénynek olyan paramétert, amit nem használ.** A `task_id`/`title` semmit nem csinált, viszont pont ez adta a nem létező névre hivatkozás lehetőségét.
+3. **A `py_compile` és az import-teszt EZT NEM FOGJA MEG** — egy nem definiált név csak futáskor derül ki, ráadásul csak azon az ágon. A projekt ellenőrző-repertoárjába ezért kell egy statikus névellenőrzés is (pyflakes vagy AST-alapú), különösen a beágyazott függvényekre, amikből ez a kódbázis sokat használ.
+
+### A JELÖLÉSEK LEVÁGÓDTAK, ÍGY A DÖNTÉS INDOKA LÁTHATATLAN VOLT (2026-09-01)
+
+A találati sor `.wu` cellája `white-space:nowrap` + `text-overflow:ellipsis` volt, és a csomagcím után MINDEN a cellába zsúfolódott: dátum, telepített verzió, majd a jelölések. A cím elvitte a helyet, a jelölések (`⚠️ régebbi` / `🏭 most Windows alapdriver → gyári elérhető` / `⛔ KOCKÁZATOS` / `↷ korábban nem vette át az eszköz`) egyszerűen **kifutottak a képből** — vagyis pont az az információ tűnt el, amiért a sor nincs előre bejelölve. A technikus ebből azt látta, hogy a program indoklás nélkül „kidobál" olyasmit, amit aztán nem telepít fel. A `.wu` cella most két sor: fent a tördelt cím, alatta `.hw-badges` blokkban a jelölések, amik **tördelnek** és sosem vágódnak le.
 
 ### „Nincs rá való csomag" — ezt KI KELL MONDANI, nem elég kihagyni (2026-08-31)
 

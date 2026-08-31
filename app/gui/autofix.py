@@ -13,6 +13,7 @@ import logging
 import shutil
 import json
 from concurrent.futures import ThreadPoolExecutor
+from app import common
 from app.common import _app_data_dir
 from app.common import _app_exe_path
 from app.common import _ps_quote
@@ -2794,7 +2795,12 @@ class GuiAutofixMixin:
                     # Ugyanígy a stats-fájl TÖRLÉSE ELŐTT: a lánc alatt megtalált, de az
                     # eszköz által át nem vett katalógus-csomagok (lásd _emit_catalog_no_bind).
                     no_bind = self._autofix_stats_get('catalog_no_bind') or []
-                    self._emit_autofix_summary(self._autofix_stats_total_and_clear(),
+                    # A lánc alatt telepített driverek száma. VÁLTOZÓBA MENTVE, mert a
+                    # `_autofix_stats_total_and_clear()` TÖRLI a stats-fájlt - egy második
+                    # hívás már 0-t adna. A napló-feltöltés (lentebb) is ezt az értéket
+                    # használja; korábban egy nem létező `chain_total` névre hivatkozott.
+                    chain_total = self._autofix_stats_total_and_clear()
+                    self._emit_autofix_summary(chain_total,
                                                pre_packages=pre_packages, no_bind=no_bind)
 
                     self.emit('task_progress', {'task': 'autofix', 'log': 'DCH alkalmazások (Microsoft Store) frissítésének elindítása...'})
