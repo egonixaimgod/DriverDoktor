@@ -653,6 +653,14 @@ Három szabály ebből:
 2. **Ne adj át egy függvénynek olyan paramétert, amit nem használ.** A `task_id`/`title` semmit nem csinált, viszont pont ez adta a nem létező névre hivatkozás lehetőségét.
 3. **A `py_compile` és az import-teszt EZT NEM FOGJA MEG** — egy nem definiált név csak futáskor derül ki, ráadásul csak azon az ágon. A projekt ellenőrző-repertoárjába ezért kell egy statikus névellenőrzés is (pyflakes vagy AST-alapú), különösen a beágyazott függvényekre, amikből ez a kódbázis sokat használ.
 
+### A BIZONYÍTOTTAN NEM ILLESZKEDŐ AJÁNLATOK KÜLÖN, ÖSSZECSUKOTT CSOPORTBA KERÜLNEK (2026-09-01)
+
+Terepi visszajelzés: *„ha nem tudja telepíteni mi a fasznak van ott???"*. Jogos volt: ezek a sorok a valódi ajánlatok közt álltak, **az „Összes" gomb be is pipálta őket**, és a technikus újra meg újra nekifutott olyasminek, amiről a program egy korábbi futásból MÁR TUDTA, hogy nem fog menni (a `catalog_no_bind.json` bejegyzése alapján). Egy futásban három ilyen ment bele egy telepítésbe, mindhárom „kihagyva" eredménnyel.
+
+- `renderDeadOffers`: a `prev_no_bind`-jelölt sorok egyetlen, **összecsukott** csoportba kerülnek („🚫 Nem telepíthető: a csomag nem ehhez a géphez való"), a fejlécben és a csoport tetején a magyarázattal (a katalógusban van bejegyzés, de a csomag INF-je más gépgyártó változatához tartozik; a valódi forrás a gép/alaplap gyártójának oldala).
+- **`selectAllHw` kihagyja őket.** Ez a lényegi változás: a döntést nem vesszük el (kinyitva bejelölhetők és újrapróbálhatók), csak nem tesszük alapértelmezetté.
+- **Elrejteni NEM szabad őket.** A katalógus-bejegyzés valóban létezik erre a hardver-azonosítóra, és egy téves feljegyzés (vagy egy időközben kijavított csomag) így is elérhető marad. Ez a régi „csak jelölünk, sosem rejtünk" szabály finomítása, nem a felrúgása: a jelölés helyett most a *csoportosítás* hordozza az információt, ami sokkal láthatóbb.
+
 ### A JELÖLÉSEK LEVÁGÓDTAK, ÍGY A DÖNTÉS INDOKA LÁTHATATLAN VOLT (2026-09-01)
 
 A találati sor `.wu` cellája `white-space:nowrap` + `text-overflow:ellipsis` volt, és a csomagcím után MINDEN a cellába zsúfolódott: dátum, telepített verzió, majd a jelölések. A cím elvitte a helyet, a jelölések (`⚠️ régebbi` / `🏭 most Windows alapdriver → gyári elérhető` / `⛔ KOCKÁZATOS` / `↷ korábban nem vette át az eszköz`) egyszerűen **kifutottak a képből** — vagyis pont az az információ tűnt el, amiért a sor nincs előre bejelölve. A technikus ebből azt látta, hogy a program indoklás nélkül „kidobál" olyasmit, amit aztán nem telepít fel. A `.wu` cella most két sor: fent a tördelt cím, alatta `.hw-badges` blokkban a jelölések, amik **tördelnek** és sosem vágódnak le.

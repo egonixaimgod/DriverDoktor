@@ -2788,7 +2788,15 @@ function renderHwTree() {
   // Group available
   if (hwPool.length > 0) {
     const cats = {};
-    hwPool.forEach((d, i) => { const c = d.cat || '🔧 Egyéb'; if(!cats[c]) cats[c]=[]; cats[c].push({idx:i,...d}); });
+    // A BIZONYÍTOTTAN nem illeszkedő ajánlatok külön csoportba (lásd renderDeadOffers):
+    // ezek a katalógusban léteznek, de a csomag INF-je más gépgyártóra szabott, és a
+    // program egy korábbi futásban már letöltötte és ellenőrizte is őket.
+    const deadItems = [];
+    hwPool.forEach((d, i) => {
+      const it = {idx:i, ...d};
+      if (d.prev_no_bind) { deadItems.push(it); return; }
+      const c = d.cat || '🔧 Egyéb'; if(!cats[c]) cats[c]=[]; cats[c].push(it);
+    });
     const sortedCats = [...catOrder.filter(c=>cats[c]), ...Object.keys(cats).filter(c=>!catOrder.includes(c))];
     sortedCats.forEach((cat, catIdx) => {
       const items = cats[cat];
@@ -2801,8 +2809,18 @@ function renderHwTree() {
         + '<span class="chevron">▸</span>'
         + '<input type="checkbox" '+(allChecked?'checked':'')+' data-catid="'+catId+'" onclick="event.stopPropagation();toggleHwCatById(\''+catId+'\')">'
         + '<span>⬇️ '+esc(cat)+' ('+items.length+' db)</span></div>'
-        + '<div class="hw-cat-children">' + items.map(it =>
-          '<div class="hw-item">'
+        + '<div class="hw-cat-children">' + items.map(hwRowHtml).join('') + '</div>';
+      container.appendChild(catDiv);
+    });
+    renderDeadOffers(container, deadItems);
+  }
+  renderHwInstalled(container);
+}
+
+/* Egy találati sor HTML-je. Külön függvény, mert két helyről kell: a normál
+   kategóriákból és a "nem telepíthető" csoportból. */
+function hwRowHtml(it) {
+  return    '<div class="hw-item">'
           + '<input type="checkbox" data-idx="'+it.idx+'" '+(hwSelectedIndices.has(it.idx)?'checked':'')+' onchange="toggleHwItem('+it.idx+')">'
           + '<span class="name" title="'+esc(it.name)+'">'+esc(it.name)+'</span>'
           + '<span class="wu"><span class="wu-title" title="'+esc(it.wu_title||'')+'">'+esc(it.wu_title||'')
@@ -2814,11 +2832,42 @@ function renderHwTree() {
           + (it.risky ? ' <span style="color:#ff5f6d;font-size:11px;font-weight:800" title="'+esc(it.risk_reason||'')+'">'+esc(it.risk_label||'⛔ KOCKÁZATOS - telepítése tudatos döntést kíván!')+'</span>' : '')
           + (it.prev_no_bind ? ' <span style="color:#b9a7e8;font-size:11px;font-weight:700" title="Egy korábbi futásban ez a csomag már feltelepült vagy kipróbáltuk, de az eszköz nem vette át'+(it.prev_no_bind_reason?' ('+esc(it.prev_no_bind_reason)+')':'')+' - jellemzően más gépgyártóra szabott változat. Bejelölhető és újrapróbálható, de várhatóan most sem ezt választaná a Windows. GPU-nál a lenti NVIDIA/AMD/Intel gyártói kártya, alaplapi eszköznél az alaplapgyártó oldala a jobb forrás.">↷ korábban nem vette át az eszköz</span>' : '')
           + '</span></span>'
-          + '<span class="hwid">'+esc(it.hwid||'')+'</span></div>'
-        ).join('') + '</div>';
-      container.appendChild(catDiv);
-    });
-  }
+          + '<span class="hwid">'+esc(it.hwid||'')+'</span></div>';
+}
+
+/* A BIZONYÍTOTTAN NEM ILLESZKEDŐ AJÁNLATOK KÜLÖN, ÖSSZECSUKOTT CSOPORTBAN.
+
+   Terepi visszajelzés (2026-09-01): *"ha nem tudja telepíteni mi a fasznak van ott???"*.
+   Jogos: ezek a sorok a többi, valódi ajánlat közt álltak, bepipálhatóan, és a technikus
+   újra meg újra nekifutott olyasminek, amiről a program MÁR TUDTA, hogy nem fog menni.
+
+   Miért nem rejtjük el őket teljesen: a bejegyzés a katalógusban VALÓBAN létezik erre a
+   hardver-azonosítóra, csak a csomag INF-je más gépgyártóra szabott. Egy téves feljegyzés
+   (vagy egy időközben kijavított csomag) így is elérhető marad - a program soha nem hoz
+   olyan döntést a technikus helyett, amit ne tudna felülbírálni. A csoport ezért CSAK
+   össze van csukva, és a fejléce megmondja, mi ez és miért nem megy. */
+function renderDeadOffers(container, dead) {
+  if (!dead || !dead.length) return;
+  const div = document.createElement('div');
+  div.className = 'hw-cat';
+  div.innerHTML = '<div class="hw-cat-header" onclick="toggleHwCatExpand(this)" '
+    + 'title="A katalógusban van bejegyzés ezekre az eszközökre, de a csomagok INF-je egy '
+    + 'MÁSIK gépgyártó változatához tartozik - a program letöltötte és ellenőrizte őket, az '
+    + 'eszköz nem fogadta el. Kinyitva bepipálhatók és újrapróbálhatók, de a valódi megoldás '
+    + 'a gép/alaplap gyártójának driver-oldala.">'
+    + '<span class="chevron">▸</span>'
+    + '<span style="color:#b9a7e8">🚫 Nem telepíthető: a csomag nem ehhez a géphez való ('
+    + dead.length + ' db)</span></div>'
+    + '<div class="hw-cat-children" style="display:none">'
+    + '<div style="padding:6px 10px 8px;font-size:11.5px;color:var(--text3)">'
+    + 'Ezekre a katalógusban VAN bejegyzés, de a csomagok INF-je más gépgyártó változatához '
+    + 'tartozik — a program letöltötte és ellenőrizte őket, az eszköz nem fogadta el. '
+    + 'A gyári driver ezekhez a gép/alaplap gyártójának oldalán van. Bepipálva újrapróbálhatók.'
+    + '</div>' + dead.map(hwRowHtml).join('') + '</div>';
+  container.appendChild(div);
+}
+
+function renderHwInstalled(container) {
   // Separator + installed
   if (hwInstalled.length > 0) {
     const sep = document.createElement('div');
@@ -2868,7 +2917,16 @@ function toggleHwItem(idx) {
   renderHwTree();
   updateHwButtons();
 }
-function selectAllHw() { hwPool.forEach((_,i)=>hwSelectedIndices.add(i)); renderHwTree(); updateHwButtons(); }
+/* Az "Összes" a VALÓDI ajánlatokat jelöli ki - a bizonyítottan nem illeszkedő
+   csomagokat NEM. Korábban ez a gomb bepipálta azokat is, és a technikus jóhiszeműen
+   nekifutott olyasminek, amiről a program már tudta, hogy nem fog menni (terepi
+   visszajelzés, 2026-09-01: három ilyen ment bele egy telepítésbe, mindhárom kihagyva).
+   Kézzel, a "Nem telepíthető" csoportot kinyitva továbbra is bejelölhetők - a döntést
+   nem vesszük el, csak nem tesszük alapértelmezetté. */
+function selectAllHw() {
+  hwPool.forEach((d,i)=>{ if (!d.prev_no_bind) hwSelectedIndices.add(i); });
+  renderHwTree(); updateHwButtons();
+}
 function deselectAllHw() { hwSelectedIndices.clear(); renderHwTree(); updateHwButtons(); }
 
 /* Problémás (hibakódos) eszközök kiemelése - akkor is látszik, ha egyik driver-forrás
