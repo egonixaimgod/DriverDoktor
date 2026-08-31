@@ -170,10 +170,50 @@ def write(text=''):
 
 
 def clear():
-    try:
-        os.system('cls' if os.name == 'nt' else 'clear')
-    except Exception:
-        write('\n' * 3)
+    """Képernyőtörlés GYEREKFOLYAMAT NÉLKÜL.
+
+    MIÉRT NEM `os.system('cls')`: az egy `cmd.exe`-t indít, ami a windowed exe-ben
+    (nincs saját konzol-alrendszer) megbízhatatlan - és ha a gyerek a MI konzolunk
+    helyett máshova ír, a képernyő üresen marad. Ez a szakasz a CLI legelső lépése,
+    tehát pont itt nem szabad kockáztatni: ha itt hasal el, a felhasználó egy fekete
+    ablakot lát, és semmi nem árulja el, mi történt.
+
+    Sorrend: ANSI escape (mindig működik, ha a VT be van kapcsolva) -> Win32
+    konzol-puffer törlés -> végső esetben néhány üres sor."""
+    if ANSI:
+        try:
+            sys.stdout.write('\033[2J\033[H')
+            sys.stdout.flush()
+            return
+        except Exception:
+            pass
+    if os.name == 'nt':
+        try:
+            import ctypes
+            from ctypes import wintypes
+            k = ctypes.windll.kernel32
+            h = k.GetStdHandle(-11)
+
+            class _SBI(ctypes.Structure):
+                _fields_ = [('dwSize', wintypes._COORD),
+                            ('dwCursorPosition', wintypes._COORD),
+                            ('wAttributes', wintypes.WORD),
+                            ('srWindow', wintypes.SMALL_RECT),
+                            ('dwMaximumWindowSize', wintypes._COORD)]
+            info = _SBI()
+            if k.GetConsoleScreenBufferInfo(h, ctypes.byref(info)):
+                cells = info.dwSize.X * info.dwSize.Y
+                written = wintypes.DWORD()
+                origin = wintypes._COORD(0, 0)
+                k.FillConsoleOutputCharacterW(h, ctypes.c_wchar(' '), cells, origin,
+                                              ctypes.byref(written))
+                k.FillConsoleOutputAttribute(h, info.wAttributes, cells, origin,
+                                             ctypes.byref(written))
+                k.SetConsoleCursorPosition(h, origin)
+                return
+        except Exception as e:
+            logging.debug(f"[CLI-UI] Win32 képernyőtörlés sikertelen: {e}")
+    write('\n' * 3)
 
 
 def rule(char=None):

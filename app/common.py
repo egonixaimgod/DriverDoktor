@@ -162,14 +162,32 @@ def ensure_console():
         if not ctypes.windll.kernel32.GetConsoleWindow():
             ctypes.windll.kernel32.AllocConsole()
         if ctypes.windll.kernel32.GetConsoleWindow():
+            # A HÁROM STREAMET MINDIG ÚJRAKÖTJÜK, nem csak ha None vagy zárt (2026-08-31).
+            # A régi feltétel (`stream is None or closed`) azon bukott meg, hogy a
+            # PyInstaller windowed bootloadere NEM mindig None-t ad: adhat egy nyitott, de
+            # SEHOVA nem vezető objektumot is. Olyankor az újrakötés kimaradt, a program
+            # vidáman "írt" - és a frissen nyitott konzolablak ÜRESEN, feketén állt (pont
+            # ez volt a terepi tünet: a CLI elindult, a napló szerint futott, a képernyőn
+            # semmi). A kötés önmagában olcsó és idempotens, tehát nincs értelme feltételhez
+            # kötni; egy nem látszó kimenet mindig rosszabb, mint egy felesleges open().
+            #
+            # UTF-8 KÓDOLÁSSAL: az alapértelmezett locale a magyar Windowson cp852, amin a
+            # keretrajzoló karakterek nincsenek meg. `errors='replace'`, hogy egy hiányzó
+            # jel se dobhasson kivételt a kiírás közben.
             for name, mode, attr in (('CONIN$', 'r', 'stdin'), ('CONOUT$', 'w', 'stdout'),
                                      ('CONOUT$', 'w', 'stderr')):
-                stream = getattr(sys, attr, None)
-                if stream is None or getattr(stream, 'closed', False):
-                    try:
-                        setattr(sys, attr, open(name, mode))
-                    except OSError as e:
-                        logging.debug(f"[CONSOLE] A(z) {attr} nem nyitható ({name}): {e}")
+                try:
+                    setattr(sys, attr, open(name, mode, buffering=1,
+                                            encoding='utf-8', errors='replace'))
+                except OSError as e:
+                    logging.debug(f"[CONSOLE] A(z) {attr} nem nyitható ({name}): {e}")
+            # A konzol kódlapját is UTF-8-ra állítjuk (65001), különben a fenti utf-8
+            # kódolású írás bájtjait a konzol cp852-ként rajzolná ki - ékezet-szemetet adva.
+            try:
+                ctypes.windll.kernel32.SetConsoleOutputCP(65001)
+                ctypes.windll.kernel32.SetConsoleCP(65001)
+            except Exception as e:
+                logging.debug(f"[CONSOLE] A kódlap átállítása nem sikerült: {e}")
             return True
     except Exception as e:
         logging.debug(f"[CONSOLE] Konzol nyitása sikertelen: {e}")

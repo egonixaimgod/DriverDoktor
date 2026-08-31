@@ -9,6 +9,7 @@ from app.common import CMD_TIMEOUT_RETURNCODE
 from app.common import CommandResult
 from app.common import spawn_failed
 from app.common import ps_force_utf8
+from app import drivers_core
 # === /AUTO-IMPORTS ===
 
 
@@ -53,6 +54,18 @@ class CliBaseMixin:
             else:
                 logging.debug(f"[CMD_CLI] OK ({elapsed:.1f}s)")
             
+            # A DriverStore-t módosító parancsok eldobják a csomaglista-gyorsítótárat.
+            # ITT, EGY HELYEN - egy hívási helyenkénti érvénytelenítést előbb-utóbb
+            # elfelejtenénk valahol, és onnantól egy elavult lista alapján döntene a lánc
+            # (lásd app/gui/drivers.py: _get_third_party_drivers).
+            try:
+                if drivers_core.mutates_driver_store(cmd_str):
+                    inv = getattr(self, 'invalidate_driver_cache', None)
+                    if inv:
+                        inv()
+            except Exception as _e:
+                logging.debug(f"[CMD] A gyorsítótár érvénytelenítése nem sikerült: {_e}")
+
             if result.stdout:
                 out_txt = result.stdout.strip()
                 if len(out_txt) > 4000: out_txt = out_txt[:4000] + '... [TRUNCATED]'

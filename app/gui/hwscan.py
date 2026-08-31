@@ -43,6 +43,9 @@ from app.wu_core import is_firmware_update
 from app.wu_core import filter_autofix_risky_devices
 from app.wu_core import FIRMWARE_CLASS_LABEL
 from app.wu_core import FIRMWARE_CLASS_WARNING
+from app.drivers_core import DELETE_DRIVER_TIMEOUT
+from app.drivers_core import INSTALL_DRIVER_TIMEOUT
+from app.common import CMD_TIMEOUT_RETURNCODE
 # === /AUTO-IMPORTS ===
 
 
@@ -1656,7 +1659,8 @@ try {
                 self._deferred_inf_cleanup_save(todo[i:])
                 raise Exception("Magyar_Megszakit_Flag")
             pub = it['published']
-            dres = self._run(['pnputil', '/delete-driver', pub], ok_codes=(0, 3010))
+            dres = self._run(['pnputil', '/delete-driver', pub], ok_codes=(0, 3010),
+                             timeout=DELETE_DRIVER_TIMEOUT)
             if dres and dres.returncode in (0, 3010):
                 done += 1
             else:
@@ -1714,7 +1718,8 @@ try {
             self.emit('task_progress', {'task': task_id, 'log': f'  🧹 {name}: a csomag {len(unused)} fel nem használt INF-jének kivezetése a DriverStore-ból...'})
             refused = 0
             for inf, pub in unused:
-                dres = self._run(['pnputil', '/delete-driver', pub], ok_codes=(0, 3010))
+                dres = self._run(['pnputil', '/delete-driver', pub], ok_codes=(0, 3010),
+                             timeout=DELETE_DRIVER_TIMEOUT)
                 if not dres or dres.returncode not in (0, 3010):
                     refused += 1
                     logging.info(f"[CATALOG_INSTALL] Kivezetés elutasítva (marad): {pub} ({inf}), rc={getattr(dres, 'returncode', '?')}")
@@ -2020,7 +2025,25 @@ try {
                     # 259 = a csomag már fent van / nincs rá kötő eszköz (lentebb no-op),
                     # 3010 = siker, de reboot kell - mindkettő VÁRT kimenet, WARNING nélkül
                     # (terepi log, 2026-07-28: 4 hamis WARNING egy hibátlan futásban).
-                    res = self._run(cmd, ok_codes=(0, 259, 3010))
+                    #
+                    # IDŐKORLÁT: terepen (2026-08-31, ThinkPad T14 Gen 1, Win11 26200) egy
+                    # ilyen hívás **31 PERCIG** futott, egy másik 15,5 percig - korlát nélkül
+                    # egyetlen beragadt telepítés órákra megfogja a láncot, és a technikus
+                    # csak annyit lát, hogy "nem történik semmi". A határ SZÁNDÉKOSAN bőkezű
+                    # (INSTALL_DRIVER_TIMEOUT): egy nagy chipset-csomag telepítése valóban
+                    # lehet több perc, tehát nem szabad egy lassú, de HALADÓ telepítést
+                    # elvágni - csak a végtelen lógást kell megfogni.
+                    res = self._run(cmd, ok_codes=(0, 259, 3010),
+                                    timeout=INSTALL_DRIVER_TIMEOUT)
+                    if res.returncode == CMD_TIMEOUT_RETURNCODE:
+                        # Nem hallgatjuk el: a csomag állapota ilyenkor bizonytalan, és a
+                        # technikusnak tudnia kell, melyik telepítés akadt el.
+                        logging.error(f"[CATALOG_INSTALL] IDŐTÚLLÉPÉS ({INSTALL_DRIVER_TIMEOUT}s) "
+                                      f"a telepítéskor: {title}")
+                        self.emit('task_progress', {'task': task_id, 'log':
+                                  f'⏱️ A(z) "{title}" telepítése {INSTALL_DRIVER_TIMEOUT // 60} perc után '
+                                  f'sem fejeződött be - továbblépünk. A csomag a következő '
+                                  f'újraindítás után befejeződhet.'})
                 # pnputil kimenet: "Added driver packages:  N". Ha N==0, semmi nem települt
                 # (a csomag már a store-ban van / up-to-date, kód 259) - ezt TILOS sikernek
                 # számolni: az AutoFix katalógus-záróköre soha be nem bind-elő eszközön

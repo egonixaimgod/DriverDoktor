@@ -2197,7 +2197,8 @@ class GuiAutofixMixin:
                 continue
             logging.warning(f"[WIFI-SWAP] Régi Wi-Fi driver kivezetése: {pub} ({p.get('original')}) - "
                             f"{p.get('provider')} {p.get('version')}")
-            res = self._run(['pnputil', '/delete-driver', pub], ok_codes=(0, 3010))
+            res = self._run(['pnputil', '/delete-driver', pub], ok_codes=(0, 3010),
+                            timeout=DELETE_DRIVER_TIMEOUT)
             if res and res.returncode in (0, 3010):
                 removed.append(f"{p.get('original') or pub} ({p.get('version') or '?'})")
             else:

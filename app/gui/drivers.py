@@ -81,8 +81,46 @@ class GuiDriversMixin:
         threading.Thread(target=worker, daemon=True, name="drivers-load").start()
 
     def _get_third_party_drivers(self):
+        """A third-party csomagok listája - RÖVID ÉLETŰ GYORSÍTÓTÁRRAL.
+
+        MIÉRT (terepi mérés, 2026-08-31, ThinkPad T14 Gen 1): egy AutoFix lánc **19-szer**
+        futtatta a `dism /Get-Drivers`-t, hívásonként átlag **90 másodpercig** - összesen
+        **28 perc**, a teljes lánc idejének negyede. A hívás azért ilyen lassú, mert a
+        katalógus-telepítések felduzzasztják a DriverStore-t (ezt a CLAUDE.md már méri:
+        0,6 mp -> 77 mp), és a lánc több lépése is ugyanazt a listát kéri el egymás után,
+        közben változatlan rendszerállapot mellett.
+
+        A GYORSÍTÓTÁR HELYESSÉGE AZON ÁLL, HOGY NEM IDŐALAPÚ: minden DriverStore-módosító
+        parancs (`pnputil /add-driver`, `/delete-driver`, `dism /Add-Driver` stb.) MAGÁTÓL
+        eldobja a `_run`-ban (lásd `drivers_core.mutates_driver_store`). Ez azért fontos,
+        mert a lánc több döntése ELŐTTE/UTÁNA összehasonlításon alapul (pl.
+        `verify_failed_installs`): ha egy telepítés utáni lekérdezés régi listát kapna, a
+        chain néma hamis eredményt hozna - pontosan az a hibaosztály, amit ez a projekt
+        mindenhol üldöz. A rövid TTL csak másodlagos védőháló arra az esetre, ha valami
+        rajtunk kívül (Windows Update, egy másik program) írná a DriverStore-t."""
+        now = time.monotonic()
+        cached = getattr(self, '_dv_cache', None)
+        if cached and (now - cached[0]) < drivers_core.DRIVER_LIST_TTL:
+            logging.debug(f"[DRIVERS] A csomaglista a gyorsítótárból ({len(cached[1])} db, "
+                          f"{now - cached[0]:.0f} mp-e olvasva) - dism megspórolva.")
+            return cached[1]
         logging.debug("[DRIVERS] dism /English /Online /Get-Drivers futtatása...")
-        return drivers_core.get_third_party_drivers(self._run)
+        drivers = drivers_core.get_third_party_drivers(self._run)
+        # A lekérdezés ALATT is történhetett módosítás (a lánc több szálon dolgozik):
+        # olyankor nem tesszük el, inkább a következő hívó kérdezze le újra.
+        if getattr(self, '_dv_cache_dirty_at', 0) <= now:
+            self._dv_cache = (time.monotonic(), drivers)
+        else:
+            logging.debug("[DRIVERS] A lekérdezés alatt módosult a DriverStore - nem gyorsítótárazunk.")
+        return drivers
+
+    def invalidate_driver_cache(self):
+        """A csomaglista-gyorsítótár eldobása. A `_run` hívja minden DriverStore-módosító
+        parancs után - lásd `_get_third_party_drivers` docstringjét."""
+        if getattr(self, '_dv_cache', None) is not None:
+            logging.debug("[DRIVERS] A csomaglista-gyorsítótár eldobva (DriverStore módosult).")
+        self._dv_cache = None
+        self._dv_cache_dirty_at = time.monotonic()
 
     def _get_all_drivers(self):
         logging.debug("[DRIVERS] _get_all_drivers() indult")

@@ -565,6 +565,23 @@ GUI-only view added 2026-07-31 on explicit user request, because Windows 11 scat
 - **Stress-test tools — diagnostics**: every Win32 call in the automation path has its return value checked and logged (`_send_unicode_char`/`_send_vk` return whether SendInput injected). `_debug_dump_pid_windows(pid, context)` enumerates every window+child for a PID on any "not found" path. Automation threads run through `_run_automation_safely()` so daemon-thread exceptions log full tracebacks.
 - **Stress-test tools — post-launch window layout** (`_position_stress_windows` in `app/gui/stress_automation.py`): runs only after **all automation threads finish** (each `_launch_stress_exe` appends its thread to `thread_sink`; `start_stress_tests` waits with a 240s ceiling + ~3s settle) — a fixed 30s timer used to fire mid-automation. Layout: 4 work-area quadrants (FurMark TL, Prime95 TR, Linpack BL, HWiNFO BR); the 3 non-FurMark windows are resized, FurMark is *moved* at native size (`SWP_NOSIZE` — resizing crops the render surface/FPS counter) and pushed to `HWND_BOTTOM`. `_minimize_other_windows()` then minimizes everything else including the app's own window, per explicit user request.
 
+### MIÉRT TARTOTT 2,5 ÓRÁIG EGY LÁNC — mért időmérleg (2026-08-31, ThinkPad T14 Gen 1)
+
+Terepi jelentés: *"valami KIBASZOTT SOKAIG TELEPITETT ES A VEGEN LE IS ALLITOTTAM"*. A napló (`debug_logok/`) alapján a lánc 14:35-től 17:13-ig futott, és **egyetlen lába 95 percig** tartott. A parancsonkénti mérleg — ezt használd kiindulásnak, ne tippelj újra:
+
+| parancs | db | összesen | átlag |
+|---|---|---|---|
+| `pnputil /add-driver … /install` | 22 | **60 perc** | 164 mp |
+| `dism /English /Online /Get-Drivers` | 19 | **28 perc** | 90 mp |
+| `pnputil /delete-driver` | 262 | 6 perc | 1,5 mp |
+| `expand` (cab) | 28 | 6 perc | 13 mp |
+
+Három tanulság, mindhárom javítva:
+
+- **VOLT HÁROM `pnputil /delete-driver` HÍVÁS IDŐKORLÁT NÉLKÜL**, és pont az egyik lógott be: a napló 42 perc néma csendet mutat egyetlen `pnputil /delete-driver oem250.inf` után. Az AutoFix fő törlő-ciklusa már 2026-07 óta kap `DELETE_DRIVER_TIMEOUT`-ot (a wedged-PnP eset miatt), de az **INF-takarítás** (`_cleanup_unused_staged_infs`, a halasztott kivezetés és az autofix párja) kimaradt a javításból. Ha egy időkorlátot bevezetsz, keresd meg a TÖBBI hívási helyet is ugyanarra a parancsra.
+- **A TELEPÍTÉS IS KAPOTT KORLÁTOT** (`INSTALL_DRIVER_TIMEOUT` = 900 mp): egy `pnputil /add-driver … /install` **31 percig** futott, egy másik 15,5 percig. A határ szándékosan bőkezű — egy nagy chipset-csomag telepítése valóban lehet több perc, tehát nem a lassú, hanem a **végtelen** telepítést fogja meg. Időtúllépéskor a technikus látható üzenetet kap (melyik csomag akadt el), nem néma továbblépést.
+- **A `dism /Get-Drivers` 19-szer futott, 90 mp-es átlaggal — a lánc idejének negyede.** Azért ilyen lassú, mert a katalógus-telepítések felduzzasztják a DriverStore-t (ezt a fájl már méri: 0,6 mp → 77 mp), és a lánc több lépése egymás után kéri ugyanazt a listát változatlan rendszerállapot mellett. Megoldás: rövid életű gyorsítótár `_get_third_party_drivers`-ben. **A helyessége azon áll, hogy NEM időalapú:** minden DriverStore-módosító parancs (`drivers_core.mutates_driver_store`) **magától eldobja a `_run`-ban** — egy helyen, mert hívási helyenként érvényteleníteni előbb-utóbb elfelejtenénk valahol. Ez azért létkérdés, mert a lánc több döntése ELŐTTE/UTÁNA összehasonlításon áll (`verify_failed_installs`): egy elavult lista ott néma hamis eredményt adna. A TTL (120 mp) csak másodlagos védőháló arra, ha rajtunk kívül írná valami a DriverStore-t.
+
 ### A driver-keresés ÉLŐ folyamatjelzője (2026-08-29)
 
 **Explicit user decision**, terepi panaszra: *"ranyomok es varok egy csomot vagy 3-5 percet azt se tudom történik e valami… azt se latom h most keres e valamit vagy beragadt"*. A szken addig egyetlen animált csíkot és egy ritkán frissülő szöveget mutatott, a leghosszabb szakasz pedig **egyetlen státuszsort küldött az elején, utána semmit percekig**.

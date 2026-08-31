@@ -63,9 +63,20 @@ class GuiCliModeMixin:
             # 2026-08-29; a hibaablak CÍME is `\\` volt). Sztringként a Windows a
             # CreateProcess-nek szó szerint adja tovább, tehát pont az megy ki, amit írunk.
             cmd = f'cmd /c {inner}'
-            logging.info(f"[CLI-MODE] Indítás: {cmd}")
-            subprocess.Popen(cmd, creationflags=subprocess.CREATE_NO_WINDOW,
-                             cwd=os.path.dirname(exe) or None)
+            # DETACHED_PROCESS ÉS NEM CREATE_NO_WINDOW (2026-08-31, terepi hiba).
+            # A `CREATE_NO_WINDOW` nem "konzol nélkül" indít, hanem konzollal, csak
+            # ELREJTVE. A segéd-`cmd` így kapott egy rejtett konzolt, amit a `start`-tal
+            # indított exe MEGÖRÖKÖLT - a `--cli` ág `AttachConsole(-1)`-e ezért SIKERRel
+            # járt, a `sys.stdout` egy valódi (cp852-es, tty) streamre került... ami a
+            # REJTETT konzolra írt. A napló pontosan ezt mutatta: `ANSI=True`,
+            # `Unicode=False`, a menü lefutott - a felhasználó viszont üres fekete ablakot
+            # látott. A `DETACHED_PROCESS` egyáltalán nem ad konzolt, így nincs mit
+            # örökölni: az `AttachConsole` elbukik, és a program SAJÁT, LÁTHATÓ konzolt
+            # nyit (`ensure_console`).
+            logging.info(f"[CLI-MODE] Indítás (DETACHED_PROCESS): {cmd}")
+            subprocess.Popen(cmd, creationflags=subprocess.DETACHED_PROCESS,
+                             cwd=os.path.dirname(exe) or None,
+                             close_fds=True)
         except Exception as e:
             # Az indítás elhasalt: a mutexet VISSZA KELL VENNI, különben ez a példány
             # mutex nélkül futna tovább, és a program bárhányszor elindítható lenne.
@@ -99,4 +110,16 @@ class GuiCliModeMixin:
             logging.shutdown()
         except Exception:
             pass
+        # `taskkill /F` A SAJÁT PID-RE, DE **/T NÉLKÜL**. A `/T` a folyamatfát vinné, abban
+        # pedig benne lenne az imént indított CLI ablak. A sima `/F` viszont kell: nélküle
+        # (csak `os._exit`) a PyInstaller bootloadere megpróbálja törölni a `_MEIxxxxx` temp
+        # mappát, ami a még betöltött DLL-ek miatt nem sikerül, és a felhasználó egy
+        # "Failed to remove temporary directory" figyelmeztetést kap - terepen pontosan ez
+        # jelent meg (2026-08-31). A program minden más kilépési pontja is így, azonnali
+        # kilövéssel zárul (lásd CLAUDE.md "Process model").
+        try:
+            subprocess.run(['taskkill', '/F', '/PID', str(os.getpid())],
+                           creationflags=subprocess.CREATE_NO_WINDOW, timeout=5)
+        except Exception as e:
+            logging.debug(f"[CLI-MODE] taskkill nem futott le: {e}")
         os._exit(0)

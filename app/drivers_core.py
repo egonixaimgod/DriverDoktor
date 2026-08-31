@@ -298,3 +298,41 @@ def force_delete_driver_files(run, pub, target_os_path=None):
                 found_any = True
     logging.warning(f"[DRIVERS] FORCE-TÖRLÉS vége: {pub} - talált/törölt: {found_any}")
     return found_any
+
+
+# ---------------------------------------------------------------------------
+# A CSOMAGLISTA GYORSÍTÓTÁRA (lásd app/gui/drivers.py: _get_third_party_drivers)
+# ---------------------------------------------------------------------------
+# Másodlagos védőháló arra az esetre, ha a DriverStore-t rajtunk kívül írná valami
+# (Windows Update, egy másik program). Az ELSŐDLEGES érvénytelenítés eseményalapú:
+# minden módosító parancs eldobja a gyorsítótárat, lásd `mutates_driver_store`.
+DRIVER_LIST_TTL = 120
+
+# Egy driver-csomag TELEPÍTÉSÉNEK felső határa. Terepen mérve (2026-08-31, ThinkPad T14
+# Gen 1, Win11 26200): egy `pnputil /add-driver ... /install` 31 percig futott, egy másik
+# 15,5 percig - a lánc 22 telepítése összesen 60 percet vitt el. A határ bőkezű, mert egy
+# nagy chipset-csomag telepítése valóban lehet több perc: itt nem a lassú, hanem a
+# VÉGTELEN telepítést kell megfogni.
+INSTALL_DRIVER_TIMEOUT = 900
+
+# Azok a parancsrészletek, amik MEGVÁLTOZTATJÁK a DriverStore tartalmát. Ha egy parancs
+# ezek bármelyikét tartalmazza, a csomaglista-gyorsítótár elavult.
+#
+# SZÁNDÉKOSAN BŐVEN MERÍTVE: egy tévesen eldobott gyorsítótár csak egy fölösleges dism-et
+# jelent, egy tévesen MEGTARTOTT viszont elavult listát ad egy előtte/utána
+# összehasonlításnak (pl. verify_failed_installs) - vagyis néma hamis eredményt.
+_DRIVER_STORE_MUTATORS = (
+    '/add-driver', '/delete-driver', '/remove-device', '/scan-devices',
+    '/add-package', '/remove-driver', '/export-driver',
+)
+
+
+def mutates_driver_store(cmd):
+    """Igaz, ha a parancs a DriverStore tartalmát megváltoztat(hat)ja."""
+    try:
+        text = (cmd if isinstance(cmd, str) else ' '.join(str(c) for c in cmd)).lower()
+    except Exception:
+        return False
+    if not ('pnputil' in text or 'dism' in text):
+        return False
+    return any(m in text for m in _DRIVER_STORE_MUTATORS)

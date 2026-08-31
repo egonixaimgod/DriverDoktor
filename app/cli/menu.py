@@ -55,6 +55,37 @@ def _install_input_logging():
 # KÉPERNYŐ-KERET
 # ---------------------------------------------------------------------------
 
+def _log_console_state():
+    """A konzol TÉNYLEGES állapota a naplóba, a menü megrajzolása előtt.
+
+    Rule 0: egy "fekete ablak, nem történik semmi" jelentés e nélkül megválaszolhatatlan -
+    pontosan ez történt 2026-08-31-én. Amit rögzítünk: van-e konzolablak, mik a szabvány
+    handle-ök, milyen objektum a sys.stdout, mi a kódolása, tty-e, és sikerül-e ténylegesen
+    ráírni. Az utolsó a döntő: ha az `írás-teszt` hibát ad, a stream nem vezet sehova."""
+    try:
+        import ctypes
+        k = ctypes.windll.kernel32
+        out = getattr(sys, 'stdout', None)
+        try:
+            tty = bool(out and out.isatty())
+        except Exception:
+            tty = None
+        proba = 'OK'
+        try:
+            out.write('')
+            out.flush()
+        except Exception as e:
+            proba = f'HIBA: {e}'
+        logging.info(
+            f"[CLI-KONZOL] ablak={bool(k.GetConsoleWindow())} "
+            f"stdout={type(out).__name__} kódolás={getattr(out, 'encoding', None)} "
+            f"tty={tty} írás-teszt={proba} "
+            f"handle(out)={k.GetStdHandle(-11)} handle(in)={k.GetStdHandle(-10)} "
+            f"kimeneti-kódlap={k.GetConsoleOutputCP()}")
+    except Exception as e:
+        logging.warning(f"[CLI-KONZOL] Az állapot lekérdezése nem sikerült: {e}")
+
+
 def _sync(api, fn, *a, **kw):
     """Egy API-hívás lefuttatása ÉS a közben indított háttérszálak bevárása.
 
@@ -844,6 +875,20 @@ def _menu_settings(api):
 def run_cli_mode():
     """A CLI mód belépési pontja - teljes funkcionalitás konzolon."""
     _install_input_logging()
+
+    # AZONNALI ÉLETJEL, MÉG BÁRMILYEN KÉPERNYŐTÖRLÉS ELŐTT.
+    # Terepen (2026-08-31) a CLI elindult - a napló szerint a menüig eljutott -, a
+    # felhasználó viszont egy ÜRES FEKETE ABLAKOT látott: a kimenet nem jutott ki a
+    # konzolra. Ez a sor a legegyszerűbb eszközökkel megy ki (sima print, csak ASCII,
+    # semmi szín/keret/törlés), tehát ha EZ látszik, a konzol jó és a hiba feljebb van;
+    # ha ez sem, akkor maga a stream-kötés a bűnös. Így a következő hibajelentés
+    # eldönti a kérdést ahelyett, hogy megint találgatnánk.
+    try:
+        print('DriverVarazslo CLI - indul...', flush=True)
+    except Exception:
+        pass
+
+    _log_console_state()
     logging.info(f"[CLI] CLI mód indul (ANSI={ui.ANSI}, Unicode={ui.UNICODE}, "
                  f"szélesség={ui.width()}).")
     try:

@@ -17,7 +17,7 @@ import threading
 import time
 import logging
 
-BUILD_NUMBER = 283
+BUILD_NUMBER = 284
 
 from app import common
 common.BUILD_NUMBER = BUILD_NUMBER
@@ -100,7 +100,19 @@ if __name__ == "__main__":
     if "--cli" in sys.argv:
         if getattr(sys, "frozen", False):
             # Attach to the parent console if running from cmd in windowed mode
-            if ctypes.windll.kernel32.AttachConsole(-1):
+            # A SZÜLŐ KONZOLJA LEHET REJTETT IS - ilyenkor NEM szabad rácsatlakozni.
+            # A `CREATE_NO_WINDOW`-val indított folyamatok konzolja létezik, csak nincs
+            # megjelenítve; ha ahhoz kötnénk a kimenetet, a program tökéletesen működne,
+            # miközben a felhasználó egy üres ablakot bámul (terepen pontosan ez történt,
+            # 2026-08-31). Ezért a csatlakozás után megnézzük, LÁTHATÓ-e a konzolablak, és
+            # ha nem, elengedjük, hogy az `ensure_console()` sajátot nyithasson.
+            _attached = bool(ctypes.windll.kernel32.AttachConsole(-1))
+            if _attached:
+                _hwnd = ctypes.windll.kernel32.GetConsoleWindow()
+                if not (_hwnd and ctypes.windll.user32.IsWindowVisible(_hwnd)):
+                    ctypes.windll.kernel32.FreeConsole()
+                    _attached = False
+            if _attached:
                 sys.stdout = open("CONOUT$", "w", encoding="utf-8")
                 sys.stderr = open("CONOUT$", "w", encoding="utf-8")
                 sys.stdin = open("CONIN$", "r", encoding="utf-8")

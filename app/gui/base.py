@@ -20,6 +20,7 @@ from app.common import _app_data_dir
 from app.common import _app_exe_path
 from app.common import _webview_error
 from app.common import _webview_ready
+from app import drivers_core
 # === /AUTO-IMPORTS ===
 
 
@@ -233,6 +234,18 @@ class GuiBaseMixin:
                 logging.debug(f"[CMD] OK ({elapsed:.1f}s)")
             
             # Log teljes kimenet 4000 karakterig
+            # A DriverStore-t módosító parancsok eldobják a csomaglista-gyorsítótárat.
+            # ITT, EGY HELYEN - egy hívási helyenkénti érvénytelenítést előbb-utóbb
+            # elfelejtenénk valahol, és onnantól egy elavult lista alapján döntene a lánc
+            # (lásd app/gui/drivers.py: _get_third_party_drivers).
+            try:
+                if drivers_core.mutates_driver_store(cmd_str):
+                    inv = getattr(self, 'invalidate_driver_cache', None)
+                    if inv:
+                        inv()
+            except Exception as _e:
+                logging.debug(f"[CMD] A gyorsítótár érvénytelenítése nem sikerült: {_e}")
+
             if result.stdout:
                 out_txt = result.stdout.strip()
                 if len(out_txt) > 4000: out_txt = out_txt[:4000] + '... [TRUNCATED]'
