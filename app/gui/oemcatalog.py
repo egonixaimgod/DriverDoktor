@@ -160,12 +160,19 @@ class GuiOemCatalogMixin:
         T580) épp ez volt a hiba - a rossz hívás minden gyártói letöltést azonnal
         kivételre futtatott, így a kör mind az 5 lábon NULLA csomagot telepített,
         miközben a képernyőn csak annyi látszott, hogy "a letöltés nem sikerült".
-        A gyári csomagok több száz MB-osak is lehetnek, ezért kell a visszajelzés."""
+        A gyári csomagok több száz MB-osak is lehetnek, ezért kell a visszajelzés.
+
+        A SZIGNATÚRA `(done, total_bytes)`, MERT A HÍVÓ ÍGY HÍVJA - lásd
+        `common.download_with_cert_fallback`: `progress_cb(done, total)`. A `_stress_dl_progress_emitter`
+        hármas `(phase, done, total)` alakja EGY MÁSIK hívóé, és ide bemásolva néma hibát okoz:
+        a `common.py` minden hívást try/except-be zár, tehát a letöltés nem bukik el - csak
+        soha nem jelenik meg semmi. MÉRVE (2026-09-01, Dell Latitude 5580, Build 288): a
+        11 perc 33 mp-es Dell-letöltés alatt EGYETLEN karakter sem jelent meg a képernyőn,
+        és a naplóba **3936** azonos hibasor került (a fájl ~19%-a), kiszorítva a valódi
+        előzményt. Ha ez a szignatúra változik, a hívó oldalt kell vele együtt módosítani."""
         state = {'last': 0.0}
 
-        def cb(phase, done, total_bytes):
-            if phase != 'download':
-                return
+        def cb(done, total_bytes):
             now = time.monotonic()
             is_final = bool(total_bytes) and done >= total_bytes
             if now - state['last'] < 2.0 and not is_final:

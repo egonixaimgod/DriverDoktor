@@ -398,8 +398,27 @@ class GuiBaseMixin:
         logging.info("[API] select_file: mégse")
         return None
 
-    def _check_internet(self):
+    def _check_internet(self, require_dns=False):
         """Megbízható TCP port alapú internet ellenőrzés.
+
+        A NÉVFELOLDÁS AZ ELSŐ PRÓBA, ÉS EZ NEM SORRENDI ÍZLÉS - EZ MAGA A LÉNYEG
+        (2026-09-01, terepen mérve, Dell Latitude 5580, Build 288). A régi sorrend a
+        nyers `8.8.8.8:53` IP-próbával kezdett, ami **definíció szerint nem igényel
+        DNS-t**, és sikerre futva azonnal True-t adott - a hosztneves próba tehát SOHA
+        nem futott le. A napló pontosan ezt mutatja: a driver-törlés utáni lábon
+        `_check_internet -> True (0.20s)`, majd ugyanabban a futásban **22 db
+        `[Errno 11001] getaddrinfo failed`** a katalógus-letöltéseknél, és a WU-keresés
+        a teljes 300 mp-es időkorlátig futott, majd `IDŐTÚLLÉPÉS`. Vagyis: a kapcsolat
+        élt, a NÉVFELOLDÁS viszont még nem - a lánc pedig "van internet"-et látott, és
+        vakon nekiment egy 5 perces WUA-keresésnek, aminek a szerverét fel sem tudta
+        oldani. Minden későbbi hálózati művelet (WUA, Microsoft-katalógus, gyártói
+        oldalak) hosztnévvel dolgozik, tehát a DNS a valódi feltétel, nem a nyers TCP.
+
+        `require_dns=True` esetén CSAK a névfeloldásos próba számít. Alapból False, hogy
+        a "van-e egyáltalán kapcsolat" jellegű hívók (netdrv-visszaállítás döntése)
+        változatlanul működjenek - de ilyenkor a DNS hiányát WARNING-gal naplózzuk, mert
+        az ezután következő letöltések ettől még el fognak hasalni, és e nélkül a sor
+        nélkül az ok megint láthatatlan maradna.
 
         Az időkorlát SZÁNDÉKOSAN hívásonként megy (create_connection timeout=), NEM
         socket.setdefaulttimeout()-tal: az utóbbi a TELJES PROCESSZRE állítja be az
@@ -410,12 +429,25 @@ class GuiBaseMixin:
         Ma minden hívónk ad explicit timeout-ot, tehát ez nem sült el; a globális
         mellékhatást viszont ne hozzuk vissza."""
         import socket
-        for host, port in (("8.8.8.8", 53), ("www.microsoft.com", 80)):
+        # 1) Névfeloldást IGÉNYLŐ próba. Ez az igazi kérdés: fel tudjuk-e oldani a
+        #    hosztneveket, amikkel a WU és a katalógus dolgozik.
+        for host, port in (("www.microsoft.com", 80), ("dns.google", 443)):
             try:
                 with socket.create_connection((host, port), timeout=3.0):
                     return True
             except Exception as e:
-                logging.debug(f"[NET] Internet-ellenőrzés sikertelen ({host}:{port}): {e}")
+                logging.debug(f"[NET] Névfeloldásos internet-ellenőrzés sikertelen ({host}:{port}): {e}")
+        if require_dns:
+            return False
+        # 2) Nyers IP-próba: DNS nélkül is elárulja, hogy van-e egyáltalán kapcsolat.
+        try:
+            with socket.create_connection(("8.8.8.8", 53), timeout=3.0):
+                logging.warning("[NET] Van hálózati kapcsolat, de a NÉVFELOLDÁS nem működik "
+                                "(a hosztneves próbák elbuktak, a nyers IP elérhető). A most "
+                                "következő letöltések és a WU-keresés emiatt elhasalhatnak.")
+                return True
+        except Exception as e:
+            logging.debug(f"[NET] Internet-ellenőrzés sikertelen (8.8.8.8:53): {e}")
         return False
 
     def _wait_for_internet(self, timeout, task_id=None, reason=''):
@@ -433,6 +465,17 @@ class GuiBaseMixin:
         újra, és 10 mp-enként visszajelez a felületre, hogy ne tűnjön fagyottnak.
         Megszakítható: a _cancel_flag-et minden körben nézi.
 
+        A VÁRAKOZÁS A NÉVFELOLDÁSRA IS VONATKOZIK (2026-09-01): a cikluson belül
+        `require_dns=True`-val próbálkozunk, mert a driver-törlés utáni bootnál a
+        kapcsolat előbb áll fel, mint a DNS - és a lánc minden következő lépése
+        (WUA-keresés, katalógus-letöltés) hosztnévvel dolgozik. Terepen mérve ez az 5
+        perces WU-időtúllépés OKA volt, nem a következménye: a régi próba a nyers
+        `8.8.8.8`-cal azonnal True-t adott, a WUA pedig utána a teljes időkorlátig
+        próbálta feloldani a szerverét. A keret LEJÁRTAKOR viszont elfogadjuk a
+        DNS nélküli kapcsolatot is: az "eddig vártunk, most már próbáljuk meg" mindig
+        jobb, mint hamisan azt állítani, hogy nincs hálózat - a lánc no-net ága ilyenkor
+        fölöslegesen állítaná vissza a NIC-mentést.
+
         Visszatérés: True, ha lett internet a határidőn belül."""
         deadline = time.monotonic() + max(0, timeout)
         attempt = 0
@@ -441,7 +484,7 @@ class GuiBaseMixin:
             if getattr(self, '_cancel_flag', False):
                 logging.info("[NET] A hálózat-várakozást megszakították.")
                 return False
-            if self._check_internet():
+            if self._check_internet(require_dns=True):
                 if attempt:
                     waited = int(timeout - max(0, deadline - time.monotonic()))
                     logging.info(f"[NET] Internet {waited} mp várakozás után elérhető ({attempt + 1}. próba).")
@@ -450,6 +493,15 @@ class GuiBaseMixin:
                 return True
             remaining = deadline - time.monotonic()
             if remaining <= 0:
+                # A keret lejárt. Ha van kapcsolat, csak DNS nincs, akkor is True-t adunk:
+                # jobb megpróbálni a letöltéseket, mint a no-net ágra menni (az fölöslegesen
+                # visszaállítaná a NIC-mentést). A hiányzó DNS-t a _check_internet naplózza.
+                if self._check_internet():
+                    logging.warning(f"[NET] {timeout} mp alatt sem lett NÉVFELOLDÁS, de a kapcsolat él "
+                                    f"- továbbmegyünk ({attempt + 1} próba, ok: {reason or 'n/a'}).")
+                    if task_id:
+                        self.emit('task_progress', {'task': task_id, 'log': '⚠️ A hálózat él, de a névfeloldás (DNS) nem áll - a letöltések elhasalhatnak.'})
+                    return True
                 logging.warning(f"[NET] {timeout} mp alatt sem lett internet ({attempt + 1} próba, ok: {reason or 'n/a'}).")
                 return False
             if not announced:

@@ -21,8 +21,10 @@ from app import backup_core
 from app import drivers_core
 from app import dupdrivers_core
 from app import wusettings_core
+from app import powerplan_core
 from app.ghost_core import build_ghost_ps
 from app.ghost_core import parse_ghost_line
+from app.ghost_core import GHOST_REMOVE_TIMEOUT
 from app.wu_core import AUTOFIX_PRINTER_SKIP_CLASSES
 from app.wu_core import WU_PNP_QUERY_PS
 from app.wu_core import WuProcessAborted
@@ -276,6 +278,15 @@ class GuiAutofixMixin:
                 logging.info(f"[GHOST] Törölve: {data}")
             elif event == 'fail':
                 logging.warning(f"[GHOST] Törlés SIKERTELEN: {data}")
+            # Beragadt eszköz: ez az EGYETLEN per-eszköz esemény, ami a felületre is
+            # kimegy. Egy sikertelen törlés a szellemeszközöknél rutin (védett eszköz),
+            # egy időtúllépés viszont azt jelenti, hogy a PnP-verem akadozik ezen a
+            # gépen - ez a technikusnak érdemi információ, és megmagyarázza a plusz
+            # perceket is (mérve: enélkül egyetlen eszköz 4 perc 55 mp-ig blokkolt).
+            elif event == 'timeout':
+                logging.warning(f"[GHOST] Törlés IDŐTÚLLÉPÉS ({GHOST_REMOVE_TIMEOUT}s), kilőve: {data}")
+                self.emit('task_progress', {'task': task_id,
+                                            'log': f'⏱️ Beragadt szellemeszköz kihagyva ({GHOST_REMOVE_TIMEOUT} mp után): {data}'})
             elif event == 'other':
                 logging.debug(f"[GHOST] script: {data}")
 
@@ -1833,6 +1844,36 @@ class GuiAutofixMixin:
         except Exception as e:
             logging.debug(f"[AUTOFIX] Fast Startup állapot lekérdezése sikertelen (nem kritikus): {e}")
 
+    def _apply_performance_power_plan(self, task_id='autofix'):
+        """A gép teljesítmény-módba állítása a lánc legvégén (explicit user decision,
+        2026-09-01: a szervizből kiadott gép ne legyen lassú).
+
+        A magja `app/powerplan_core.py`; itt csak a kiírás történik. A Fast Startup
+        jegyzet mintáját követi: ez az ügyfél gépének TARTÓS, észrevehető változása,
+        tehát nem elég megcsinálni - ki is kell MONDANI, a visszaállítás módjával
+        együtt. Egy energiabeállítás, amiről az ügyfél nem tud, ugyanolyan
+        megválaszolhatatlan bejelentés lesz, mint annak idején a színprofil-törlés.
+
+        A hívás helye a lánc legvége, szándékosan: a lánc közben a `_disable_sleep_sync`
+        tartja ébren a gépet, és a több újraindítás bármelyike felülírhatná a sémát."""
+        self.emit('task_progress', {'task': task_id, 'log': '\n⚡ Teljesítmény-mód beállítása (hogy a gép ne legyen lassú a szerviz után)...'})
+        res = powerplan_core.apply_performance_plan(
+            self._run, log=lambda m: self.emit('task_progress', {'task': task_id, 'log': m}))
+        if not res.get('ok'):
+            return
+        prev = res.get('previous_name') or res.get('previous_guid') or 'ismeretlen'
+        self.emit('task_progress', {'task': task_id, 'log': f'⚡ Energiaséma: "{prev}" → NAGY TELJESÍTMÉNYŰ.'})
+        if res.get('applied'):
+            self.emit('task_progress', {'task': task_id, 'log': '   Maximumra állítva: ' + ', '.join(res['applied']) + '.'})
+        # A következményt is kimondjuk. Egy laptop akkumulátoros üzemideje ezzel
+        # ÉRZÉKELHETŐEN csökken, és a ventilátor is többet szólhat - ha ezt a technikus
+        # nem tudja, a következő ügyfél-bejelentés erről fog szólni.
+        self.emit('task_progress', {'task': task_id, 'log': '   Laptopnál ez akkumulátoron rövidebb üzemidőt és több ventilátorzajt jelent - cserébe a gép nem lassul vissza.'})
+        self.emit('task_progress', {'task': task_id, 'log': '   Visszaállítás: Gépház > Rendszer > Energiaellátás, vagy rendszergazdaként: powercfg /setactive SCHEME_BALANCED'})
+        if res.get('failed'):
+            logging.info(f"[AUTOFIX] Teljesítmény-mód: ezen a gépen nem elérhető beállítások: "
+                         f"{', '.join(res['failed'])}")
+
     def _emit_catalog_no_bind(self, no_bind, task_id='autofix'):
         """Jelentés azokról a katalógus-csomagokról, amiket a lánc MEGTALÁLT, de az eszköz
         végül nem kapott meg (a csomag nem erre a gépre való, vagy nem kötött rá).
@@ -1951,6 +1992,9 @@ class GuiAutofixMixin:
             # (lassabb hidegindítás). Nem kapcsoljuk vissza automatikusan (a szerviz
             # szempontjából a kikapcsolt hiberboot a helyesebb állapot), de kimondjuk.
             self._emit_fast_startup_note(task_id)
+            # TELJESÍTMÉNY-MÓD: a szervizből kiadott gép ne legyen lassú. Ez is tartós
+            # rendszerváltozás, tehát ugyanúgy bejelentjük, mint a Fast Startup-ot.
+            self._apply_performance_power_plan(task_id)
             # WI-FI MÓD ZÁRÁSA: kimondjuk, hogy a Wi-Fi driver szándékosan maradt a helyén
             # (a "mindent törlünk" elvtől való eltérést mindig ki kell mondani - ugyanúgy,
             # mint a nyomtatóknál), és eltakarítjuk a WLAN-profil mentést, hogy ügyfélgépen

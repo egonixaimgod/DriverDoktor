@@ -74,6 +74,25 @@ PNP_ERROR_CODE_DESCRIPTIONS = {
 }
 
 
+# A WUA-keresés (`_search_wu_api`) időkorlátja másodpercben.
+#
+# 300 -> 180 (2026-09-01, explicit user decision). MÉRVE ugyanabban a láncban (Dell
+# Latitude 5580, Build 288): a SIKERES keresések **48, 55 és 92 mp** alatt lefutottak, a
+# bukott viszont pontosan a teljes 300-ig ment, majd IDŐTÚLLÉPÉS. A 180 tehát még mindig
+# a mért maximum kétszerese - de a bukott esetben 2 percet megspórol.
+#
+# A HATÁR CSÖKKENTÉSE ÖNMAGÁBAN NEM ELÉG, ÉS NEM IS EZ A LÉNYEGI JAVÍTÁS: ugyanennek a
+# futásnak a diagnózisa szerint a keresés azért futott bele az időkorlátba, mert a
+# NÉVFELOLDÁS még nem állt fel a driver-törlés utáni booton (a régi `_check_internet` egy
+# nyers `8.8.8.8` IP-próbával elégedett meg, ami DNS nélkül is sikerül). Az OKOT a
+# `GuiBaseMixin._check_internet`/`_wait_for_internet` DNS-ellenőrzése szünteti meg; ez a
+# konstans már csak a büntetést rövidíti, ha a WUA mégis beragad.
+#
+# NE MENJ ENNÉL LEJJEBB mérés nélkül: a projekt elve itt "inkább hosszabb, mint rövidebb"
+# - egy elvágott, egyébként sikeres keresés azt jelenti, hogy a gép WU-s driverei
+# kimaradnak, és azt a naplóból utólag alig lehet megkülönböztetni a valódi WU-hibától.
+WU_SEARCH_TIMEOUT = 180
+
 # --- Microsoft Update Catalog: lapozás, rendezés, holtverseny-kezelés ---
 #
 # A katalógus laponként 25 sort ad (mérve: "1 - 25 of 546 (page 1 of 22)"), a lapozás
@@ -626,7 +645,8 @@ try {
     else { $updates | ConvertTo-Json -Depth 2 -Compress }
 } catch { Write-Error $_.Exception.Message }
 """
-            res = self._run(["powershell", "-NoProfile", "-Command", ps_cmd], timeout=300, encoding='utf-8')
+            res = self._run(["powershell", "-NoProfile", "-Command", ps_cmd],
+                            timeout=WU_SEARCH_TIMEOUT, encoding='utf-8')
             out = res.stdout.strip()
             if not out and res.stderr:
                 logging.warning(f"[WU_API] Stderr: {res.stderr[:200]}")
@@ -638,8 +658,9 @@ try {
                 logging.info(f"[WU_API] Talált frissítések: {len(data) if isinstance(data, list) else 0}")
                 return data if isinstance(data, list) else None
         except subprocess.TimeoutExpired:
-            logging.error("[WU_API] WU API timeout (300s) - szolgáltatás-újraindítás, majd azonnali továbblépés (nincs második keresési kör)...")
-            self.emit('hw_scan_progress', {'status': '⚠️ A Windows Update nem válaszolt (5 perc) — áttérés a katalógusra', 'detail': ''})
+            logging.error(f"[WU_API] WU API timeout ({WU_SEARCH_TIMEOUT}s) - szolgáltatás-újraindítás, "
+                          f"majd azonnali továbblépés (nincs második keresési kör)...")
+            self.emit('hw_scan_progress', {'status': f'⚠️ A Windows Update nem válaszolt ({WU_SEARCH_TIMEOUT // 60} perc) — áttérés a katalógusra', 'detail': ''})
             # A 'autofix' csatornára CSAK akkor írunk, ha tényleg AutoFix fut: kézi
             # szkennelésnél ez a sor a logban ([EMIT:]) az AutoFix-hez tartozónak látszott,
             # és egy terepi bejelentés kivizsgálásakor pont ez viszi félre a nyomot.
@@ -657,10 +678,10 @@ try {
             Start-Service wuauserv -ErrorAction SilentlyContinue
             """
             self._run(["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", reset_ps])
-            # SZÁNDÉKOSAN NINCS újrapróbálkozás (korábban volt még egy 300s-os keresési kör):
+            # SZÁNDÉKOSAN NINCS újrapróbálkozás (korábban volt még egy teljes keresési kör):
             # terepen bizonyított (klónozott rendszer vadonatúj AM5 hardveren, 2026-07, két
             # egymás utáni szkennél is), hogy a szolgáltatás-újraindítás utáni retry ugyanúgy
-            # 300s timeoutba fut - a felhasználó ~10,5 percet várt ~5,5 helyett, nulla
+            # időtúllépésbe fut - a felhasználó ~10,5 percet várt ~5,5 helyett, nulla
             # többlet-eredményért. A None visszatérésre a hívók maguktól váltanak: a manuális
             # szken a katalógus-fallbackre (start_hw_scan), az AutoFix a kör lezárására.
         except Exception as e:

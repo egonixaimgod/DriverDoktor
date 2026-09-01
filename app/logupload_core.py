@@ -211,6 +211,34 @@ def build_payload(blob, info, machine_name='', build='', outcome='', extra=None,
     return json.dumps(payload, ensure_ascii=False)
 
 
+def friendly_upload_error(msg):
+    """Az Apps Script nyers hibaszövegéből érthető, TEENDŐT tartalmazó mondat.
+
+    MIÉRT: az Apps Script kivételei a saját belső API-járól beszélnek, és a képernyőre
+    így kerültek ki (terepen mérve, 2026-09-01, egy egyébként hibátlan lánc legvégén):
+
+        A napló feltöltése nem sikerült (Exception: Nincs engedélye a(z)
+        DriveApp.getFoldersByName függvény meghívására. Szükséges engedélyek:
+        (https://www.googleapis.com/auth/drive.readonly || .../auth/drive).
+        További információ: https://developers.google.com/apps-script/...)
+
+    Ebből a technikus nem tudja kitalálni, hogy a teendő NEM a gépen van, hanem a
+    Drive-on: egyszer le kell futtatni a szkript `engedelyezes()` függvényét, majd új
+    verzióként telepíteni. Az eredeti szöveg a NAPLÓBAN változatlanul megmarad (ott
+    az a pontos nyom), a képernyőre viszont a teendő megy ki.
+
+    Tiszta függvény, offline tesztelhető."""
+    low = (msg or '').lower()
+    if 'driveapp' in low or 'auth/drive' in low or 'engedély' in low or 'authorization' in low:
+        return ('a Drive-engedély hiányzik a szerviz Apps Script-jéből - EGYSZER kell '
+                'megcsinálni: a táblázat > Bővítmények > Apps Script, futtasd az '
+                '"engedelyezes" függvényt, fogadd el az engedélyt, majd Telepítés > '
+                'Telepítések kezelése > ceruza > Verzió: "Új verzió"')
+    if 'jelsz' in low or 'password' in low:
+        return 'hibás jelszó (a szkript LOG_READ_PASSWORD értéke)'
+    return msg
+
+
 def upload_logs(run, url, machine_name='', build='', outcome='', http=None):
     """A naplók feltöltése. Visszatérés: (siker, üzenet).
 
@@ -239,7 +267,7 @@ def upload_logs(run, url, machine_name='', build='', outcome='', http=None):
         if isinstance(resp, dict) and resp.get('ok') is False:
             msg = resp.get('error') or 'a szerver hibát jelzett'
             logging.warning(f"[LOGUP] A szerver elutasította a feltöltést: {msg}")
-            return False, msg
+            return False, friendly_upload_error(msg)
         where = (resp or {}).get('url') or (resp or {}).get('file') or ''
         logging.info(f"[LOGUP] Feltöltés kész{(' -> ' + where) if where else ''}.")
         return True, where
@@ -289,7 +317,10 @@ def _post(run, url, payload, http=None):
     if not isinstance(resp, dict):
         return {}, 'váratlan szerver-válasz'
     if resp.get('ok') is False:
-        return resp, (resp.get('error') or 'a szerver hibát jelzett')
+        # Ugyanaz a fordítás, mint a feltöltésnél: a letöltés/listázás UGYANAZOKBA a
+        # Drive-engedélyekbe fut bele (listDriverLogs_ -> getLogFolder_), tehát a
+        # technikus itt is a nyers Apps Script-kivételt kapná teendő nélkül.
+        return resp, friendly_upload_error(resp.get('error') or 'a szerver hibát jelzett')
     return resp, ''
 
 

@@ -6,6 +6,7 @@ import subprocess
 import logging
 from app.ghost_core import build_ghost_ps
 from app.ghost_core import parse_ghost_line
+from app.ghost_core import GHOST_REMOVE_TIMEOUT
 # === /AUTO-IMPORTS ===
 
 
@@ -54,6 +55,9 @@ class GuiGhostMixin:
                     self.emit('task_progress', {'task': 'ghost', 'log': f'  ✅ Sikeresen törölve: {data}', 'current': success, 'counter': f'{success} / {total}'})
                 elif event == 'fail':
                     self.emit('task_progress', {'task': 'ghost', 'log': f'  ❌ Sikertelen (valószínűleg védett eszköz): {data}', 'current': success, 'counter': f'{success} / {total}'})
+                elif event == 'timeout':
+                    logging.warning(f"[GHOST] Törlés IDŐTÚLLÉPÉS ({GHOST_REMOVE_TIMEOUT}s), kilőve: {data}")
+                    self.emit('task_progress', {'task': 'ghost', 'log': f'  ⏱️ Beragadt, kihagyva {GHOST_REMOVE_TIMEOUT} mp után: {data}', 'current': success, 'counter': f'{success} / {total}'})
                 elif event == 'done':
                     self.emit('task_progress', {'task': 'ghost', 'log': f'\n{data}'})
                 else:

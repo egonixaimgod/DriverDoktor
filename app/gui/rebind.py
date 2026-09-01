@@ -59,6 +59,31 @@ from app.wu_core import _collect_boot_path_protection
 # A PnP-nek kell pár másodperc, mire az újraenumerálás után rákötötte a drivert.
 REBIND_SETTLE_SECONDS = 5
 
+# CSAK AZOKAT AZ ESZKÖZÖKET RÚGJUK MEG, AMIKHEZ VAN GYÁRI CSOMAG A GÉPEN
+# (explicit user decision, 2026-09-01 - a 2026-08-25-i "mindent meg lehet rúgva"
+# terjedelem SZŰKÍTÉSE, nem a visszavonása).
+#
+# MIÉRT: a kör két, minőségileg különböző esetet kezelt egyformán. Ahol van stage-elt
+# gyári csomag, ott az újraenumerálás VALÓDI munkát végez: a Windows nulláról választ, és
+# a csomag el tud indulni - pontosan ez a T580 tapipadjának esete, amiért a modul született.
+# Ahol viszont NINCS csomag a gépen, ott a Windowsnak nincs miből jobbat választania, tehát
+# garantáltan ugyanazt az inbox drivert köti vissza - ezt a kör saját üzenete is kimondja
+# ("Ha nincs jobb, ugyanazt kapja vissza"). Az a menet tehát idő és kockázat, nulla
+# nyereséggel.
+#
+# MÉRVE (2026-09-01, Dell Latitude 5580, Build 288): 30 megrúgott eszközből **4**-hez volt
+# csomag, 26-hoz nem; a kör ~3,5 percig tartott, és a záró jelentés szerint utána is 9
+# eszköz maradt alapdriveren. Ugyanez a T580-on 8 eszközből 0 azonnali visszakötés.
+#
+# A KOCKÁZAT-CSÖKKENÉS ÖNMAGÁBAN IS INDOK: a kör az USB-vezérlőt, a HID-eszközöket és a
+# billentyűzetet is érinti, ezek az újraindításig halottak. Minél kevesebb csomópontot
+# bántunk feleslegesen, annál kisebb az esély, hogy a technikus egy használhatatlan géppel
+# marad, ha az újraindítás valamiért elmarad.
+#
+# A kihagyott eszközök NEM tűnnek el a szem elől: a záró egészségjelentés
+# (`_emit_driver_health`) továbbra is felsorolja, ami alapdriveren maradt.
+REBIND_ONLY_WITH_PACKAGE = True
+
 # Visszaszámlálás a kör végi automatikus újraindításig (lásd _rebind_finish_reboot).
 REBIND_REBOOT_GRACE_SECONDS = 10
 
@@ -399,7 +424,25 @@ class GuiRebindMixin:
             if path:
                 with_pkg += 1
             todo.append((d, info, path, orig or '(a Windows választ)'))
+        # SZŰKÍTÉS: csak az az eszköz kerül sorra, amihez VAN gyári csomag a gépen.
+        # A többinél a Windowsnak nincs miből jobbat választania, tehát garantáltan
+        # ugyanazt az inbox drivert kötné vissza - idő és kockázat, nulla nyereséggel
+        # (lásd REBIND_ONLY_WITH_PACKAGE indoklását a fájl tetején).
+        if REBIND_ONLY_WITH_PACKAGE:
+            skipped = [t for t in todo if not t[2]]
+            todo = [t for t in todo if t[2]]
+            if skipped:
+                logging.info(f"[REBIND] {len(skipped)} eszköz kihagyva (nincs hozzá gyári csomag a "
+                             f"gépen, az újraenumerálás ugyanazt az inbox drivert adná vissza): "
+                             f"{[ (d.get('name') or d.get('pnp_id')) for d, _i, _p, _o in skipped ]}")
         if not todo:
+            if REBIND_ONLY_WITH_PACKAGE and with_pkg == 0 and candidates:
+                # FONTOS KÜLÖNBSÉG: nem az van, hogy minden rendben - hanem az, hogy
+                # amihez csomag kellene, ahhoz nincs csomag a gépen. Ezt ki kell mondani,
+                # különben a technikus "✅ nincs teendő"-nek olvasná.
+                self.emit('task_progress', {'task': task_id, 'log': f'\nℹ️ {len(candidates)} eszköz fut Windows-alapdriveren, de egyikhez sincs gyári csomag a gépen - az újra-felderítés ugyanazt adná vissza, ezért kihagyjuk.'})
+                self.emit('task_progress', {'task': task_id, 'log': '   Ezek a záró jelentésben tételesen szerepelnek; gyári driver a gép/alaplap gyártójának oldaláról pótolható.'})
+                return 0, [], []
             self.emit('task_progress', {'task': task_id, 'log': '\n✅ Nincs olyan eszköz, ami Windows-alapdriveren futna és amit érdemes lenne újra felderíttetni.'})
             return 0, [], []
 
@@ -408,9 +451,9 @@ class GuiRebindMixin:
         # egyetlen eszközhöz sem volt csomag. A technikus ebből azt olvasta ki, hogy N
         # drivert fog visszakapni, holott a többségnél a Windows ugyanazt az inbox drivert
         # köti majd vissza (ami nem hiba, csak nem javulás).
-        self.emit('task_progress', {'task': task_id, 'log': f'\n🔧 {len(todo)} eszköz fut Windows-alapdriveren - újra felderíttetjük őket:'})
-        self.emit('task_progress', {'task': task_id, 'log': f'   • {with_pkg} db: VAN hozzá gyári csomag a gépen, ezt próbáljuk rákötni;'})
-        self.emit('task_progress', {'task': task_id, 'log': f'   • {len(todo) - with_pkg} db: nincs a gépen hozzá gyári csomag - ezeknél a Windows választ újra. Ha nincs jobb, ugyanazt kapja vissza (nem lesz rosszabb).'})
+        self.emit('task_progress', {'task': task_id, 'log': f'\n🔧 {len(todo)} eszközhöz VAN gyári csomag a gépen, de a Windows alapdriverén futnak - ezeket felderíttetjük újra, hogy a gyári csomag rájuk kössön:'})
+        if REBIND_ONLY_WITH_PACKAGE and len(candidates) > len(todo):
+            self.emit('task_progress', {'task': task_id, 'log': f'   • további {len(candidates) - len(todo)} db alapdriveres eszközhöz nincs csomag a gépen - azokat NEM bántjuk, mert a Windows úgyis ugyanazt adná vissza (a záró jelentés felsorolja őket).'})
         for i, (d, info, path, orig) in enumerate(todo, 1):
             if self._cancel_flag:
                 break

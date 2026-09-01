@@ -4,6 +4,7 @@ app/ghost_core.py)."""
 # === AUTO-IMPORTS ===
 from app.ghost_core import build_ghost_ps
 from app.ghost_core import parse_ghost_line
+from app.ghost_core import GHOST_REMOVE_TIMEOUT
 # === /AUTO-IMPORTS ===
 
 
@@ -37,6 +38,8 @@ class CliGhostMixin:
                 print("✅")
             elif event == 'fail':
                 print("❌ (valószínűleg védett eszköz)")
+            elif event == 'timeout':
+                print(f"⏱️ (beragadt, kihagyva {GHOST_REMOVE_TIMEOUT} mp után)")
             elif event == 'done':
                 print(data)
 

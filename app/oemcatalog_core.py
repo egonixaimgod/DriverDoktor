@@ -65,6 +65,43 @@ HTTP_TIMEOUT = 60
 # katalógust kérdezné le újra. Napokban.
 CATALOG_CACHE_DAYS = 3
 
+# ---------------------------------------------------------------------------
+# A TELJES GÉPRE SZÓLÓ (Dell/HP) DRIVER PACKEK KI VANNAK KAPCSOLVA
+# (explicit user decision, 2026-09-01: "ez a dell pack baromsag nem is kell bele")
+#
+# MI KÜLÖNBSÉG: ez KIZÁRÓLAG a `whole_machine` packekre vonatkozik - a Dell és a HP
+# több száz MB - 1+ GB méretű, TELJES gépre szóló csomagjaira. A Lenovo per-eszköz
+# csomagjai (`<_PnPID>` hardver-azonosítókkal) VÁLTOZATLANUL futnak: azok célzottak,
+# kicsik (a T580 UltraNav-csomagja 27,4 MB volt), és a T580-nál bizonyítottan ez volt
+# az EGYETLEN forrás, ami a touchpadot megtalálta. Az ő kivételük valódi veszteség lenne.
+#
+# MIÉRT KELLETT KIVENNI - négy, egymástól független ok, mind mérve:
+#  1. STRUKTURÁLISAN NEM TUD DÖNTENI. A `whole_machine` pack `pnpids`-e ÜRES, tehát nincs
+#     eszköze (`dev is None`), amihez a verzióját hasonlítani lehetne - `_oem_already_current`
+#     ezért definíció szerint MINDIG "telepítsd"-et ad. A program tehát nem tudja, és nem is
+#     tudhatja meg, hogy a csomag hoz-e bármi újat: vaktában tölti le, minden gépen, mindig.
+#  2. AZ IDŐ, AMIT ELVISZ. Mérve (2026-09-01, Dell Latitude 5580, Build 288): a
+#     `5580-win10-A13-JRG2W.CAB` letöltése **11 perc 33 mp** volt - a 82 perces lánc
+#     egyhetede -, majd a kicsomagolás azonnal elbukott (lásd a 3. pontot), tehát a
+#     teljes 11,5 perc tiszta veszteség lett. A HP-nál ugyanez már dokumentálva volt:
+#     az `sp92706` LÁBANKÉNT ~7 percet vitt el, amíg az `oem_done` mankó meg nem született.
+#  3. AMIT LETÖLTÖTT, AZT KI SEM TUDTA CSOMAGOLNI. A Dell whole-machine packja `.CAB`,
+#     az `extract_vendor_package` viszont mind a 4 kapcsolókészletével önkicsomagoló
+#     `.exe`-t feltételez -> `[WinError 193] %1: nem Win32 alkalmazás`, négyszer. Ez a hiba
+#     minden Dell gépen, minden láncon elsült volna.
+#  4. AMIT HOZNA, AZT A KATALÓGUS ÚGYIS HOZZA. Ugyanabban a futásban a Microsoft Update
+#     Catalog 16 drivert telepített (chipset, hang, LAN, Wi-Fi, videó, ME, I2C) - célzottan,
+#     HWID alapján, verzió-ellenőrzéssel és kötés-vizsgálattal. A gépgyártói pack ezeket
+#     egy régebbi, egybegyúrt kiadásban tartalmazza.
+#
+# Asztali/összerakott gépekre amúgy sincs ilyen pack, tehát ez a bolt bevételének nagy
+# részét eleve nem érintette.
+#
+# HA VALAHA VISSZA KELL: ezt az egy sort kell True-ra állítani - a providerek, az
+# illesztés és a kicsomagolás kódja érintetlenül megmaradt. Ilyenkor viszont a 3. pont
+# CAB-hibáját is javítani kell, különben Dell gépen ismét 11 perc menne a semmibe.
+INSTALL_WHOLE_MACHINE_PACKS = False
+
 # A gyártói önkicsomagoló exe-k kapcsolói. A Lenovo a leírójában meg is adja; a többinél
 # ez a lánc a próbálkozási sorrend. MINDEGYIK csak KICSOMAGOL, nem telepít - ez a modul
 # soha nem futtat gyártói telepítőt (lásd a fenti indoklást).
@@ -543,6 +580,16 @@ def find_oem_packages(machine, run_fn, log=None):
         logging.info("[OEM] Ehhez a géphez nincs gyártói katalógus-szolgáltató "
                      "(a WU és a Microsoft-katalógus természetesen fut rá).")
         return []
+    # A Dell/HP szolgáltató KIZÁRÓLAG teljes gépre szóló packet ad (mindkettőnél
+    # `pnpids: []` + `whole_machine: True`), tehát kikapcsolt állapotban már a
+    # katalógus LETÖLTÉSÉT is megspóroljuk - nem csak a telepítést. A Lenovo nem
+    # érintett: ő per-eszköz, hardver-azonosítós csomagokat ad.
+    if vendor in ('dell', 'hp') and not INSTALL_WHOLE_MACHINE_PACKS:
+        logging.info(f"[OEM] A(z) {vendor} csak TELJES GÉPRE szóló driver packet kínál, "
+                     f"az pedig ki van kapcsolva (INSTALL_WHOLE_MACHINE_PACKS=False) - "
+                     f"a katalógust le sem kérdezzük. A WU, a Microsoft-katalógus és a "
+                     f"GPU-gyártói ág változatlanul fut erre a gépre.")
+        return []
     try:
         if vendor == 'lenovo':
             return lenovo_packages(machine, log)
@@ -639,6 +686,14 @@ def match_packages_to_devices(packages, devices, allow_firmware=False):
             # driverek MIND megadják a hardver-azonosítóikat (mérve: 56-ból 45), tehát ott
             # a hiányuk azt jelenti, hogy ez nem driver - segédprogram vagy firmware-eszköz.
             if pkg.get('whole_machine'):
+                # VÉDŐHÁLÓ. A providerek szintjén már nem is jönnek létre ilyen csomagok
+                # (lásd find_oem_packages), de ha valaha új szolgáltató kerül be, az itt
+                # akad fenn - nem a telepítőnél, több száz MB letöltése UTÁN.
+                if not INSTALL_WHOLE_MACHINE_PACKS:
+                    dropped['teljes-gép-pack'] = dropped.get('teljes-gép-pack', 0) + 1
+                    logging.info(f"[OEM] KIHAGYVA (teljes gépre szóló driver pack, ki van "
+                                 f"kapcsolva): {pkg.get('title')} [{pkg.get('category')}]")
+                    continue
                 out.append((pkg, None))
             else:
                 dropped['nincs-hwid'] += 1
