@@ -13,6 +13,7 @@ Telepítőt NEM tölt le és NEM futtat - link-out, mint az AMD/Intel kártyákn
 Minden lépés hibatűrő: hiba esetén a kártya egyszerűen nem jelenik meg."""
 
 # === AUTO-IMPORTS ===
+import os
 import json
 import logging
 import urllib.parse
@@ -128,3 +129,23 @@ class GuiOemDriversMixin:
                                           'note': note, 'url': url, 'title': title, 'desc': desc})
         except Exception as e:
             logging.warning(f"[OEM] Gyártói oldal ajánló hiba (nem kritikus): {e}")
+
+    def open_vendor_driver_page(self, url):
+        """A gyártói letöltőoldal megnyitása az alapértelmezett böngészőben - csak
+        http(s) URL-t fogadunk el (a JS-ből jön, de védekezünk).
+
+        ITT ÉL, MERT A VIDEOKÁRTYA-ÁG MEGSZŰNT (2026-09-02): korábban az
+        `app/gui/vendorgpu.py`-ban volt, de azt a modult (az NVIDIA-val együtt) töröltük.
+        Ez a metódus viszont NEM GPU-specifikus - a gép/alaplap gyártójának driver-oldalát
+        nyitó kártya (`oem_driver_info` -> ui.html: openVendorPage) is ezt hívja, tehát a
+        modul törlésével némán eltört volna a link-gomb."""
+        logging.info(f"[API] open_vendor_driver_page({url})")
+        u = str(url or '')
+        if not (u.startswith('https://') or u.startswith('http://')):
+            return False
+        try:
+            os.startfile(u)
+            return True
+        except Exception as e:
+            logging.error(f"[OEM] Oldal megnyitási hiba: {e}")
+            return False

@@ -929,6 +929,18 @@ class GuiAutofixMixin:
             self.emit('task_progress', {'task': task_id, 'log': 'ℹ️ Katalógus-zárókör elhalasztva az újraindítás utánra.'})
             return total_installed_in_session
 
+        # GYORS MÓD: a technikus kikapcsolta a Microsoft Update Catalog keresést, tehát a
+        # lánc CSAK a WU Agentre támaszkodik (explicit user decision, 2026-09-02).
+        # KIMONDJUK A KÉPERNYŐN IS, nem csak a naplóban: ha utólag kiderül, hogy egy eszköz
+        # driver nélkül maradt, a technikusnak látnia kell, hogy ez a kapcsoló következménye
+        # volt, nem a program hibája. A záró egészségjelentés amúgy is felsorolja, mi maradt
+        # Windows-alapdriveren.
+        if not getattr(self, '_autofix_use_catalog', True):
+            logging.info("[AUTOFIX] A katalógus-zárókör KIHAGYVA (gyors mód, --no-catalog).")
+            self.emit('task_progress', {'task': task_id, 'log': '\n⏭️ Katalógus-keresés kihagyva (gyors mód) - a lánc csak a Windows Update-ből telepít.'})
+            self.emit('task_progress', {'task': task_id, 'log': '   Ha a végén marad Windows-alapdriveres eszköz, futtasd újra a fixet bekapcsolt katalógus-kereséssel.'})
+            return total_installed_in_session
+
         try:
             if not getattr(self, '_cancel_flag', False):
                 res = self._run(["powershell", "-NoProfile", "-Command", WU_PNP_QUERY_PS], encoding='utf-8')
@@ -1097,33 +1109,12 @@ class GuiAutofixMixin:
             self.emit('task_progress', {'task': task_id, 'log': f'⚠️ Katalógus-zárókör hiba (a folyamat megy tovább): {e}'})
 
         # ================================================================
-        # NEGYEDIK FORRÁS: A GÉPGYÁRTÓ SAJÁT KATALÓGUSA
-        #
-        # Van olyan gyári driver, amit sem a WU Agent, sem a Microsoft Update Catalog nem
-        # szállít, mert a gépgyártó a saját frissítő-csatornáján adja (Lenovo Vantage,
-        # Dell Command Update, HP Image Assistant). Ez a kör onnan szerzi meg - NULLÁRÓL
-        # letöltve, nem a gép régi driverét visszatéve (lásd CLAUDE.md: re-driver from ZERO).
-        #
-        # A SORREND SZÁNDÉKOS: a WU és a Microsoft-katalógus UTÁN fut, tehát csak arra
-        # marad munkája, amit azok nem oldottak meg, és nem ír felül frissebb drivert.
-        #
-        # NEM UNIVERZÁLIS FELTÉTEL: ha a géphez nincs gyártói katalógus (Acer, összerakott
-        # PC), a kör üresen tér vissza, és a gép semmit nem veszít - az univerzális
-        # forrásokat (WU + Microsoft-katalógus + GPU-gyártók) addigra már megkapta.
-        try:
-            devices_for_oem = locals().get('devices_now') or []
-            if not devices_for_oem:
-                res_p = self._run(["powershell", "-NoProfile", "-Command", WU_PNP_QUERY_PS], encoding='utf-8')
-                try:
-                    devices_for_oem = _filter_wu_scan_devices(json.loads(res_p.stdout or '[]'))
-                except Exception as e:
-                    logging.warning(f"[OEM] Az eszközlista nem olvasható a gyártói körhöz: {e}")
-                    devices_for_oem = []
-            oem_installed, _oem_skipped = self._oem_catalog_round(devices_for_oem, task_id=task_id)
-            total_installed_in_session += oem_installed
-        except Exception as e:
-            logging.warning(f"[OEM] A gyártói katalógus-kör hiba (nem kritikus): {e}", exc_info=True)
-
+        # A GÉPGYÁRTÓI (Lenovo/Dell/HP) KATALÓGUS-KÖR ITT VOLT, ÉS TELJESEN KIKERÜLT
+        # (explicit user decision, 2026-09-02): *"a gyártói katalógust vedd ki teljesen a
+        # kódból... felesleges, mire az lefut, már megvan szinte minden driver az adott
+        # géphez"*. A modulok (`app/oemcatalog_core.py`, `app/gui/oemcatalog.py`) is
+        # törölve; a gépazonosítás - amit a napló-feltöltés is használ - `app/machine_core.py`.
+        # NE ÉLESZD ÚJRA egy "hátha segít" alapon: a mért indoklás a CLAUDE.md-ben van.
         return total_installed_in_session
 
     # ================================================================
@@ -1166,6 +1157,8 @@ class GuiAutofixMixin:
         # feladat argumentuma is a megszokott viselkedést adja.
         if not getattr(self, '_autofix_wu_pause', True) and '--no-wu-pause' not in resume_flag:
             resume_flag += ' --no-wu-pause'
+        if not getattr(self, '_autofix_use_catalog', True) and '--no-catalog' not in resume_flag:
+            resume_flag += ' --no-catalog'
         # CLI MÓD TOVÁBBVITELE (2026-08-29). A lábak külön processzek, és a `--cli` nélkül
         # az ütemezett feladat a GRAFIKUS felületet indítaná el - pont azon a régi gépen,
         # ahol a technikus azért választotta a CLI-t, mert a GUI használhatatlan. Onnantól
@@ -2327,11 +2320,11 @@ class GuiAutofixMixin:
 
     def run_autofix(self, skip_printer_drivers=True, allow_storage_drivers=False, allow_firmware=False,
                     wifi_mode=False, keep_packages=None, rebuild_wifi_driver=True,
-                    pause_windows_update=True):
+                    pause_windows_update=True, use_catalog=True):
         logging.info(f"[API] run_autofix() indítása (skip_printer_drivers={skip_printer_drivers}, "
                      f"allow_storage_drivers={allow_storage_drivers}, allow_firmware={allow_firmware}, "
                      f"wifi_mode={wifi_mode}, rebuild_wifi_driver={rebuild_wifi_driver}, "
-                     f"pause_windows_update={pause_windows_update}, "
+                     f"pause_windows_update={pause_windows_update}, use_catalog={use_catalog}, "
                      f"keep_packages={len(keep_packages or [])} db)")
         if self.target_os_path:
             self.emit('toast', {'message': 'Az 1 kattintásos fix csak az Élő (jelenlegi) rendszeren futtatható le biztonságosan!', 'type': 'error'})
@@ -2352,6 +2345,8 @@ class GuiAutofixMixin:
                 # Itt a TILTÁS utazik jelzőként (alapértelmezés: szüneteltetünk), ezért
                 # negálva olvassuk vissza - lásd GuiBaseMixin.__init__: self.no_wu_pause.
                 wu_pause = not getattr(self, 'no_wu_pause', False)
+                # Ugyanaz a negált minta (alapértelmezés: keresünk a katalógusban).
+                use_cat = not getattr(self, 'no_catalog', False)
             else:
                 skip_printers = skip_printer_drivers
                 allow_storage = bool(allow_storage_drivers)
@@ -2359,6 +2354,7 @@ class GuiAutofixMixin:
                 wifi = bool(wifi_mode)
                 rebuild_wifi = bool(rebuild_wifi_driver)
                 wu_pause = bool(pause_windows_update)
+                use_cat = bool(use_catalog)
             # A belépési log a JS-paramétert írja ki, ami a resume lábakon a frontend
             # ALAPÉRTÉKE (mindig True), nem a felhasználó választása - egy nyomtató-panasz
             # kivizsgálásánál pont ez a mező vinne félre. Ezért a FELOLDOTT értéket is
@@ -2385,9 +2381,12 @@ class GuiAutofixMixin:
             self._autofix_allow_firmware = allow_fw
             logging.info(f"[AUTOFIX] Záró Windows Update-szüneteltetés (~10 év): {wu_pause} "
                          f"(forrás: {'sys.argv --no-wu-pause' if (is_resume_step1 or is_resume_mode) else 'GUI dialógus'})")
+            logging.info(f"[AUTOFIX] Microsoft Update Catalog keresés: {use_cat} "
+                         f"(forrás: {'sys.argv --no-catalog' if (is_resume_step1 or is_resume_mode) else 'GUI dialógus'})")
             self._autofix_wifi_mode = wifi
             self._autofix_rebuild_wifi = bool(rebuild_wifi) and wifi
             self._autofix_wu_pause = wu_pause
+            self._autofix_use_catalog = use_cat
 
             task_title = '1 Katt. Fix (RESTART UTÁNI LÁNC FOLYTATÁSA!)' if (is_resume_mode or is_resume_step1) else '1 Kattintásos Driver Javítás és Frissítés'
             self.emit('task_start', {'task': 'autofix', 'title': task_title})
@@ -2743,10 +2742,19 @@ class GuiAutofixMixin:
                 # ez lefutott... amikor visszajovok a kavezasrol minden hibatlanul mukodjon
                 # a fix utan egybol."
                 #
-                # A _fix_driver_regressions (fent) csak azt kapja el, ami a fix ELŐTT gyári
-                # driveren futott és most alapdriveren van. Ez a kör ennél tágabb: MINDEN
-                # alapdriveres eszközt újra felderíttet a Windowszal, hogy ha van hozzá gyári
-                # csomag a gépen, azt kapja meg. Ugyanaz a mag fut, mint a kézi gombban
+                # MI A KÜLÖNBSÉG A _fix_driver_regressions-HÖZ KÉPEST (a kettő ÁTFED, de
+                # egyik sem váltja ki a másikat - 2026-09-02-i pontosítás):
+                #   * a regresszió-javítás kulcsa a fix ELŐTTI állapot: ami akkor gyári
+                #     driveren futott és most alapdriveren van. Cserébe INGYEN VAN - a
+                #     már úgyis következő ülepítő újraindításra ül rá, nem kér sajátot.
+                #   * ez a kör a JELENLEGI állapotból dolgozik: minden alapdriveres eszköz,
+                #     amihez VAN stage-elt gyári csomag a gépen (REBIND_ONLY_WITH_PACKAGE).
+                #     Így elkapja azt is, ami a fix előtt IS alapdriveren futott - tehát
+                #     regressziónak sosem látszana -, viszont EGY EXTRA ÚJRAINDÍTÁST kér.
+                #   * amit CSAK a regresszió-javítás lát: az az eszköz, aminek a csomagját a
+                #     lánc törölte és nem jött vissza semmi. Ott nincs mit rákötni, de a
+                #     jelentés név szerint kimondja - ez a kör azt némán kihagyná.
+                # Ugyanaz a mag fut, mint a kézi gombban
                 # (app/gui/rebind.py: _rebind_sweep) - két külön példány előbb-utóbb más
                 # eszközöket érintene, és a terepi naplóból nem lehetne megmondani, melyik
                 # futott.

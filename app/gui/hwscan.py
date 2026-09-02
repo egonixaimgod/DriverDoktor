@@ -197,7 +197,7 @@ CATALOG_FALLBACK_MAX_BYTES = 2 * 1024 * 1024 * 1024
 class GuiHwScanMixin:
     """Driver Keresés és Telepítés nézet: hardver-szken, WU/Catalog keresés, kiválasztott driverek telepítése. A DriverToolApi része (összerakás: app/gui/api.py)."""
 
-    def start_hw_scan(self, deep=True, allow_storage=False, allow_firmware=False):
+    def start_hw_scan(self, deep=True, allow_storage=False, allow_firmware=False, use_catalog=True):
         """Hardver-szken. deep=True (alapértelmezés): a Microsoft Update Catalogot MINDEN
         olyan eszközre megkérdezzük, amire a WU Agent nem adott ajánlatot - nem csak a
         hibakódosakra és a Windows-alapdriveren futókra. Lassabb (eszközönként max 4 HTTP
@@ -208,7 +208,16 @@ class GuiHwScanMixin:
         osztályok kapcsolói, UGYANÚGY ALAPBÓL KI, mint az AutoFix megerősítő dialógusán.
         Korábban a kézi szken MINDIG kereste őket (piros jelöléssel, előre be nem jelölve);
         most a technikus dönti el, hogy egyáltalán bekerüljenek-e a keresésbe. Bekapcsolva a
-        régi viselkedés jön vissza: benne vannak, de PIROSAN és ELŐRE BE NEM JELÖLVE."""
+        régi viselkedés jön vissza: benne vannak, de PIROSAN és ELŐRE BE NEM JELÖLVE.
+
+        use_catalog (2026-09-02, explicit user decision - "gyors mód"): alapból BE. Kikapcsolva
+        a szken CSAK a WU Agentet kérdezi meg, és a Microsoft Update Catalog mindhárom ága
+        (hibakódos + Windows-alapdriveres + mélykeresés) kimarad. Ez a szken leghosszabb
+        szakasza - mérve 90+ eszközön 10 szálon ~1,5-2 perc, a találatok telepítésével együtt
+        jóval több -, de VELE EGYÜTT VÉSZ EL a katalógus-only találat is: azon a Dell-en,
+        amiről a mérés készült, a WU időtúllépésbe futott, és mind a 16 driver a katalógusból
+        jött. Ha a WU elhasal ÉS a katalógus ki van kapcsolva, a szken semmit nem talál -
+        ezt ilyenkor ki is mondjuk a felületen, hogy ne tűnjön hibának."""
         logging.info(f"[API] start_hw_scan(deep={deep}, allow_storage={allow_storage}, "
                      f"allow_firmware={allow_firmware}) hívás")
         deep = bool(deep)
@@ -440,7 +449,21 @@ class GuiHwScanMixin:
                 if generic_devs:
                     logging.info(f"[CATALOG] Generikus driveren futó eszközök: {[d['name'] for d in generic_devs]}")
 
-                if not wu_api_success:
+                if not use_catalog:
+                    # GYORS MÓD: a katalógus mindhárom ága kimarad. Ha a WU is elhasalt,
+                    # akkor NINCS forrás - ezt ki kell mondani, különben a technikus a
+                    # program hibájának hiszi az üres eredményt.
+                    logging.info("[CATALOG] A katalógus-keresés KIHAGYVA (gyors mód, use_catalog=False).")
+                    if not wu_api_success:
+                        self.wu_api_mode = False
+                        self.emit('hw_scan_progress', {
+                            'status': '6/6 · Katalógus kihagyva (gyors mód)',
+                            'detail': 'A Windows Update NEM válaszolt, a katalógus pedig ki van kapcsolva - így most nincs forrás.'})
+                    else:
+                        self.emit('hw_scan_progress', {
+                            'status': '6/6 · Katalógus kihagyva (gyors mód)',
+                            'detail': 'Csak a Windows Update találatai látszanak.'})
+                elif not wu_api_success:
                     # Teljes katalógus-fallback: a WU API elhasalt, minden eszközt a
                     # katalógusban keresünk.
                     self.wu_api_mode = False
@@ -584,21 +607,32 @@ class GuiHwScanMixin:
                 self.emit('hw_scan_result', {
                     'pool': self.hw_updates_pool, 'installed': self._hw_installed_devs,
                     'problems': problems, 'sys_info': final_sys, 'time': time_str,
-                    'skipped_risky': skipped_note, 'inbox': inbox
+                    'skipped_risky': skipped_note, 'inbox': inbox,
+                    # A felület ebből tudja kiírni, hogy a szűk eredmény a GYORS MÓD
+                    # következménye, nem hiány. `wu_failed` mellé téve különösen fontos:
+                    # a kettő együtt azt jelenti, hogy egyik forrás sem futott.
+                    'catalog_skipped': (not use_catalog),
+                    'wu_failed': (not wu_api_success),
                 })
                 self._hw_loaded = True
 
-                # Gyári GPU-driver ellenőrzések (app/gui/nvidia.py + vendorgpu.py): a WU
-                # hónapokkal lemarad a gyári driverektől - NVIDIA-nál letöltés+csendes
-                # telepítés, AMD/Intel-nél verzió-összevetés + hivatalos oldal link-out.
-                # Mindnek saját hibakezelése van, a szken eredményét sosem boríthatják.
-                self.emit('hw_scan_progress', {'status': 'Gyári (NVIDIA/AMD/Intel) driverek ellenőrzése',
-                                               'detail': 'A gyártók szervereinek kérdezése — pár másodperc.',
-                                               'determinate': False})
-                self._check_nvidia_driver()
-                self._check_amd_driver()
-                self._check_intel_driver()
-                # OEM (Dell/Lenovo/HP) gépre szabott driver-oldal kártya (link-out).
+                # A VIDEOKÁRTYA-GYÁRTÓI ELLENŐRZÉSEK (NVIDIA/AMD/Intel) ITT VOLTAK, ÉS
+                # TELJESEN KIKERÜLTEK (explicit user decision, 2026-09-02): *"ez a
+                # videokartya cucc nem is kell a programba, a program amugyis felrak egy
+                # videokartya drivert igyis ugyis"*. Törölve `app/gui/nvidia.py` és
+                # `app/gui/vendorgpu.py`, a mixinek mindkét API-osztályból, a CLI
+                # menüpontjai. AMIT EZZEL ELENGEDTÜNK, TUDVA: az NVIDIA-ág nem csak
+                # linkelt, hanem le is töltötte és csendben telepítette a gyári drivert,
+                # ami jellemzően hónapokkal újabb a WU-énál (mért: GT 710 -> 475.14,
+                # RTX 3060 -> 610.74) - NVIDIA-s gépen mostantól a WU/katalógus verziója
+                # marad. Az Intel-ág amúgy is halott volt: az intel.com 403 Forbidden-t
+                # ad minden úton (mérve 2026-09-02, PowerShell-fallbackkel is).
+                # Az `open_vendor_driver_page` NEM veszett el: átkerült az oemdrivers.py-ba,
+                # mert a gép/alaplap-gyártói link-kártya is azt hívja.
+                #
+                # OEM (Dell/Lenovo/HP) gépre szabott driver-oldal kártya (link-out) - MARAD:
+                # ez nem videokártya, hanem a gép/alaplap gyártójának letöltőoldala, és a
+                # záró jelentés is erre hivatkozik, ha egy eszköznek nincs máshonnan drivere.
                 self._check_oem_driver_page()
             except Exception as e:
                 logging.error(f"hw_scan crash: {e}")

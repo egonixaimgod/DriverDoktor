@@ -878,7 +878,14 @@ td input[type="checkbox"]{accent-color:var(--accent);width:16px;height:16px;curs
           </div>
           <div style="margin:-4px 0 10px">
             <label style="display:inline-flex;align-items:center;gap:8px;font-size:12px;color:var(--text2);cursor:pointer"
-                   title="Bekapcsolva a program a Microsoft Update Catalogot MINDEN eszközre megkérdezi, nem csak a hibásakra és a Windows-alapdriveren futókra. Így egy régi, de működő gyári driver is frissülhet - a Windows Update ilyet nem ajánl fel. Cserébe a szken 1-2 perccel hosszabb.">
+                   title="Alapból BE. Kikapcsolva a szken CSAK a Windows Update ügynökét kérdezi meg, a Microsoft Update Catalogot egyáltalán nem - ez a GYORS MÓD. Sokkal gyorsabb, de a katalógus-only találatok elvesznek: egy mért Dell laptopon a Windows Update időtúllépésbe futott, és mind a 16 driver a katalógusból jött volna. Akkor kapcsold ki, ha csak egy gyors ellenőrzést akarsz.">
+              <input type="checkbox" id="hw-use-catalog" checked>
+              <span>🗂️ Microsoft Update Catalog keresés (kikapcsolva: <b>gyors mód</b>, csak Windows Update)</span>
+            </label>
+          </div>
+          <div style="margin:-4px 0 10px">
+            <label style="display:inline-flex;align-items:center;gap:8px;font-size:12px;color:var(--text2);cursor:pointer"
+                   title="Bekapcsolva a program a Microsoft Update Catalogot MINDEN eszközre megkérdezi, nem csak a hibásakra és a Windows-alapdriveren futókra. Így egy régi, de működő gyári driver is frissülhet - a Windows Update ilyet nem ajánl fel. Cserébe a szken 1-2 perccel hosszabb. (Csak akkor számít, ha a katalógus-keresés fent BE van kapcsolva.)">
               <input type="checkbox" id="hw-deep-scan" checked>
               <span>🌐 Mély keresés (a katalógus minden eszközre - lassabb, de a régi gyári drivereket is frissíti)</span>
             </label>
@@ -923,9 +930,6 @@ td input[type="checkbox"]{accent-color:var(--accent);width:16px;height:16px;curs
             <div id="hw-status" style="color:var(--text2);font-size:12px;margin-top:6px"></div>
           </div>
           <div id="hw-rescan-offer"></div>
-          <div id="nvidia-card" style="display:none"></div>
-          <div id="amd-card" style="display:none"></div>
-          <div id="intel-card" style="display:none"></div>
           <div id="oem-card" style="display:none"></div>
           <div id="hw-problems"></div>
           <!-- Windows-alapdriveren maradt eszközök: a szken legcsendesebb kimenetele -
@@ -1556,6 +1560,11 @@ td input[type="checkbox"]{accent-color:var(--accent);width:16px;height:16px;curs
         <span class="toggle-track"></span>
         ⏸️ Windows Update teljes szüneteltetése a végén (~10 év) – a funkciófrissítés ellen
       </label>
+      <label class="toggle" id="mc-use-catalog-row" style="display:none;margin-top:10px" title="Alapból BE. Kikapcsolva a lánc CSAK a Windows Update ügynökéből telepít, a Microsoft Update Catalogot egyáltalán nem kérdezi meg - ez a GYORS MÓD. MÉRVE egy Dell Latitude 5580-on: a katalógus-körök összesen ~26 percet vittek el a 82 perces láncból, tehát a kikapcsolásuk nagyjából ennyivel rövidít. FIGYELEM: ugyanazon a gépen a Windows Update keresés IDŐTÚLLÉPÉSBE futott, és mind a 16 driver a katalógusból jött - gyors módban az a gép NULLA drivert kapott volna. Akkor kapcsold ki, ha a gép már többnyire fel van driverezve, és csak egy gyors átfutás kell.">
+        <input type="checkbox" id="mc-use-catalog" checked>
+        <span class="toggle-track"></span>
+        🗂️ Microsoft Update Catalog keresés – kikapcsolva <b>GYORS MÓD</b> (~20-25 perccel rövidebb, de kevesebbet talál)
+      </label>
       <div id="mc-note-row" style="display:none;margin-top:14px">
         <textarea id="mc-note-input" rows="3" placeholder="Pl.: időszakos fagyás játék közben, gyanús kattogó hang a gépből..." style="width:100%;padding:10px 12px;border-radius:var(--r-sm);border:1px solid var(--glass-border);background:rgba(20,12,38,0.6);color:var(--text);font:13px var(--font);resize:vertical"></textarea>
       </div>
@@ -1838,15 +1847,6 @@ window.handlePyEvent = function(payload) {
       break;
     case 'hw_scan_result':
       onHwScanResult(data);
-      break;
-    case 'nvidia_driver_info':
-      renderNvidiaCard(data);
-      break;
-    case 'amd_driver_info':
-      renderVendorGpuCard('amd-card', '🔴 AMD', data);
-      break;
-    case 'intel_driver_info':
-      renderVendorGpuCard('intel-card', '🔵 Intel', data);
       break;
     case 'oem_driver_info':
       renderOemCard(data);
@@ -2674,12 +2674,6 @@ async function startHwScan() {
   document.getElementById('hw-problems').innerHTML = '';
   const _ib = document.getElementById('hw-inbox'); if (_ib) _ib.innerHTML = '';
   document.getElementById('hw-rescan-offer').innerHTML = '';
-  document.getElementById('nvidia-card').style.display = 'none';
-  document.getElementById('nvidia-card').innerHTML = '';
-  document.getElementById('amd-card').style.display = 'none';
-  document.getElementById('amd-card').innerHTML = '';
-  document.getElementById('intel-card').style.display = 'none';
-  document.getElementById('intel-card').innerHTML = '';
   document.getElementById('oem-card').style.display = 'none';
   document.getElementById('oem-card').innerHTML = '';
   hwScanStart();
@@ -2694,9 +2688,12 @@ async function startHwScan() {
     const deepEl = document.getElementById('hw-deep-scan');
     const stEl = document.getElementById('hw-allow-storage');
     const fwEl = document.getElementById('hw-allow-firmware');
+    /* Katalógus-keresés (gyors mód): alapból BE, mint a Pythonban. */
+    const catEl = document.getElementById('hw-use-catalog');
     await api().start_hw_scan(deepEl ? !!deepEl.checked : true,
                               stEl ? !!stEl.checked : false,
-                              fwEl ? !!fwEl.checked : false);
+                              fwEl ? !!fwEl.checked : false,
+                              catEl ? !!catEl.checked : true);
   } catch (e) {
     hwScanStop();
     document.getElementById('hw-status').textContent = '❌ Hiba: ' + e;
@@ -3036,62 +3033,19 @@ function showRescanOffer(data) {
     + '</div>';
 }
 
-/* NVIDIA gyári driver kártya - a szken végén érkező nvidia_driver_info event tölti. */
-function renderNvidiaCard(data) {
-  const card = document.getElementById('nvidia-card');
-  if (!data || !data.gpu) { card.style.display = 'none'; return; }
-  if (data.update_available) {
-    card.innerHTML = '<div style="border:1px solid rgba(118,185,0,.45);background:rgba(118,185,0,.08);'
-      + 'border-radius:10px;padding:10px 14px;margin-bottom:10px;display:flex;align-items:center;gap:12px;flex-wrap:wrap">'
-      + '<span style="font-size:20px">🎮</span>'
-      + '<div style="flex:1;min-width:200px"><div style="font-weight:700">'+esc(data.gpu)+' — új GYÁRI driver érhető el!</div>'
-      + '<div style="font-size:12px;color:var(--text3)">Telepítve: '+esc(data.installed)+' → NVIDIA legfrissebb: <b style="color:var(--green)">'+esc(data.latest)+'</b>'
-      + ' <span title="A Windows Update a videókártya-drivereknél hónapokkal lemaradhat - ez a hivatalos nvidia.com-os legfrissebb WHQL driver.">ⓘ</span></div></div>'
-      + '<button class="btn btn-success" onclick="installNvidiaDriver()">⬇ Letöltés és csendes telepítés</button>'
-      + '</div>';
-    card.style.display = 'block';
-  } else {
-    card.innerHTML = '<div style="border:1px solid rgba(118,185,0,.25);background:rgba(118,185,0,.04);'
-      + 'border-radius:10px;padding:8px 14px;margin-bottom:10px;font-size:12px;color:var(--text2)">'
-      + '🎮 '+esc(data.gpu)+': a gyári driver naprakész ('+esc(data.installed)+').</div>';
-    card.style.display = 'block';
-  }
-}
-async function installNvidiaDriver() {
-  try { await api().install_nvidia_driver(); }
-  catch (e) { toast('NVIDIA telepítési hiba: ' + e, 'error'); }
-}
+/* A VIDEOKÁRTYA-GYÁRTÓI KÁRTYÁK (NVIDIA/AMD/Intel) INNEN KIKERÜLTEK (2026-09-02,
+   explicit user decision) - a Python-oldal is törölve (app/gui/nvidia.py, vendorgpu.py).
 
-/* AMD/Intel gyári driver kártya (amd_driver_info / intel_driver_info event): itt nincs
-   automata telepítés - a verzió-összevetés után a HIVATALOS letöltőoldalt nyitjuk meg
-   (az AMD/Intel a közvetlen exe-letöltést blokkolja, link-out a megbízható út). */
-function renderVendorGpuCard(cardId, vendorLabel, data) {
-  const card = document.getElementById(cardId);
-  if (!card) return;
-  if (!data || !data.gpu) { card.style.display = 'none'; return; }
-  if (data.update_available) {
-    card.innerHTML = '<div style="border:1px solid rgba(118,185,0,.45);background:rgba(118,185,0,.08);'
-      + 'border-radius:10px;padding:10px 14px;margin-bottom:10px;display:flex;align-items:center;gap:12px;flex-wrap:wrap">'
-      + '<span style="font-size:20px">🎮</span>'
-      + '<div style="flex:1;min-width:200px"><div style="font-weight:700">'+esc(data.gpu)+' — új GYÁRI driver érhető el!</div>'
-      + '<div style="font-size:12px;color:var(--text3)">Telepítve: '+esc(data.installed)+' → '+vendorLabel+' legfrissebb: <b style="color:var(--green)">'+esc(data.latest)+'</b>'
-      + (data.date ? ' ('+esc(data.date)+')' : '')
-      + ' <span title="A Windows Update a videókártya-drivereknél hónapokkal lemaradhat. A gomb a hivatalos gyártói letöltőoldalt nyitja meg - onnan töltsd le és futtasd a telepítőt.">ⓘ</span></div></div>'
-      + '<button class="btn btn-success" onclick="openVendorPage(\''+esc(data.url||'')+'\')">🌐 Hivatalos letöltőoldal</button>'
-      + '</div>';
-    card.style.display = 'block';
-  } else {
-    card.innerHTML = '<div style="border:1px solid rgba(118,185,0,.25);background:rgba(118,185,0,.04);'
-      + 'border-radius:10px;padding:8px 14px;margin-bottom:10px;font-size:12px;color:var(--text2)">'
-      + '🎮 '+esc(data.gpu)+': a gyári driver naprakész ('+esc(data.installed)+').</div>';
-    card.style.display = 'block';
-  }
-}
+   Az openVendorPage() viszont MARAD, és ez nem formalitás: a gép/alaplap-gyártói kártya
+   (renderOemCard, lentebb) hívja a link-gombjában, az pedig nem videokártya. A törléskor
+   ez a függvény a két eltávolított render-függvény KÖZÖTT állt, és először velük együtt
+   esett ki - a hiba abban nyilvánult meg, hogy az OEM-kártya gombja némán semmit nem
+   csinált volna. A Python-párja (open_vendor_driver_page) ugyanezért költözött át a
+   vendorgpu.py-ból az oemdrivers.py-ba. */
 async function openVendorPage(url) {
   try { await api().open_vendor_driver_page(url); }
   catch (e) { toast('Oldal megnyitási hiba: ' + e, 'error'); }
 }
-
 /* Gyártói driver-oldal kártya (oem_driver_info event): márkás gépnél (Dell/Lenovo/HP)
    a gépre szabott support-oldal, összerakott gépnél az ALAPLAP gyártójának oldala.
    A címet/leírást a Python küldi (title/desc) - a régi OEM-szöveg ("gép", "dokkoló")
@@ -3158,6 +3112,9 @@ async function startAutoFix(skipConfirm = false) {
   // Alapértelmezés: BE (a bolt gyakorlata). Resume lábon a Python a sys.argv-ből olvassa
   // vissza (--no-wu-pause), itt csak az első láb alapértéke kell.
   let wuPause = true;
+  // Katalogus-kereses: alapbol BE. Resume labon a Python a sys.argv-bol olvassa vissza
+  // (--no-catalog), itt csak az elso lab alaperteke kell.
+  let useCatalog = true;
   let keepPackages = [];
   if (!ok) {
     const res = await showAutoFixConfirm('1 Kattintásos Driver Fix', 'Megerősíted a teljes automatikus javítás (visszaállítási pont, driver törlés és újratelepítés) indítását?');
@@ -3168,13 +3125,14 @@ async function startAutoFix(skipConfirm = false) {
     wifiMode = res.wifiMode;
     rebuildWifi = res.rebuildWifi !== false;
     wuPause = res.wuPause !== false;
+    useCatalog = res.useCatalog !== false;
     keepPackages = res.keepPackages || [];
   }
   if (ok) {
     document.getElementById('btn-autofix').disabled = true;
     document.getElementById('btn-autofix').textContent = '⏳ FOLYAMATBAN...';
     try {
-      await api().run_autofix(skipPrinters, allowStorage, allowFirmware, wifiMode, keepPackages, rebuildWifi, wuPause);
+      await api().run_autofix(skipPrinters, allowStorage, allowFirmware, wifiMode, keepPackages, rebuildWifi, wuPause, useCatalog);
     } catch (e) {
       toast('Autofix hiba: ' + e, 'error');
       document.getElementById('btn-autofix').disabled = false;
@@ -4505,7 +4463,7 @@ function delSetLoading(on) {
   // semmilyen hatása nincs), de amíg az elemzés fut, az Igen gomb úgyis tiltott - egyetlen
   // aktív kapcsoló a kiszürkült oszlopban hibának látszana.
   const ids = ['mc-wifi-mode', 'mc-rebuild-wifi', 'mc-skip-printers', 'mc-allow-storage',
-               'mc-allow-firmware', 'mc-wu-pause', 'mc-del-search', 'mc-del-all', 'mc-del-none'];
+               'mc-allow-firmware', 'mc-wu-pause', 'mc-use-catalog', 'mc-del-search', 'mc-del-all', 'mc-del-none'];
   ids.forEach(id => { const el = document.getElementById(id); if (el) el.disabled = on; });
   // A Wi-Fi újraépítés kapcsolója vezetékes gépen amúgy is tiltott marad - a
   // syncRebuildWifi() dönt róla, ezért az elemzés végén ŐT kérdezzük újra, nem itt.
@@ -4542,12 +4500,15 @@ function showAutoFixConfirm(title, message) {
       // értéke bekapcsolva marad - a Python úgyis csak Wi-Fi módban veszi figyelembe.
       const rebuildWifi = document.getElementById('mc-rebuild-wifi').checked;
       const wuPause = document.getElementById('mc-wu-pause').checked;
+      // GYORS MOD: kikapcsolva a lanc csak a WU Agentbol telepit (--no-catalog).
+      const useCatalog = document.getElementById('mc-use-catalog').checked;
       // Amit a tech kézzel kivett: csak a NEM zárolt sorok számítanak (a zároltakat
       // úgyis a Python védi, és a kettőt nem szabad összekeverni).
       const keep = delPreview
         .filter(d => !delRowForce(d) && delUnchecked.has((d.published || '').toLowerCase()))
         .map(d => ({ published: d.published, original: d.original }));
       document.getElementById('mc-wu-pause-row').style.display = 'none';
+      document.getElementById('mc-use-catalog-row').style.display = 'none';
       document.getElementById('mc-wifi-mode-row').style.display = 'none';
       document.getElementById('mc-rebuild-wifi-row').style.display = 'none';
       document.getElementById('mc-rebuild-wifi-info').style.display = 'none';
@@ -4556,7 +4517,7 @@ function showAutoFixConfirm(title, message) {
       document.getElementById('mc-allow-firmware-row').style.display = 'none';
       document.getElementById('mc-del-panel').style.display = 'none';
       document.getElementById('mc-box').style.maxWidth = '480px';
-      resolve({ ok: val, skipPrinters: skip, allowStorage: storage, allowFirmware: firmware, wifiMode: wifi, rebuildWifi: rebuildWifi, wuPause: wuPause, keepPackages: keep });
+      resolve({ ok: val, skipPrinters: skip, allowStorage: storage, allowFirmware: firmware, wifiMode: wifi, rebuildWifi: rebuildWifi, wuPause: wuPause, useCatalog: useCatalog, keepPackages: keep });
     };
     document.getElementById('mc-title').textContent = title;
     document.getElementById('mc-message').textContent = message;
@@ -4576,6 +4537,11 @@ function showAutoFixConfirm(title, message) {
     // pár nap múlva), a kikapcsolás a tudatos eltérés - nem fordítva.
     document.getElementById('mc-wu-pause').checked = true;
     document.getElementById('mc-wu-pause-row').style.display = 'flex';
+    // KATALOGUS-KERESES: szinten alapbol BE, es minden nyitaskor visszaall. A gyors mod
+    // a tudatos elteres - egy elozo gepen bekapcsolva hagyott gyors mod nem vihetne el
+    // csendben a kovetkezo gep katalogus-drivereit.
+    document.getElementById('mc-use-catalog').checked = true;
+    document.getElementById('mc-use-catalog-row').style.display = 'flex';
     // WI-FI MÓD: a dialógus AZONNAL megjelenik (a hálózat-felismerés PowerShell-hívás,
     // pár másodperc), a pipa és a magyarázó sor utólag frissül. Alapból kikapcsolva
     // nyílik, és csak akkor kapcsol be magától, ha a gép TÉNYLEG Wi-Fin lóg és nincs

@@ -41,14 +41,11 @@ from app.gui.tempclean import GuiTempCleanMixin
 from app.gui.hwscan import GuiHwScanMixin
 from app.gui.wu import GuiWuMixin
 from app.gui.autofix import GuiAutofixMixin
-from app.gui.oemcatalog import GuiOemCatalogMixin
 from app.gui.rebind import GuiRebindMixin
 from app.gui.bitlocker import GuiBitlockerMixin
 from app.gui.report import GuiReportMixin
 from app.gui.storeprint import GuiStorePrintMixin
 from app.gui.blockscript import GuiBlockScriptMixin
-from app.gui.nvidia import GuiNvidiaMixin
-from app.gui.vendorgpu import GuiVendorGpuMixin
 from app.gui.oemdrivers import GuiOemDriversMixin
 from app.gui.display import GuiDisplayMixin
 from app.gui.winact import GuiWinActMixin
@@ -77,9 +74,9 @@ class CliApi(CliBridgeMixin, CliBaseMixin, GuiBaseMixin,
              # GUI feature-mixinek
              GuiDriversMixin, GuiDupDriversMixin, GuiBackupMixin, GuiBcdMixin,
              GuiGhostMixin, GuiTempCleanMixin, GuiHwScanMixin, GuiWuMixin,
-             GuiAutofixMixin, GuiOemCatalogMixin, GuiRebindMixin,
+             GuiAutofixMixin, GuiRebindMixin,
              GuiBitlockerMixin, GuiReportMixin, GuiStorePrintMixin,
-             GuiBlockScriptMixin, GuiNvidiaMixin, GuiVendorGpuMixin,
+             GuiBlockScriptMixin,
              GuiOemDriversMixin, GuiDisplayMixin, GuiWinActMixin, GuiLogsMixin,
              GuiStressMixin, GuiStressAutomationMixin, GuiToolsInstallMixin,
              GuiBenchmarkMixin, GuiUpdaterMixin,

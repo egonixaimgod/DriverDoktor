@@ -302,8 +302,7 @@ def _menu_hwscan(api):
             ('2', 'Találatok listázása', 'Az előző keresés eredménye'),
             ('3', 'Kijelöltek telepítése', 'A listából számozva'),
             ('4', 'Problémás (hibakódos) eszközök', 'Felsorolás + gyors javítás'),
-            ('5', 'NVIDIA gyári driver ellenőrzése/telepítése', None),
-            ('6', 'AMD / Intel / gyártói oldal megnyitása', 'Amit csak a gyártó ad ki'),
+            ('5', 'Gyártói driver-oldal megnyitása', 'A gép/alaplap gyártójának letöltőoldala'),
         ], back_label='Vissza a főmenübe')
         if c == '0':
             return
@@ -316,9 +315,7 @@ def _menu_hwscan(api):
         elif c == '4':
             _run_screen(api, 'Problémás eszközök', lambda: _hwscan_problems(api))
         elif c == '5':
-            _run_screen(api, 'NVIDIA gyári driver', lambda: _nvidia_flow(api))
-        elif c == '6':
-            _run_screen(api, 'Gyártói oldalak', lambda: _vendor_pages(api))
+            _run_screen(api, 'Gyártói oldal', lambda: _vendor_pages(api))
 
 
 def _hwscan_flow(api):
@@ -426,28 +423,10 @@ def _hwscan_problems(api):
             api.fix_problem_device(p['pnp_id'], p.get('code'))
 
 
-def _nvidia_flow(api):
-    ui.info('NVIDIA gyári driver ellenőrzése...')
-    _sync(api, api._check_nvidia_driver)
-    data = api._cli_take('nvidia_driver_info', {})
-    if not data:
-        ui.warn('Nem található NVIDIA videokártya, vagy a gyártói szolgáltatás nem válaszolt.')
-        return
-    ui.kv('Videokártya', data.get('gpu') or '-')
-    ui.kv('Telepítve', data.get('installed') or '-')
-    ui.kv('Legfrissebb (NVIDIA)', data.get('latest') or '-')
-    if data.get('update_available') and data.get('url'):
-        ui.warn('Van újabb gyári driver.')
-        if ui.confirm('Letöltöm és csendben telepítem? (több száz MB)', False):
-            api.install_nvidia_driver()
-    else:
-        ui.ok('A telepített driver naprakész.')
-
-
 def _vendor_pages(api):
-    for name, fn, key in (('AMD', api._check_amd_driver, 'amd_driver_info'),
-                          ('Intel', api._check_intel_driver, 'intel_driver_info'),
-                          ('Gyártói (OEM/alaplap)', api._check_oem_driver_page, 'oem_driver_info')):
+    # A videokártya-gyártói ágak (NVIDIA/AMD/Intel) 2026-09-02-án kikerültek a programból
+    # (lásd app/gui/hwscan.py); ami maradt, az a gép/alaplap gyártójának driver-oldala.
+    for name, fn, key in (('Gyártói (OEM/alaplap)', api._check_oem_driver_page, 'oem_driver_info'),):
         try:
             _sync(api, fn)
         except Exception as e:
@@ -497,6 +476,8 @@ def _menu_autofix(api):
     allow_storage = ui.confirm('Tároló-driverek (NVMe/AHCI/RAID) telepítése is engedélyezett?', False)
     allow_firmware = ui.confirm('Firmware-frissítések (UEFI/SSD/TPM) engedélyezettek?', False)
     wu_pause = ui.confirm('A végén a Windows Update szüneteltetése ~10 évre?', True)
+    # GYORS MÓD: nemmel a lánc csak a WU Agentből telepít. Alapból IGEN (teljes keresés).
+    use_catalog = ui.confirm('Microsoft Update Catalog keresés is? (nem = GYORS MÓD, ~20-25 perccel rövidebb)', True)
 
     ui.write('')
     ui.panel('ÖSSZEGZÉS — EZ FOG TÖRTÉNNI', [
@@ -506,6 +487,7 @@ def _menu_autofix(api):
         f"Tároló-driverek              : {'ENGEDÉLYEZVE' if allow_storage else 'tiltva'}",
         f"Firmware-frissítések         : {'ENGEDÉLYEZVE' if allow_firmware else 'tiltva'}",
         f"WU szüneteltetés a végén     : {'IGEN' if wu_pause else 'nem'}",
+        f"MS Update Catalog keresés    : {'IGEN' if use_catalog else 'NEM (gyors mód)'}",
     ], color=ui.YELLOW)
 
     if not ui.confirm('INDULHAT a fix? (a gép többször újraindul)', False):
@@ -515,7 +497,8 @@ def _menu_autofix(api):
     _header(api, '1 Kattintásos Driver Fix — folyamatban')
     api.run_autofix(skip_printer_drivers=skip_printer, allow_storage_drivers=allow_storage,
                     allow_firmware=allow_firmware, wifi_mode=wifi_mode,
-                    rebuild_wifi_driver=rebuild_wifi, pause_windows_update=wu_pause)
+                    rebuild_wifi_driver=rebuild_wifi, pause_windows_update=wu_pause,
+                    use_catalog=use_catalog)
     ui.pause()
 
 

@@ -150,9 +150,9 @@ def machine_label(run_fn):
     Sosem dob kivételt: ha semmi nem jön össze, üres stringet ad, és a hívó a gépnevet
     használja."""
     try:
-        from app import oemcatalog_core
-        m = oemcatalog_core.detect_machine(run_fn) or {}
-        ph = oemcatalog_core._is_placeholder
+        from app import machine_core
+        m = machine_core.detect_machine(run_fn) or {}
+        ph = machine_core.is_placeholder
         parts = []
         vendor = (m.get('manufacturer') or '').strip()
         # A beszédes név elsőbbséget élvez a nyers Model kóddal szemben.

@@ -71,6 +71,15 @@ class GuiBaseMixin:
         # szüneteltető viselkedést adja. A lábak külön processzek, ezért ez is csak az
         # ütemezett feladat argumentumában él tovább (lásd _schedule_autofix_resume).
         self.no_wu_pause = '--no-wu-pause' in sys.argv
+        # GYORS MÓD: a Microsoft Update Catalog kihagyása (explicit user decision,
+        # 2026-09-02). Alapból BE van kapcsolva a katalógus, ezért - a wu-pause-hoz
+        # hasonlóan - a TILTÁS utazik jelzőként: egy régebbi ütemezett feladat
+        # argumentuma (amiben ez a kapcsoló még nincs) így a megszokott, teljes
+        # keresést adja. MÉRT ÁR: a katalógus kihagyása 20-25 percet spórol egy
+        # lábakra bontott láncon, DE azon a Dell-en, amiről ez a mérés készült, a WU
+        # keresés időtúllépésbe futott, és a 16 driver MIND a katalógusból jött volna -
+        # gyors módban az a gép 0 drivert kapott volna. Lásd CLAUDE.md.
+        self.no_catalog = '--no-catalog' in sys.argv
         self._si = subprocess.STARTUPINFO()
         self._si.dwFlags |= subprocess.STARTF_USESHOWWINDOW
         self._nw = subprocess.CREATE_NO_WINDOW
