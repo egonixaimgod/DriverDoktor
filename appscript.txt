@@ -34,10 +34,21 @@
              A spreadsheets-et BENNE KELL HAGYNI: az explicit lista felülírja a
              jelenlegi engedélyeket, tehát ha csak a drive-ot írnád be, a MŰKÖDŐ
              benchmark-ág romlana el. A "webapp" részhez ne nyúlj.
-          e) Ctrl+S, majd FUTTASD ÚJRA az "engedelyezes"-t -> most már kérnie kell
-          f) ha még így sem kér: myaccount.google.com > Biztonság > "Alkalmazások,
-             amelyek hozzáférnek a fiókodhoz" -> a projekt -> Hozzáférés
-             eltávolítása, majd újra az "engedelyezes"
+          e) Ctrl+S, majd FUTTASD ÚJRA az "engedelyezes"-t
+          f) >>> TEREPEN EZ VOLT A MEGOLDÁS (2026-09-02) <<<  Az e) lépés után a
+             Google MÉG MINDIG nem kért engedélyt - a meglévő engedély-tokent
+             használta tovább. Amit kikényszerít:
+               https://myaccount.google.com/connections
+               -> keresd meg a projektet (a neve valószínűleg "Névtelen projekt",
+                  NEM DriverVarázsló!) -> Hozzáférés eltávolítása
+               -> vissza az Apps Scriptbe, F5, majd újra "engedelyezes"
+             MOST feljön a hozzájárulási ablak. FIGYELEM: azon KÉT jelölőnégyzet
+             van (Drive + Táblázatok), és MINDKETTŐT be kell pipálni - a legfelső
+             "Összes kijelölése" a legegyszerűbb. Ha csak az egyiket pipálod, a
+             hiba visszatér.
+             AMÍG a visszavonás és az újra-engedélyezés között vagy, a benchmark
+             feltöltés is szünetel (a webapp a te engedélyeiddel fut) - ezért a
+             visszavonás után rögtön csináld meg az engedélyezést és a telepítést.
         MIÉRT: az explicit oauthScopes lista FELÜLBÍRÁLJA a kódból való
         következtetést, ezért a Google úgy látja, a script már teljesen
         engedélyezve van, és hiába futtatod újra, nem kér semmit.
