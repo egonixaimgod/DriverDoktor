@@ -165,16 +165,39 @@ td input[type="checkbox"]{accent-color:var(--accent);width:16px;height:16px;curs
 .pw-input:focus{outline:none;border-color:var(--glass-border-hover);box-shadow:0 0 0 3px rgba(180,100,255,0.15)}
 /* Windows & Office nézet */
 .winact-btnrow{display:flex;gap:8px;flex-wrap:wrap}
-/* Kockázatos-osztály kapcsolók a Driver Keresés nézetben. Pirosas keret, mert ezek nem
-   kényelmi beállítások: bekapcsolva boot-kritikus és visszafordíthatatlan csomagok is
-   megjelenhetnek a listán. */
-.hw-risk-row{display:flex;gap:10px;flex-wrap:wrap;margin:-4px 0 12px}
-.hw-risk-row label{display:inline-flex;align-items:center;gap:8px;font-size:12px;
-  color:var(--text2);cursor:pointer;padding:7px 12px;border-radius:999px;
-  background:rgba(255,90,90,0.07);border:1px solid rgba(255,120,120,0.28);transition:all var(--t)}
-.hw-risk-row label:hover{background:rgba(255,90,90,0.13);border-color:rgba(255,120,120,0.5)}
-.hw-risk-row input[type="checkbox"]{accent-color:#ff7676;width:15px;height:15px;cursor:pointer}
-.hw-risk-row b{color:#ff9a9a;font-weight:700}
+/* Tároló/firmware: RÖGZÍTETT VÉDELEM, nem kapcsoló (2026-09-02). Itt korábban két
+   jelölőnégyzet állt; a magyarázó sor azért maradt, mert a "miért nem talált az SSD-mhez
+   drivert?" kérdésre a felületen is kell válasz. Szándékosan halvány, nem riasztó piros:
+   ez nem hiba és nem döntés, hanem a program állandó viselkedése. */
+.hw-risk-note{margin:-4px 0 12px;padding:9px 12px;border-radius:var(--r-sm);font-size:12px;
+  color:var(--text3);line-height:1.5;border:1px dashed rgba(255,255,255,0.18);
+  background:rgba(255,255,255,0.03)}
+.hw-risk-note b{color:var(--text2);font-weight:700}
+/* KERESÉSI MÓD kártya az AutoFix dialógusán (mc-use-catalog). Egy sima csúszkáról a
+   terepen nem derült ki, mit csinál, ezért az ÁLLAPOT maga hordozza az információt:
+   zöld izzás = teljes keresés, piros = gyors mód. A data-on attribútumot a
+   syncCatalogMode() állítja, a felirat is vele együtt vált. Kisebb súlyú, mint a
+   Wi-Fi blokk (az 2px lila keret, 16px cím) - ez a második döntés, nem az első. */
+.mc-mode{margin-top:12px;margin-left:16px;padding:11px 14px;border-radius:var(--r);
+  border:2px solid;align-items:flex-start;gap:11px;
+  transition:border-color var(--t),background var(--t),box-shadow var(--t)}
+.mc-mode[data-on="1"]{border-color:#2ee08a;
+  background:linear-gradient(135deg,rgba(46,224,138,0.17),rgba(46,224,138,0.04));
+  box-shadow:0 0 18px rgba(46,224,138,0.30),inset 0 0 22px rgba(46,224,138,0.07)}
+.mc-mode[data-on="0"]{border-color:#ff4d5e;
+  background:linear-gradient(135deg,rgba(255,77,94,0.17),rgba(255,77,94,0.04));
+  box-shadow:0 0 18px rgba(255,77,94,0.30),inset 0 0 22px rgba(255,77,94,0.07)}
+.mc-mode-title{display:block;font-size:13.5px;font-weight:800;letter-spacing:0.2px}
+.mc-mode[data-on="1"] .mc-mode-title{color:#66ffb2}
+.mc-mode[data-on="0"] .mc-mode-title{color:#ff929c}
+.mc-mode-hint{display:block;margin-top:4px;font-size:12px;font-weight:400;
+  color:var(--text3);line-height:1.5}
+/* A csúszka maga is a mód színét veszi fel - a kártya és a kapcsoló nem mondhat mást. */
+.mc-mode[data-on="1"] .toggle input:checked+.toggle-track{background:#2ee08a;border-color:#2ee08a;
+  box-shadow:0 0 10px rgba(46,224,138,0.55)}
+.mc-mode[data-on="1"] input:checked+.toggle-track{background:#2ee08a;border-color:#2ee08a;
+  box-shadow:0 0 10px rgba(46,224,138,0.55)}
+.mc-mode[data-on="0"] input+.toggle-track{background:rgba(255,77,94,0.30);border-color:rgba(255,77,94,0.55)}
 /* "Még dolgozik" jelzés a nyomtató-szűrő kapcsolóján: amíg a felderítés fut, a kapcsoló
    be van pipálva, de még nem rejt el semmit - ezt látnia kell a technikusnak. */
 .toggle-busy{opacity:.6}
@@ -676,7 +699,7 @@ td input[type="checkbox"]{accent-color:var(--accent);width:16px;height:16px;curs
           <div class="welcome-features" style="flex-basis:100%">
             <div class="welcome-feature"><span class="fi">💿</span><span><b>Driverkezelés</b> — listázás, erőszakos törlés, mentés/visszaállítás, offline (WinPE) módban is</span></div>
             <div class="welcome-feature"><span class="fi">🚀</span><span><b>1 Kattintásos Driver Fix</b> — teljes driver-csere WU + Catalog forrásból, újraindítás-lánccal</span></div>
-            <div class="welcome-feature"><span class="fi">🖥️</span><span><b>Driver Keresés</b> — WU + Microsoft Update Catalog, NVIDIA/AMD/Intel gyári driver-ellenőrzéssel</span></div>
+            <div class="welcome-feature"><span class="fi">🖥️</span><span><b>Driver Keresés</b> — WU + Microsoft Update Catalog, telepített verziókkal összevetve</span></div>
             <div class="welcome-feature"><span class="fi">🔄</span><span><b>Windows Update felügyelet</b> — driver-frissítések letiltása, teljes WU-szünet akár 10 évre</span></div>
             <div class="welcome-feature"><span class="fi">👻</span><span><b>Szellemeszközök</b>, <b>Temp fájlok</b> és <b>DriverStore</b> takarítása egy kattintással</span></div>
             <div class="welcome-feature"><span class="fi">🔥</span><span><b>Stress Teszt & Szervíz Programok</b> — automata 4-in-1 teszt, portable vagy telepíthető eszközök</span></div>
@@ -860,11 +883,11 @@ td input[type="checkbox"]{accent-color:var(--accent);width:16px;height:16px;curs
         <div class="view-hero vh-blue" data-emoji="🖥️">
           <div class="vh-text">
             <div class="vh-title">🖥️ Driver Keresés és Telepítés</div>
-            <div class="vh-sub">Végigszkenneli a gép összes hardverét, és a Windows Update-ről + a Microsoft Update Catalogból megkeresi hozzájuk a legfrissebb drivereket — a telepített verziókkal összevetve, hogy csak a tényleges frissítés látszódjon. A hibás (sárga felkiáltójeles) eszközöket külön kiemeli, és a gyári NVIDIA/AMD/Intel drivereket is ellenőrzi.</div>
+            <div class="vh-sub">Végigszkenneli a gép összes hardverét, és a Windows Update-ről + a Microsoft Update Catalogból megkeresi hozzájuk a legfrissebb drivereket — a telepített verziókkal összevetve, hogy csak a tényleges frissítés látszódjon. A hibás (sárga felkiáltójeles) eszközöket külön kiemeli, és a végén kiírja, mi maradt a Windows beépített driverén.</div>
             <div class="vh-chips">
               <span class="hero-chip">🌐 WU + Catalog keresés</span>
               <span class="hero-chip">⚠️ Hibás eszközök kiemelve</span>
-              <span class="hero-chip">🎮 NVIDIA/AMD/Intel gyári driver</span>
+              <span class="hero-chip">🏭 Alapdriveres eszközök listája</span>
             </div>
           </div>
         </div>
@@ -890,18 +913,18 @@ td input[type="checkbox"]{accent-color:var(--accent);width:16px;height:16px;curs
               <span>🌐 Mély keresés (a katalógus minden eszközre - lassabb, de a régi gyári drivereket is frissíti)</span>
             </label>
           </div>
-          <!-- KOCKÁZATOS OSZTÁLYOK: ugyanaz a két kapcsoló, mint az 1 kattintásos fix
-               megerősítő ablakában, és itt is ALAPBÓL KI. Bekapcsolva a találatok pirosan,
-               ELŐRE BE NEM JELÖLVE jelennek meg - a telepítés így is külön döntés marad. -->
-          <div class="hw-risk-row">
-            <label title="Bekapcsolva a program a tárolóvezérlőkre (NVMe/AHCI/RAID) és a lemezekre is keres drivert. FIGYELEM: rossz tároló-driver után a Windows nem indul el (INACCESSIBLE_BOOT_DEVICE), és azt már csak helyreállító adathordozóról lehet javítani. A találatok pirosan, előre be nem jelölve jelennek meg.">
-              <input type="checkbox" id="hw-allow-storage">
-              <span>💾 Tároló-driverek keresése is <b>(kockázatos)</b></span>
-            </label>
-            <label title="Bekapcsolva a program firmware-frissítéseket is keres (UEFI/BIOS, SSD-vezérlő, TPM, dokkoló). FIGYELEM: a firmware-írás visszafordíthatatlan - nincs az a visszaállítási pont vagy Windows-újratelepítés, ami visszacsinálja, és egy megszakadt írás hardveresen tönkreteheti az eszközt. A találatok pirosan, előre be nem jelölve jelennek meg.">
-              <input type="checkbox" id="hw-allow-firmware">
-              <span>⚡ Firmware-frissítések keresése is <b>(kockázatos)</b></span>
-            </label>
+          <!-- TÁROLÓ ÉS FIRMWARE: VÉGLEGESEN KI, NINCS HOZZÁ KAPCSOLÓ (2026-09-02, explicit
+               user decision: "ne lehessen bekapcsolni sose... inkább ne tudják bekapcsolni
+               az ügyfelek mert abbol sok baj lehet"). Korábban itt két jelölőnégyzet állt,
+               alapból kikapcsolva. A két hibalehetőség, ami miatt eltűntek: egy rossz
+               tároló-driver után a Windows EL SEM INDUL (INACCESSIBLE_BOOT_DEVICE, csak
+               helyreállító médiával javítható), egy firmware-írás pedig visszafordíthatatlan.
+               Csak MAGYARÁZÓ sor maradt, mert a "miért nem talált az SSD-mhez drivert?"
+               kérdésre a felületen is kell válasz - lásd a szken végi `skipped_risky` sort. -->
+          <div class="hw-risk-note" title="Ez nem beállítás, hanem rögzített védelem: a program a tárolóvezérlőkre (NVMe/SATA/RAID), a lemezekre és a firmware-re (UEFI/BIOS, SSD-vezérlő, TPM, dokkoló) SOHA nem keres és nem telepít drivert. Egy rossz tároló-driver után a gép a következő indításnál nem biztos, hogy elindul, a firmware-írás pedig nem vonható vissza sem visszaállítási ponttal, sem Windows-újratelepítéssel.">
+            🔒 <b>Tároló- és firmware-driverek: kihagyva</b> – a program ezekre szándékosan
+            soha nem keres. Rossz tároló-driver után a Windows el sem indul, a firmware-írás
+            pedig visszafordíthatatlan. Ezeket a gyártó saját oldaláról, kézzel kell frissíteni.
           </div>
           <!-- ESZKÖZ-ÚJRAKÖTÉS: nem keres és nem tölt le semmit - azokat az eszközöket
                köti vissza a MÁR FENT LÉVŐ gyári driverre, amik a Windows alapdriverén
@@ -1540,30 +1563,34 @@ td input[type="checkbox"]{accent-color:var(--accent);width:16px;height:16px;curs
         🔄 <b style="color:var(--text2)">A Wi-Fi driver is teljesen újraépül</b> – vezetékes gépen ez automatikus:
         a Wi-Fi driver a többivel együtt törlődik, és tisztán települ vissza. Nincs mit beállítani.
       </div>
+      <!-- KERESÉSI MÓD. Közvetlenül a Wi-Fi blokk alatt, mert ez a második olyan döntés,
+           ami a lánc EGÉSZÉRE hat (nem finomhangolás) - de kisebb súllyal, mint a Wi-Fi.
+           2026-09-02, explicit user decision: a sima csúszkáról "nem tudni, mit csinál",
+           ezért a kártya SZÍNNEL ÉS SZÖVEGGEL is kimondja az AKTUÁLIS állapotot - zöld =
+           teljes keresés, piros = gyors mód. A felirat nem a kapcsoló nevét írja, hanem
+           azt, hogy MOST mi fog történni; a mért időadat a title-ben van. -->
+      <label class="toggle mc-mode" id="mc-use-catalog-row" data-on="1" style="display:none" title="Alapból BE. Kikapcsolva a lánc CSAK a Windows Update ügynökéből telepít, a Microsoft Update Catalogot egyáltalán nem kérdezi meg - ez a GYORS MÓD. MÉRVE egy Dell Latitude 5580-on: a katalógus-körök összesen ~26 percet vittek el a 82 perces láncból, tehát a kikapcsolásuk nagyjából ennyivel rövidít. FIGYELEM: ugyanazon a gépen a Windows Update keresés IDŐTÚLLÉPÉSBE futott, és mind a 16 driver a katalógusból jött - gyors módban az a gép NULLA drivert kapott volna. Akkor kapcsold ki, ha a gép már többnyire fel van driverezve, és csak egy gyors átfutás kell.">
+        <input type="checkbox" id="mc-use-catalog" checked onchange="syncCatalogMode()">
+        <span class="toggle-track" style="flex:0 0 auto;margin-top:2px"></span>
+        <span style="display:block">
+          <span class="mc-mode-title" id="mc-catalog-title">🗂️ TELJES KERESÉS – a Microsoft katalógust is végignézi</span>
+          <span class="mc-mode-hint" id="mc-catalog-hint">Ajánlott. Minden eszközre megkérdezi a Microsoft Update Catalogot is, így olyan drivert is megtalál, amit a Windows Update nem kínál fel. Kb. 20-25 perccel hosszabb.</span>
+        </span>
+      </label>
       <label class="toggle" id="mc-skip-printers-row" style="display:none;margin-top:14px" title="Bekapcsolva a meglévő nyomtató/szkenner driverek NEM törlődnek - ezek gyakran csak a gyári driverrel működnek jól, és egy multifunkciós készülék segéd-driverei több eszközosztályban szétszórva ülnek. FONTOS: ez csak a TÖRLÉSRE vonatkozik. Újabb nyomtató-drivert a program mindkét állásban keres és telepít, ha a Windows Update kínál.">
         <input type="checkbox" id="mc-skip-printers" checked>
         <span class="toggle-track"></span>
         Meglévő nyomtató/szkenner driverek megtartása (ajánlott)
       </label>
-      <label class="toggle" id="mc-allow-storage-row" style="display:none;margin-top:10px" title="Alapból KI. Bekapcsolva a fix a Windows Update-ből a tárolóvezérlő (NVMe/SATA/RAID) drivereit is feltelepíti. Kockázat: ha rossz driver kerül fel, a gép a KÖVETKEZŐ indításnál nem biztos, hogy elindul (INACCESSIBLE_BOOT_DEVICE), és azt már csak helyreállító médiával lehet javítani. A Microsoft Update Catalogból tárolódriver ekkor SEM települ automatikusan - azt a Driver Keresés és Telepítés menü mutatja meg, piros jelöléssel.">
-        <input type="checkbox" id="mc-allow-storage">
-        <span class="toggle-track"></span>
-        ⛔ Tárolóvezérlő-driverek (NVMe/SATA) telepítése is – kockázatos!
-      </label>
-      <label class="toggle" id="mc-allow-firmware-row" style="display:none;margin-top:10px" title="Alapból KI. Bekapcsolva a fix a firmware-frissítéseket is feltelepíti (UEFI/BIOS, SSD-vezérlő, TPM, dokkoló). Ez NEM drivert cserél, hanem újraírja az eszköz nem felejtő memóriáját: VISSZAFORDÍTHATATLAN, sem visszaállítási pont, sem Windows-újratelepítés nem hozza vissza a régit. Írás közbeni áramszünet hardveresen teheti tönkre az eszközt, TPM-nél pedig érvénytelenítheti a BitLocker-kulcsokat. Csak stabil tápellátás mellett (UPS/laptop akku) és mentett BitLocker-kulccsal!">
-        <input type="checkbox" id="mc-allow-firmware">
-        <span class="toggle-track"></span>
-        ⚡ Firmware-frissítések (UEFI/BIOS, SSD, TPM) is – VISSZAFORDÍTHATATLAN!
-      </label>
+      <!-- TÁROLÓ ÉS FIRMWARE: itt korábban két kapcsoló volt, mindkettő alapból KI.
+           2026-09-02, explicit user decision: teljesen eltűntek, mert a bekapcsolásukból
+           csak baj lehet (rossz tároló-driver = el sem induló Windows; firmware-írás =
+           visszafordíthatatlan). A Python-oldali logika ÉRINTETLEN maradt, csak a
+           belépési pontokon van False-ra zárva - lásd app/gui/autofix.py: run_autofix. -->
       <label class="toggle" id="mc-wu-pause-row" style="display:none;margin-top:10px" title="Alapból BE. FONTOS: a driverek elleni védelem NEM ezen múlik - a fix a végén mindenképp letiltja, hogy a Windows Update drivert telepítsen (SearchOrderConfig=0 + ExcludeWUDriversInQualityUpdate=1), akkor is, ha ezt a pipát kiveszed. Ez a kapcsoló azt dönti el, hogy a Windows Update EGYÁLTALÁN elinduljon-e: bekapcsolva ~10 évre szünetel minden frissítés, ami a FUNKCIÓFRISSÍTÉS ellen véd (az újrafuttatja a Setupot és a beépített drivereket a gyáriak fölé teheti - ezt a driver-tiltás nem fogja meg). Ez szüneteltetés, nem letiltás: az ügyfél a Beállítások > Windows Update alatt egy kattintással folytathatja. A fix ALATT a WU mindenképp szünetel, függetlenül ettől a pipától.">
         <input type="checkbox" id="mc-wu-pause" checked>
         <span class="toggle-track"></span>
         ⏸️ Windows Update teljes szüneteltetése a végén (~10 év) – a funkciófrissítés ellen
-      </label>
-      <label class="toggle" id="mc-use-catalog-row" style="display:none;margin-top:10px" title="Alapból BE. Kikapcsolva a lánc CSAK a Windows Update ügynökéből telepít, a Microsoft Update Catalogot egyáltalán nem kérdezi meg - ez a GYORS MÓD. MÉRVE egy Dell Latitude 5580-on: a katalógus-körök összesen ~26 percet vittek el a 82 perces láncból, tehát a kikapcsolásuk nagyjából ennyivel rövidít. FIGYELEM: ugyanazon a gépen a Windows Update keresés IDŐTÚLLÉPÉSBE futott, és mind a 16 driver a katalógusból jött - gyors módban az a gép NULLA drivert kapott volna. Akkor kapcsold ki, ha a gép már többnyire fel van driverezve, és csak egy gyors átfutás kell.">
-        <input type="checkbox" id="mc-use-catalog" checked>
-        <span class="toggle-track"></span>
-        🗂️ Microsoft Update Catalog keresés – kikapcsolva <b>GYORS MÓD</b> (~20-25 perccel rövidebb, de kevesebbet talál)
       </label>
       <div id="mc-note-row" style="display:none;margin-top:14px">
         <textarea id="mc-note-input" rows="3" placeholder="Pl.: időszakos fagyás játék közben, gyanús kattogó hang a gépből..." style="width:100%;padding:10px 12px;border-radius:var(--r-sm);border:1px solid var(--glass-border);background:rgba(20,12,38,0.6);color:var(--text);font:13px var(--font);resize:vertical"></textarea>
@@ -1930,15 +1957,8 @@ function switchView(name) {
   
   if (name === 'wu') checkWuStatus();
   if (name === 'bitlocker') checkBitlockerStatus();
-  if (name === 'hw') {
-    // A két kockázati kapcsoló minden belépéskor visszaáll KI-re. Ugyanaz az érv, mint az
-    // AutoFix dialógusán: ez gépenkénti, boot-kritikus döntés, nem megjegyzendő beállítás -
-    // egy ottfelejtett pipa a KÖVETKEZŐ gépen tenne fel tároló-/firmware-csomagot.
-    ['hw-allow-storage', 'hw-allow-firmware'].forEach(id => {
-      const el = document.getElementById(id);
-      if (el) el.checked = false;
-    });
-  }
+  // (A tároló/firmware kapcsolók 2026-09-02-én eltűntek a nézetből - nincs mit
+  //  visszaállítani belépéskor, a program soha nem keres rájuk.)
   if (name === 'hw' && !hwPool.length && !hwInstalled.length) { /* first visit, don't auto-scan */ }
 }
 
@@ -2683,16 +2703,15 @@ async function startHwScan() {
   try {
     /* Mély keresés: a katalógust minden eszközre megkérdezzük (lásd a checkbox title-jét
        és app/gui/hwscan.py: start_hw_scan(deep=...)). Alapértelmezés: be.
-       A két kockázati kapcsoló alapból KI - ugyanaz a szerződés, mint az AutoFix
-       megerősítő ablakában. */
+       A 2. és 3. paraméter a tároló/firmware engedély: 2026-09-02 óta MINDIG false, a
+       felületen nincs is hozzá kapcsoló. A Python a maga oldalán is False-ra zárja, tehát
+       ezt itt nem lehet "véletlenül" bekapcsolni - a paraméter csak azért maradt a
+       helyén, hogy a képesség egy sor visszavételével újra elérhetővé tehető legyen. */
     const deepEl = document.getElementById('hw-deep-scan');
-    const stEl = document.getElementById('hw-allow-storage');
-    const fwEl = document.getElementById('hw-allow-firmware');
     /* Katalógus-keresés (gyors mód): alapból BE, mint a Pythonban. */
     const catEl = document.getElementById('hw-use-catalog');
     await api().start_hw_scan(deepEl ? !!deepEl.checked : true,
-                              stEl ? !!stEl.checked : false,
-                              fwEl ? !!fwEl.checked : false,
+                              false, false,
                               catEl ? !!catEl.checked : true);
   } catch (e) {
     hwScanStop();
@@ -3104,8 +3123,10 @@ async function startAutoFix(skipConfirm = false) {
   // Resume hívásnál mindkettő irreleváns: a Python az ütemezett feladat argumentumából
   // (sys.argv) olvassa vissza a felhasználó eredeti választását.
   let skipPrinters = true;
-  let allowStorage = false;
-  let allowFirmware = false;
+  // TÁROLÓ/FIRMWARE: 2026-09-02 óta nincs hozzá kapcsoló, és mindig false megy át. A
+  // Python is False-ra zárja a belépési ponton, tehát ez csak a hívás alakját tartja meg.
+  const allowStorage = false;
+  const allowFirmware = false;
   let wifiMode = false;
   // Resume lábon a Python sys.argv-ből olvassa vissza; itt csak alapérték kell.
   let rebuildWifi = true;
@@ -3120,8 +3141,6 @@ async function startAutoFix(skipConfirm = false) {
     const res = await showAutoFixConfirm('1 Kattintásos Driver Fix', 'Megerősíted a teljes automatikus javítás (visszaállítási pont, driver törlés és újratelepítés) indítását?');
     ok = res.ok;
     skipPrinters = res.skipPrinters;
-    allowStorage = res.allowStorage;
-    allowFirmware = res.allowFirmware;
     wifiMode = res.wifiMode;
     rebuildWifi = res.rebuildWifi !== false;
     wuPause = res.wuPause !== false;
@@ -4462,8 +4481,8 @@ function delSetLoading(on) {
   // A WU-szüneteltetés kapcsolója is ide tartozik. Nem a törlési előnézetre hat (arra
   // semmilyen hatása nincs), de amíg az elemzés fut, az Igen gomb úgyis tiltott - egyetlen
   // aktív kapcsoló a kiszürkült oszlopban hibának látszana.
-  const ids = ['mc-wifi-mode', 'mc-rebuild-wifi', 'mc-skip-printers', 'mc-allow-storage',
-               'mc-allow-firmware', 'mc-wu-pause', 'mc-use-catalog', 'mc-del-search', 'mc-del-all', 'mc-del-none'];
+  const ids = ['mc-wifi-mode', 'mc-rebuild-wifi', 'mc-skip-printers',
+               'mc-wu-pause', 'mc-use-catalog', 'mc-del-search', 'mc-del-all', 'mc-del-none'];
   ids.forEach(id => { const el = document.getElementById(id); if (el) el.disabled = on; });
   // A Wi-Fi újraépítés kapcsolója vezetékes gépen amúgy is tiltott marad - a
   // syncRebuildWifi() dönt róla, ezért az elemzés végén ŐT kérdezzük újra, nem itt.
@@ -4489,12 +4508,29 @@ function setAllDeletePreview(on) {
   renderDeletePreview();
 }
 
+/* KERESÉSI MÓD kártyája: a szín ÉS a felirat is az aktuális állapotot mondja ki, nem a
+   kapcsoló nevét. Terepi visszajelzés volt, hogy egy sima csúszkáról "nem tudni, mit
+   csinál" - a cím ezért mindig azt írja, MI FOG TÖRTÉNNI, ha így hagyják. */
+function syncCatalogMode() {
+  const cb = document.getElementById('mc-use-catalog');
+  const row = document.getElementById('mc-use-catalog-row');
+  if (!cb || !row) return;
+  const on = !!cb.checked;
+  row.dataset.on = on ? '1' : '0';
+  const t = document.getElementById('mc-catalog-title');
+  const h = document.getElementById('mc-catalog-hint');
+  if (t) t.textContent = on
+    ? '🗂️ TELJES KERESÉS – a Microsoft katalógust is végignézi'
+    : '⚡ GYORS MÓD – csak Windows Update, katalógus NÉLKÜL';
+  if (h) h.textContent = on
+    ? 'Ajánlott. Minden eszközre megkérdezi a Microsoft Update Catalogot is, így olyan drivert is megtalál, amit a Windows Update nem kínál fel. Kb. 20-25 perccel hosszabb.'
+    : 'Kb. 20-25 perccel rövidebb, de KEVESEBB drivert talál. Csak akkor válaszd, ha a gép már többnyire fel van driverezve: egy mért gépen a Windows Update időtúllépésbe futott, és mind a 16 driver a katalógusból jött volna.';
+}
+
 function showAutoFixConfirm(title, message) {
   return new Promise(resolve => {
     confirmResolver = (val) => {
       const skip = document.getElementById('mc-skip-printers').checked;
-      const storage = document.getElementById('mc-allow-storage').checked;
-      const firmware = document.getElementById('mc-allow-firmware').checked;
       const wifi = document.getElementById('mc-wifi-mode').checked;
       // Vezetékes gépen a kapcsoló nem is látszik (helyette magyarázó sor van), az
       // értéke bekapcsolva marad - a Python úgyis csak Wi-Fi módban veszi figyelembe.
@@ -4513,11 +4549,9 @@ function showAutoFixConfirm(title, message) {
       document.getElementById('mc-rebuild-wifi-row').style.display = 'none';
       document.getElementById('mc-rebuild-wifi-info').style.display = 'none';
       document.getElementById('mc-skip-printers-row').style.display = 'none';
-      document.getElementById('mc-allow-storage-row').style.display = 'none';
-      document.getElementById('mc-allow-firmware-row').style.display = 'none';
       document.getElementById('mc-del-panel').style.display = 'none';
       document.getElementById('mc-box').style.maxWidth = '480px';
-      resolve({ ok: val, skipPrinters: skip, allowStorage: storage, allowFirmware: firmware, wifiMode: wifi, rebuildWifi: rebuildWifi, wuPause: wuPause, useCatalog: useCatalog, keepPackages: keep });
+      resolve({ ok: val, skipPrinters: skip, wifiMode: wifi, rebuildWifi: rebuildWifi, wuPause: wuPause, useCatalog: useCatalog, keepPackages: keep });
     };
     document.getElementById('mc-title').textContent = title;
     document.getElementById('mc-message').textContent = message;
@@ -4525,12 +4559,7 @@ function showAutoFixConfirm(title, message) {
     document.getElementById('mc-cancel').textContent = 'Mégse';
     document.getElementById('mc-yes').textContent = 'Igen';
     document.getElementById('mc-skip-printers-row').style.display = 'flex';
-    // A tároló-kapcsoló MINDIG kikapcsolva nyílik, akkor is, ha az előző futásnál be volt
-    // jelölve: ez egy gépenként mérlegelendő, boot-kritikus döntés, nem "beállítás".
-    document.getElementById('mc-allow-storage').checked = false;
-    document.getElementById('mc-allow-storage-row').style.display = 'flex';
-    document.getElementById('mc-allow-firmware').checked = false;
-    document.getElementById('mc-allow-firmware-row').style.display = 'flex';
+    // (A tároló- és firmware-kapcsoló 2026-09-02-én eltűnt: soha nem kapcsolható be.)
     // WU-SZÜNETELTETÉS: a tároló/firmware kapcsolókkal ellentétben ez ALAPÉRTELMEZÉSBEN BE
     // van kapcsolva, és minden nyitáskor vissza is áll bekapcsolt állapotba. Ez a bolt
     // alapértelmezett gyakorlata (a frissen felrakott driverkészletet ne írja felül a WU
@@ -4542,6 +4571,7 @@ function showAutoFixConfirm(title, message) {
     // csendben a kovetkezo gep katalogus-drivereit.
     document.getElementById('mc-use-catalog').checked = true;
     document.getElementById('mc-use-catalog-row').style.display = 'flex';
+    syncCatalogMode();
     // WI-FI MÓD: a dialógus AZONNAL megjelenik (a hálózat-felismerés PowerShell-hívás,
     // pár másodperc), a pipa és a magyarázó sor utólag frissül. Alapból kikapcsolva
     // nyílik, és csak akkor kapcsol be magától, ha a gép TÉNYLEG Wi-Fin lóg és nincs

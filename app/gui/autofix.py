@@ -1877,7 +1877,8 @@ class GuiAutofixMixin:
         a szerelő sosem tudta meg, hogy pl. az RTX 3060-hoz volt egy újabb csomag a
         katalógusban (terepi futás, 2026-07-27: 32.0.15.9595 a telepített 32.0.15.9186
         helyett), csak épp nem sikerült ráadni. Márpedig ezekre van kézi megoldás:
-        a gyártói (NVIDIA/AMD/Intel) kártya a manuális szkenben."""
+        a hardver gyártójának saját letöltőoldala. (2026-09-02-ig itt a manuális szken
+        "gyártói NVIDIA/AMD/Intel kártyája" szerepelt - az az ág azóta törölve van.)"""
         if not no_bind:
             return
         try:
@@ -1945,7 +1946,11 @@ class GuiAutofixMixin:
                 for nb in not_bound:
                     self.emit('task_progress', {'task': task_id, 'log': _line(nb)})
                 self.emit('task_progress', {'task': task_id, 'log': '   A Windows egy nála pontosabban illeszkedő drivert részesített előnyben.'})
-            self.emit('task_progress', {'task': task_id, 'log': '👉 TEENDŐ: videokártyánál a "Driver Keresés és Telepítés" menü gyártói (NVIDIA/AMD/Intel) kártyája adja a legfrissebb drivert; alaplapi eszköznél az alaplapgyártó letöltőoldala.'})
+            # A szöveg 2026-09-02-ig a manuális szken "gyártói (NVIDIA/AMD/Intel) kártyájára"
+            # küldte a technikust - az az ág aznap TÖRLŐDÖTT a programból, tehát nem létező
+            # felületre mutatott volna. A teendő ugyanaz maradt, csak most a gyártó saját
+            # letöltőoldala a cím, ami videokártyára és alaplapi eszközre egyaránt igaz.
+            self.emit('task_progress', {'task': task_id, 'log': '👉 TEENDŐ: a legfrissebb drivert a hardver gyártójának saját letöltőoldala adja - videokártyánál az NVIDIA/AMD/Intel oldala, alaplapi eszköznél az alaplapgyártóé (a "Driver Keresés és Telepítés" menü gép/alaplap-kártyája kilinkel oda).'})
         except Exception as e:
             logging.warning(f"[AUTOFIX] A nem-kötő katalógus-csomagok jelentése hiba (nem kritikus): {e}")
 
@@ -1999,11 +2004,13 @@ class GuiAutofixMixin:
                     self.emit('task_progress', {'task': task_id, 'log': '\n📶 Wi-Fi-s telepítés: a Wi-Fi kártya drivere MEGMARADT, hogy a kapcsolat a lánc alatt ne szakadjon meg.'})
                     self.emit('task_progress', {'task': task_id, 'log': 'A Windows Update és a katalógus sem kínált hozzá újabbat, tehát a jelenlegi a legfrissebb elérhető. Ha mindenképp tiszta újratelepítést akarsz, tedd kábelre a gépet, és futtasd újra a fixet Wi-Fi mód nélkül.'})
                 clear_wlan_backup()
-            # A WU videokártya-driverei jellemzően hónapokkal a gyári kiadás mögött járnak,
-            # az AutoFix pedig szándékosan CSAK a WU-ból dolgozik (a gyártói ellenőrzés a
-            # manuális szken része, lásd app/gui/nvidia.py + vendorgpu.py). A szerviz-
-            # munkafolyamat záró lépése ezért egy manuális szken.
-            self.emit('task_progress', {'task': task_id, 'log': '\n💡 TIPP: a videokártyához a Windows Update rendszerint nem a legfrissebb drivert adja. A "Driver Keresés és Telepítés" menüben futtatott szken az NVIDIA/AMD/Intel gyári legújabb verzióját is ellenőrzi.'})
+            # A WU videokártya-driverei jellemzően hónapokkal a gyári kiadás mögött járnak.
+            # 2026-09-02-ig itt az állt, hogy a manuális szken "az NVIDIA/AMD/Intel gyári
+            # legújabb verzióját is ellenőrzi" - az az ág aznap TÖRLŐDÖTT (explicit user
+            # decision), tehát ez az ígéret azóta valótlan lett volna. A tény, ami maradt:
+            # a lánc WU + katalógus forrásból dolgozik, a gyári GPU-driver pedig ezeknél
+            # újabb szokott lenni - ezt kimondjuk, de már nem ígérünk hozzá funkciót.
+            self.emit('task_progress', {'task': task_id, 'log': '\n💡 TIPP: a videokártyához a Windows Update és a katalógus rendszerint nem a legfrissebb drivert adja. Ha a gépbe dedikált videokártya kerül, a gyártó oldaláról (NVIDIA/AMD/Intel) érdemes kézzel felrakni a legújabbat.'})
         except Exception as e:
             logging.warning(f"[AUTOFIX] Összefoglaló hiba (nem kritikus): {e}")
 
@@ -2355,19 +2362,41 @@ class GuiAutofixMixin:
                 rebuild_wifi = bool(rebuild_wifi_driver)
                 wu_pause = bool(pause_windows_update)
                 use_cat = bool(use_catalog)
+            # TÁROLÓ ÉS FIRMWARE: VÉGLEGESEN TILTVA (2026-09-02, explicit user decision:
+            # "ne lehessen bekapcsolni sose... inkább ne tudják bekapcsolni az ügyfelek mert
+            # abbol sok baj lehet"). A felületről eltűnt a két kapcsoló, a CLI sem kérdezi
+            # már - ez a KÖZÖS, mindkét ág utáni kapu, ami a JS-paramétert ÉS egy régi
+            # ütemezett feladat --allow-storage-drivers / --allow-firmware argumentumát is
+            # semlegesíti. MIÉRT ilyen szigorú: rossz tároló-driver után a Windows el sem
+            # indul (INACCESSIBLE_BOOT_DEVICE, csak helyreállító médiával javítható), és ez
+            # egy FELÜGYELET NÉLKÜL futó lánc - a technikus kávézik, amikor kiderülne; a
+            # firmware-írás pedig visszafordíthatatlan, egy megszakadt flash hardveresen
+            # teszi tönkre az eszközt. A mögöttes logika (wu_core szűrői, a piros jelölés,
+            # a lánc-flagek) SZÁNDÉKOSAN érintetlen: ha valaha újra kell, ennek a két
+            # értékadásnak a törlése + a felületi kapcsolók visszatétele elég.
+            if allow_storage or allow_fw:
+                logging.warning(f"[AUTOFIX] Tároló/firmware engedély érkezett "
+                                f"(tároló={allow_storage}, firmware={allow_fw}), de ez "
+                                f"véglegesen tiltva van - figyelmen kívül hagyva.")
+            allow_storage = False
+            allow_fw = False
             # A belépési log a JS-paramétert írja ki, ami a resume lábakon a frontend
             # ALAPÉRTÉKE (mindig True), nem a felhasználó választása - egy nyomtató-panasz
             # kivizsgálásánál pont ez a mező vinne félre. Ezért a FELOLDOTT értéket is
             # kilogoljuk, forrás-megjelöléssel.
             logging.info(f"[AUTOFIX] Nyomtató-kihagyás (érvényes érték): {skip_printers} "
                          f"(forrás: {'sys.argv --skip-printer-drivers' if (is_resume_step1 or is_resume_mode) else 'GUI dialógus'})")
+            # A forrás-megjelölés itt SZÁNDÉKOSAN nem "GUI dialógus"/"sys.argv": 2026-09-02
+            # óta egyik sem dönt, a program szabálya dönt. A sor azért marad, mert egy
+            # terepi naplóból ki kell derülnie, hogy a tároló/firmware NEM azért maradt ki,
+            # mert a technikus elfelejtett bepipálni valamit.
             logging.info(f"[AUTOFIX] Tárolóvezérlő-driverek engedélyezve: {allow_storage} "
-                         f"(forrás: {'sys.argv --allow-storage-drivers' if (is_resume_step1 or is_resume_mode) else 'GUI dialógus'})")
-            # A feloldott értékek innentől a _schedule_autofix_resume-é: MINDEN további láb
-            # ütemezésekor ő fűzi hozzá a flageket, hogy a választás ne veszhessen el a
+                         f"(forrás: véglegesen tiltva, nincs hozzá kapcsoló)")
+            # A többi feloldott érték innentől a _schedule_autofix_resume-é: MINDEN további
+            # láb ütemezésekor ő fűzi hozzá a flageket, hogy a választás ne veszhessen el a
             # lánc közepén (lásd ott a részletes indoklást).
             logging.info(f"[AUTOFIX] Firmware-frissítések engedélyezve: {allow_fw} "
-                         f"(forrás: {'sys.argv --allow-firmware' if (is_resume_step1 or is_resume_mode) else 'GUI dialógus'})")
+                         f"(forrás: véglegesen tiltva, nincs hozzá kapcsoló)")
             logging.info(f"[AUTOFIX] Wi-Fi-s telepítés: {wifi} "
                          f"(forrás: {'sys.argv --wifi-mode' if (is_resume_step1 or is_resume_mode) else 'GUI dialógus'})")
             # Csak Wi-Fi módban jelent bármit: vezetékesen az adapter drivere a normál

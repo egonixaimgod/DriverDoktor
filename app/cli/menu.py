@@ -321,12 +321,13 @@ def _menu_hwscan(api):
 def _hwscan_flow(api):
     deep = ui.confirm('Mély keresés (a katalógus MINDEN eszközre — lassabb, de többet talál)?', True)
     ui.write('')
-    ui.warn('A következő két kapcsoló KOCKÁZATOS eszközöket enged a keresésbe.')
-    ui.dim('Tároló: rossz driver után a Windows nem indul el (INACCESSIBLE_BOOT_DEVICE).')
-    ui.dim('Firmware: visszafordíthatatlan írás, megszakadva hardveresen tönkreteheti az eszközt.')
-    st = ui.confirm('Tároló-driverek keresése is?', False)
-    fw = ui.confirm('Firmware-frissítések keresése is?', False)
-    _sync(api, api.start_hw_scan, deep, st, fw)
+    # TÁROLÓ/FIRMWARE: 2026-09-02 óta nem kérdés, hanem rögzített szabály (lásd
+    # app/gui/hwscan.py: start_hw_scan). A CLI is teljes értékű felület, ezért ha ITT
+    # megmaradt volna a két kérdés, a kapcsoló csak a grafikus felületről tűnt volna el -
+    # a felhasználó kérése viszont az volt, hogy SOHA ne lehessen bekapcsolni.
+    ui.dim('Tároló- és firmware-driverek: a program ezekre soha nem keres (rossz tároló-driver')
+    ui.dim('után a Windows el sem indul, a firmware-írás pedig visszafordíthatatlan).')
+    _sync(api, api.start_hw_scan, deep, False, False)
     res = api._cli_take('hw_scan_result', {})
     ui.write('')
     ui.kv('Rendszer', res.get('sys_info') or '-')
@@ -472,9 +473,8 @@ def _menu_autofix(api):
     if wifi_mode:
         rebuild_wifi = ui.confirm('A Wi-Fi drivert teljesen újraépítse (törlés + visszatöltés)?', True)
     ui.write('')
-    ui.warn('A következő két kapcsoló KOCKÁZATOS — alapból mindkettő KI.')
-    allow_storage = ui.confirm('Tároló-driverek (NVMe/AHCI/RAID) telepítése is engedélyezett?', False)
-    allow_firmware = ui.confirm('Firmware-frissítések (UEFI/SSD/TPM) engedélyezettek?', False)
+    # (A tároló- és firmware-kérdés 2026-09-02-én kikerült: nem választás többé, hanem
+    #  rögzített szabály - lásd app/gui/autofix.py: run_autofix.)
     wu_pause = ui.confirm('A végén a Windows Update szüneteltetése ~10 évre?', True)
     # GYORS MÓD: nemmel a lánc csak a WU Agentből telepít. Alapból IGEN (teljes keresés).
     use_catalog = ui.confirm('Microsoft Update Catalog keresés is? (nem = GYORS MÓD, ~20-25 perccel rövidebb)', True)
@@ -484,8 +484,8 @@ def _menu_autofix(api):
         f"Nyomtató-driverek megtartása : {'IGEN' if skip_printer else 'nem'}",
         f"Wi-Fi mód                    : {'IGEN' if wifi_mode else 'nem'}"
         + (f" (driver újraépítés: {'igen' if rebuild_wifi else 'nem'})" if wifi_mode else ''),
-        f"Tároló-driverek              : {'ENGEDÉLYEZVE' if allow_storage else 'tiltva'}",
-        f"Firmware-frissítések         : {'ENGEDÉLYEZVE' if allow_firmware else 'tiltva'}",
+        f"Tároló-driverek              : tiltva (nem kapcsolható)",
+        f"Firmware-frissítések         : tiltva (nem kapcsolható)",
         f"WU szüneteltetés a végén     : {'IGEN' if wu_pause else 'nem'}",
         f"MS Update Catalog keresés    : {'IGEN' if use_catalog else 'NEM (gyors mód)'}",
     ], color=ui.YELLOW)
@@ -495,8 +495,7 @@ def _menu_autofix(api):
         ui.pause()
         return
     _header(api, '1 Kattintásos Driver Fix — folyamatban')
-    api.run_autofix(skip_printer_drivers=skip_printer, allow_storage_drivers=allow_storage,
-                    allow_firmware=allow_firmware, wifi_mode=wifi_mode,
+    api.run_autofix(skip_printer_drivers=skip_printer, wifi_mode=wifi_mode,
                     rebuild_wifi_driver=rebuild_wifi, pause_windows_update=wu_pause,
                     use_catalog=use_catalog)
     ui.pause()

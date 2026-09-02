@@ -204,11 +204,17 @@ class GuiHwScanMixin:
         lekérdezés, 10 szálon), cserébe ez az egyetlen mód, amivel egy RÉGI, de hibátlanul
         működő gyári driver is frissülni tud. deep=False: a korábbi, szűk kiegészítés.
 
-        allow_storage / allow_firmware (2026-08-28, explicit user decision): a kockázatos
-        osztályok kapcsolói, UGYANÚGY ALAPBÓL KI, mint az AutoFix megerősítő dialógusán.
-        Korábban a kézi szken MINDIG kereste őket (piros jelöléssel, előre be nem jelölve);
-        most a technikus dönti el, hogy egyáltalán bekerüljenek-e a keresésbe. Bekapcsolva a
-        régi viselkedés jön vissza: benne vannak, de PIROSAN és ELŐRE BE NEM JELÖLVE.
+        allow_storage / allow_firmware: **2026-09-02 ÓTA MINDIG False, A PARAMÉTERTŐL
+        FÜGGETLENÜL** (explicit user decision: "ne lehessen bekapcsolni sose... inkább ne
+        tudják bekapcsolni az ügyfelek mert abbol sok baj lehet"). A felületről eltűnt a két
+        jelölőnégyzet, itt pedig a paraméter felül van írva, hogy a képességet se a JS-ből,
+        se máshonnan ne lehessen visszahozni. A két hibalehetőség, ami miatt: rossz
+        tároló-driver után a Windows EL SEM INDUL (INACCESSIBLE_BOOT_DEVICE, csak
+        helyreállító médiával javítható), a firmware-írás pedig visszafordíthatatlan.
+        A paraméter és a mögötte lévő teljes logika SZÁNDÉKOSAN a helyén maradt: ha valaha
+        újra kapcsolhatóvá kell tenni, az alábbi két sor törlése + a felületi kapcsoló
+        visszatétele elég, semmi mást nem kell újraírni.
+        (Előzmény: 2026-08-28-tól két, alapból kikapcsolt jelölőnégyzet volt itt.)
 
         use_catalog (2026-09-02, explicit user decision - "gyors mód"): alapból BE. Kikapcsolva
         a szken CSAK a WU Agentet kérdezi meg, és a Microsoft Update Catalog mindhárom ága
@@ -218,11 +224,17 @@ class GuiHwScanMixin:
         amiről a mérés készült, a WU időtúllépésbe futott, és mind a 16 driver a katalógusból
         jött. Ha a WU elhasal ÉS a katalógus ki van kapcsolva, a szken semmit nem talál -
         ezt ilyenkor ki is mondjuk a felületen, hogy ne tűnjön hibának."""
-        logging.info(f"[API] start_hw_scan(deep={deep}, allow_storage={allow_storage}, "
-                     f"allow_firmware={allow_firmware}) hívás")
+        logging.info(f"[API] start_hw_scan(deep={deep}, use_catalog={use_catalog}) hívás")
         deep = bool(deep)
-        allow_storage = bool(allow_storage)
-        allow_firmware = bool(allow_firmware)
+        # LEZÁRVA (2026-09-02, explicit user decision). A kapott értéket SZÁNDÉKOSAN eldobjuk:
+        # a felületen nincs kapcsoló, és a képességet innen sem szabad visszahozni. Ha a hívó
+        # mégis True-t küld, azt kilogoljuk - az már hívási hiba, nem felhasználói döntés.
+        if allow_storage or allow_firmware:
+            logging.warning("[HW_SCAN] Tároló/firmware engedélyt kért a hívó "
+                            f"(allow_storage={allow_storage}, allow_firmware={allow_firmware}), "
+                            "de ez a program egészében véglegesen tiltva van - figyelmen kívül hagyva.")
+        allow_storage = False
+        allow_firmware = False
         if self.target_os_path:
             self.emit('toast', {'message': '❌ Hiba: Hardver keresés csak Élő rendszeren működik!', 'type': 'error'})
             self.emit('hw_scan_result', {'pool': [], 'installed': [], 'sys_info': '❌ Offline módban nem elérhető', 'time': ''})
@@ -560,8 +572,12 @@ class GuiHwScanMixin:
                               len(risky_dropped.get('firmware') or []))
                 if n_st or n_fw:
                     parts = ([f'{n_st} tároló'] if n_st else []) + ([f'{n_fw} firmware'] if n_fw else [])
-                    skipped_note = (f"{' és '.join(parts)}-eszköz kihagyva "
-                                    f"(kapcsold be a pipát, ha ezekre is keressen)")
+                    # A szöveg 2026-09-02-ig azt mondta, "kapcsold be a pipát" - a kapcsoló
+                    # azóta nem létezik, tehát az útmutatás hazugság lenne. A helyes válasz
+                    # a gyártó saját oldala; ezt ki is mondjuk, hogy a technikus ne keresse
+                    # a nem létező kapcsolót.
+                    skipped_note = (f"{' és '.join(parts)}-eszköz szándékosan kihagyva "
+                                    f"(a program ezekre soha nem keres - gyártói oldalról, kézzel)")
                     final_sys += f" | ⛔ {skipped_note}"
 
                 # MI MARADT A WINDOWS BEÉPÍTETT (INBOX) DRIVERÉN? (2026-08-31, explicit
