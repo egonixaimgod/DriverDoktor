@@ -25,15 +25,42 @@ WINDOWS_APP_ID = '55c92734-d682-4d71-983e-d6ec3f16059f'
 
 # A SoftwareLicensingProduct.LicenseStatus számkódjai. A szöveget MI adjuk (magyarul),
 # így nem függünk a rendszer nyelvétől.
+# A LICENCÁLLAPOT emberi szövege és SZÍNE.
+#
+# A SZÍN AZT MONDJA MEG, MŰKÖDIK-E MOST - NEM AZT, HOGY TÖKÉLETES-E (2026-09-03, explicit
+# user decision: *"ha aktiválva van és működik akkor legyen az zöld ne piros... írja azt is
+# h a termék licencelt és működik, akkor az legyen inkább írva zölddel, ne az h aktiválás
+# szükséges mert le fog járni - most épp aktív, ez a lényeg"*).
+#
+# A terepi eset: egy Office 16 `LicenseStatus=5` (Notification) állapotban volt, okként
+# `0xC004F00F` ("a kulcs a hardverhez van kötve, és a hardver megváltozott"). A termék
+# LICENCELT és MŰKÖDIK - a Word is aktiváltnak mutatta magát -, csak egy idő után
+# figyelmeztetni fog. A program viszont PIROSSAL, "aktiválás szükséges" felirattal írta
+# ki, ami egy működő terméket hibásnak mutatott, és pont az ellenkezőjét érte el, mint
+# amiért ez a nézet létezik: a technikus nem tudta, mit higgyen.
+#
+# A 3 -> színek jelentése ezért:
+#   'ok'      = MOST MŰKÖDIK, nincs teendő
+#   'warning' = MOST MŰKÖDIK, de véges ideig (türelmi idő / újraaktiválás kell)
+#   'error'   = NEM működik rendesen, valódi teendő van
+#
+# Az 5-ös (Notification) állapot ezért 'warning' és nem 'error': a szoftver fut, csak
+# az aktiválás nem végleges. A 3-as (lejárt türelmi idő) viszont marad hiba: ott a
+# csökkentett működés már beállt.
 LICENSE_STATUS = {
     0: ('Nincs aktiválva', 'error'),
     1: ('Aktiválva', 'ok'),
-    2: ('Türelmi idő (még nincs aktiválva)', 'warning'),
-    3: ('Lejárt türelmi idő', 'warning'),
-    4: ('Nem eredetinek jelölt türelmi idő', 'error'),
-    5: ('Értesítési állapot (aktiválás szükséges)', 'error'),
-    6: ('Meghosszabbított türelmi idő', 'warning'),
+    2: ('Türelmi időben – működik, de aktiválni kell', 'warning'),
+    3: ('Lejárt türelmi idő – aktiválás szükséges', 'error'),
+    4: ('Nem eredetinek jelölt', 'error'),
+    5: ('Licencelt és működik – újraaktiválás ajánlott', 'warning'),
+    6: ('Meghosszabbított türelmi idő – működik', 'warning'),
 }
+
+# Azok az állapotok, amikben a termék MOST HASZNÁLHATÓ. A nézet ezt írja ki egy külön,
+# megnyugtató sorban - egy "licencelt és működik" mondat mellett egy piros jelvény
+# önmagában ellentmondás.
+WORKING_STATUSES = (1, 2, 5, 6)
 
 # A LICENCÁLLAPOT OKA (`LicenseStatusReason`), emberi nyelven.
 #
@@ -391,6 +418,10 @@ def collect_office_activation(run):
             'reason_hex': reason_hex, 'reason_text': reason_text,
             # A licencelt-de-ujraaktivalando allapotok: a termek MUKODIK.
             'licensed_but_stale': code in (3, 5, 6),
+            # MUKODIK-E MOST? A felulet ez alapjan dont a jelvenyrol es arrol, kell-e
+            # egyaltalan figyelmeztetni. Egy "licencelt es mukodik" mondat mellett egy
+            # piros jelveny onmagaval kerul ellentmondasba (2026-09-03).
+            'working': code in WORKING_STATUSES,
         })
     logging.info(f"[WINACT] Office/egyéb licencelt termék: {len(out['products'])} db "
                  f"({', '.join(p['name'][:40] for p in out['products']) or 'nincs'})")

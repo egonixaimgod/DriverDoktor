@@ -340,6 +340,23 @@ Vagyis a *„más gépgyártó változata"* eset **letöltés, kicsomagolás és
 
 **A parse a NYERS HTML-ből megy, nem a tag-mentesített szövegből** — ez nem stílus: a lap szövegében a „More information" / „Support Url" a HWID-szekció ELŐTT szerepel, tehát egy szöveg-alapú `(.*?)(?:More information|…)` minta pont a listát vágja le (először pontosan ezt írtam, és 0 azonosítót adott). A `<div id="driverhwIDs">` blokk viszont egyértelmű.
 
+#### A HID-KOLLEKCIÓ LÁNCA (`&COL..`) NEM RÉSZHALMAZ — és halmazként LÁTHATATLAN (2026-09-03, terepen bizonyítva)
+
+**Ez az a hiba, ami miatt a program egy touchpad-drivert ajánlott a billentyűzetre, minden szken után újra.** A `_hwid_matches` token-**halmazokat** hasonlít (ez oldotta meg az R9-200 esetet), a HID-kollekciók viszont ismétlődő tagokból állnak, amiket a halmaz kiejt:
+
+```
+INF:    HID\VID_044E&PID_1212&COL02          tokenek: {VID_044E, PID_1212, COL02}
+eszköz: HID\VID_044E&PID_1212&COL02&COL02    tokenek: {VID_044E, PID_1212, COL02}   <- AZONOS!
+```
+
+Pedig ez **két külön eszköz-csomópont**: a `…&COL02` a touchpad-kollekció, a `…&COL02&COL02` a billentyűzet-gyereke. A gépen lévő INF (2,8 KB, `apvhid.inf`) egyetlen azonosítót deklarál — `HID\VID_044E&PID_1212&COL02` —, és a neve kimondja: **„ThinkPad UltraNav driver"**.
+
+A következmény végigkövethető a naplóban: a csomag felment („sikerült"), az eszköz sosem vette át, a Windows helyesen a `keyboard.inf`-en hagyta, az újrakötés-kör pedig ugyanezzel a rossz párosítással 4 eszköz csomópontját távolította el fölöslegesen — és a technikus mindebből annyit látott, hogy *„sose lesz minden naprakész"*.
+
+**A javítás:** a COL-lánc **sorrend és darabszám szerint** azonosít egy kollekciót, ezért arra CSAK a pontos egyezés jó (`_hwid_token_seq`); a többi tokenre a részhalmaz-szabály változatlan. Regresszió-tesztelve a terepen bizonyított esetekre (R9 200 `ven+dev+rev`, amdafd `ven+cc`, USB kompozit `&MI_00`) — azok érintetlenek.
+
+**A TANULSÁG: ha egy azonosító ISMÉTLŐDŐ tagokból is állhat, a halmaz-alapú összehasonlítás némán hazudik.** Nem hibázik, nem dob, csak azonosnak lát két különböző dolgot — és a hiba a *telepítés* szintjén jelentkezik, ahol már senki nem a párosítót gyanúsítja.
+
 #### „NINCS HOZZÁ DRIVER" CSAK AKKOR MONDHATÓ, HA A PROGRAM TÉNYLEG MINDENT VÉGIGPRÓBÁLT
 
 **Explicit user decision, 2026-09-03:** *„nem akarom h feladja a program sehol semmilyen esetben se, nem megoldas az ha kiirod az ugyfelnek h nincs hozza driver vagy nem létezik. Persze akkor lehet csak ezt kiírni ha TÉNYLEG MINDENT megprobalt a program es sehonnan se tudott hozzá drivereket keríteni, de mondjuk az hogy atnezi a katalogus elso 3 sorat aztan kiírja a program h nincs hozza driver, ez nem elfogadhato mert ez nem igaz — ahogy az se volt igaz h az asrock lapomhoz nem volt driver, aztán mégis lett."*

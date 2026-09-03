@@ -380,9 +380,40 @@ def _hwid_matches(wu_hwid, dev_hwid):
         return False
     # Részhalmaz MINDKÉT irányban: a WU-azonosító lehet általánosabb (ven+dev vs.
     # ven+dev+subsys+rev), de lehet specifikusabb is (a kompozit USB-eszköz szülője
-    # rövidebb, mint a csomag &MI_00-s interfész-azonosítója). Ez a két irány váltja ki
-    # a régi string-prefix szabályt, annak hamis találatai nélkül.
+    # A HID-KOLLEKCIÓ LÁNCA (&COL..) NEM RÉSZHALMAZ-SZERŰEN VISELKEDIK, ÉS EZ HALMAZKÉNT
+    # LÁTHATATLAN (2026-09-03, terepen bizonyítva, HP EliteDesk + Alps UltraNav):
+    #
+    #   INF:    HID\VID_044E&PID_1212&COL02          tokenek: {VID_044E, PID_1212, COL02}
+    #   eszköz: HID\VID_044E&PID_1212&COL02&COL02    tokenek: {VID_044E, PID_1212, COL02}
+    #
+    # A halmaz KIEJTI az ismétlődő COL02-t, tehát a kettő AZONOSNAK látszott - pedig két
+    # KÜLÖN eszköz-csomópont: az első a touchpad-kollekció, a második a billentyűzet-
+    # gyereke. A program emiatt egy "ThinkPad UltraNav driver" nevű touchpad-csomagot
+    # ajánlott a billentyűzetre, minden szken után újra; a telepítés "sikerült" is (a
+    # csomag felment), az eszköz viszont sosem vette át - a Windows helyesen a
+    # keyboard.inf-en hagyta. A technikus ezt úgy élte meg, hogy "sose lesz minden
+    # naprakész".
+    #
+    # A COL-lánc SORREND és DARABSZÁM szerint azonosít egy kollekciót, tehát rá csak a
+    # PONTOS egyezés jó. A többi tokenre a részhalmaz-szabály változatlan - az a
+    # terepen bizonyított R9-200 esetet oldja meg, azt nem szabad elrontani.
+    wcol = [t for t in _hwid_token_seq(w) if t.startswith('COL')]
+    dcol = [t for t in _hwid_token_seq(d) if t.startswith('COL')]
+    if wcol != dcol:
+        return False
     return wt[1] <= dt[1] or dt[1] <= wt[1]
+
+
+def _hwid_token_seq(hwid):
+    """Egy hardver-azonosító tokenjei SORRENDBEN, ismétlődésekkel együtt.
+
+    A `_hwid_tokens` halmazt ad (a részhalmaz-szabályhoz az kell), de a HID-kollekciók
+    láncát (`&COL02&COL02`) csak sorrendhelyes, ismétlődéseket megőrző lista tudja
+    megkülönböztetni - lásd a `_hwid_matches` COL-szabályát."""
+    s = str(hwid or '').strip().upper()
+    if '\\' not in s:
+        return []
+    return [t for t in s.split('\\', 1)[1].split('&') if t]
 
 
 # INF-ből kiolvasható hardver-azonosító: BUSZ\TOKEN&TOKEN... alak. A `_` megkövetelése

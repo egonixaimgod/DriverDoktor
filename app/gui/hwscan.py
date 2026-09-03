@@ -168,7 +168,12 @@ CATALOG_FOREIGN_TRY_MAX_MB = 100
 # fölösleges letöltésnél (11 MB - 1,2 GB) - egy 25 soros holtversenynél viszont már 25
 # kérés lenne, ezért van felső korlát. A holtverseny amúgy is dátum szerint rendezett,
 # tehát az első néhány a releváns.
-CATALOG_HWID_PROBE_MAX = 6
+#
+# 6 -> 12 (2026-09-03, terepen mérve): a HID billentyűzetre **12** azonos című, azonos
+# dátumú AlpsAlpine-jelölt jött, tehát a 6-os korláttal a szűrő KIMARADT, és a program
+# újra felajánlotta a bizonyítottan nem ide való csomagot. 12 lap ~24 mp - egy olyan
+# eszköznél, ahol enélkül minden szken újra felajánlana valamit, ez megéri.
+CATALOG_HWID_PROBE_MAX = 12
 CATALOG_SORT_QS = '&scol=DateComputed&sdir=desc'
 # Ennyi holtverseny-jelöltnél kérjük le a részletlapot a "Driver Model" mezőért
 # (letöltés előtti, pár KB-os alkalmasság-jelzés - lásd _catalog_driver_models). PONTOS
@@ -1478,9 +1483,15 @@ try {
         best_score = max(s for s, _g, _t, _d in pool)
         cands = [c for c in pool if c[0] == best_score]
         dev_ids = {str(h).lower() for h in (item.get('all_hwids') or []) if h}
-        if dev_ids and len(cands) <= CATALOG_HWID_PROBE_MAX:
+        if dev_ids:
+            # A SORREND SZÁMÍT: a legfrissebb (és legspecifikusabb kulcsról való) jelölteket
+            # kérdezzük le, mert a korlát miatt csak az első néhányat vizsgáljuk meg.
+            sorrend = sorted(cands, key=lambda c: ((c[3] or ''), _parse_driver_version(c[2]) or ()),
+                             reverse=True)
+            sorrend.sort(key=lambda c: spec_by_guid.get(c[1], 99))
+            vizsgalt, maradek = sorrend[:CATALOG_HWID_PROBE_MAX], sorrend[CATALOG_HWID_PROBE_MAX:]
             illik, eldonthetetlen, kizart = [], [], []
-            for c in cands:
+            for c in vizsgalt:
                 tamogatott = self._catalog_supported_hwids(c[1], ssl_ctx)
                 if tamogatott is None:
                     eldonthetetlen.append(c)
@@ -1488,21 +1499,36 @@ try {
                     illik.append(c)
                 else:
                     kizart.append((c, len(tamogatott)))
-            szurt = illik + eldonthetetlen
-            if kizart and szurt:
+            if kizart:
                 for (c, n) in kizart:
                     logging.info(f"[CATALOG] {item['name']}: '{c[2][:60]}' KIZÁRVA letöltés előtt - "
-                                 f"a részletlap {n} támogatott azonosítója közt nincs ott az eszközé "
-                                 f"(más gépgyártó változata).")
+                                 f"a részletlap {n} támogatott azonosítója közt nincs ott az eszközé.")
                 self.emit('task_progress', {'task': 'hw_scan', 'log':
                           f'  ⏭️ {item["name"]}: {len(kizart)} katalógus-csomag kizárva letöltés '
-                          f'nélkül (a gyártó listája szerint más géptípushoz valók).'})
+                          f'nélkül (a gyártó saját listája szerint nem ehhez az eszközhöz valók).'})
+            # MI MARAD JELÖLTNEK: ami illik, ami nem volt eldönthető, és amit a korlát miatt
+            # meg sem néztünk. A BIZONYÍTOTTAN kizártak nem.
+            szurt = illik + eldonthetetlen + maradek
+            if szurt:
                 cands = szurt
-            elif kizart and not szurt:
-                logging.info(f"[CATALOG] {item['name']}: a részletlapok szerint egyik jelölt sem "
-                             f"támogatja ezt az eszközt ({len(kizart)} db) - a szűrést NEM "
-                             f"alkalmazzuk (egy üres jelölt-lista erősebb állítás lenne, mint "
-                             f"amit egy oldal-formátum alapján kimondhatunk).")
+            elif eldonthetetlen or not kizart:
+                # Nem tudtunk semmit kiolvasni -> NEM szűrünk (a nemtudás sosem elvetés ok).
+                logging.info(f"[CATALOG] {item['name']}: a részletlapokból nem derült ki semmi - "
+                             f"a szűrést nem alkalmazzuk.")
+            else:
+                # MINDEN jelöltet MEGVIZSGÁLTUNK, és mindegyik listája KIZÁRJA az eszközt.
+                # Ez nem feltételezés, hanem a gyártó saját, névszerinti listája - tehát
+                # kimondható, hogy erre az eszközre a katalógusban nincs való csomag.
+                # (Terepen mérve: a HID billentyűzetre 12 AlpsAlpine-jelölt jött, mindegyik
+                # `hid\alp000d&col02` típusú azonosítókat támogat, az eszköz viszont
+                # `hid\vid_044e&pid_1212&col02&col02` - egyik sem fedi.)
+                logging.info(f"[CATALOG] {item['name']}: MINDEN megvizsgált jelölt ({len(kizart)} db) "
+                             f"kizárja ezt az eszközt a saját támogatott-azonosító listájával - "
+                             f"nincs való csomag, nem ajánljuk fel.")
+                self.emit('task_progress', {'task': 'hw_scan', 'log':
+                          f'  🚫 {item["name"]}: a katalógus {len(kizart)} jelöltje közül egyik sem '
+                          f'támogatja ezt az eszközt (a gyártó saját listája szerint) - nem ajánljuk fel.'})
+                return None
         # KORÁBBAN MÁR MEGBUKOTT CSOMAGOK KIHAGYÁSA: amit egy előző futásban ugyanerre az
         # eszközre letöltöttünk és az INF-vizsgálat elvetett, azt nem töltjük le újra
         # (egy videokártya-csomag 1,2 GB). A jelölést a tartós no-bind tár őrzi, GUID

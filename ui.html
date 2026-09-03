@@ -3467,35 +3467,60 @@ async function quickFixDevice(i) {
 /* Telepítés utáni újraszken-ajánlat (offer_rescan event): chipset/USB driver után új
    eszközök bukkanhatnak elő - az AutoFix ezért megy több körben, a manuális útnál ez a
    banner tölti be ugyanazt a szerepet. */
-function showRescanOffer(data) {
-  const el = document.getElementById('hw-rescan-offer');
-  if (!el) return;
-  /* HA VOLT OLYAN CSOMAG, AMI FELMENT DE AZ ESZKÖZ NEM VETTE ÁT, akkor az új szkennelés
-     önmagában semmit nem old meg: a driver ott van a gépen, a KÖTÉS hiányzik - arra az
-     újrakötés-kör való (az 1 kattintásos fix ezt a lánc végén magától lefuttatja).
-     Ilyenkor AZ az elsődleges gomb, nem a szkennelés. */
+/* A TELEPÍTÉS VÉGÉN EGY ABLAK KÉRDEZI MEG, NEM EGY ELDUGOTT CSÍK (2026-09-03, explicit
+   user decision: *"ne az legyen h végigmegy a telepítés, utána ki kell mennem onnan okkal,
+   utána ott van a kis ikon eldugva… a telepítés végén tolja bele az ember pofájába a
+   program, hogy igenis szkenneld újra, újra fog indulni a gép, mehet?"*).
+
+   MIÉRT KELL EGYÁLTALÁN: egy frissen telepített driver kétféleképp maradhat félkész, és
+   MINDKETTŐN ugyanaz segít - az eszközök újrafelderítése + egy újraindítás:
+     - a csomag felment, de az eszköz nem vette át (a kötés a bootnál dől el),
+     - chipset/USB driver után új eszközök bukkanhatnak elő, amikhez még nincs driver.
+   Az 1 kattintásos fix ezt a lánc végén MAGÁTÓL lefuttatja (`_autofix_closing_rebind`);
+   a kézi úton eddig a technikusnak kellett tudnia, hogy ez a dolga, és külön megkeresni
+   a gombot. Most a program kérdezi meg, ott, ahol épp van.
+
+   AZ ÚJRAINDÍTÁST KI KELL MONDANI A KÉRDÉSBEN. A `rebindDrivers()` a végén újraindítja a
+   gépet - egy "Igen"-t csak úgy szabad kérni, ha az ember tudja, mire mond igent. */
+async function showRescanOffer(data) {
   const nobind = (data && data.rebind_devices) || [];
-  const kozos = '<button class="btn btn-sm" onclick="document.getElementById(\'hw-rescan-offer\').innerHTML=\'\'">Később</button>';
+  const telepitve = (data && data.installed) || 0;
+  let uzenet = '';
   if (nobind.length) {
-    el.innerHTML = '<div style="border:1px solid rgba(255,180,80,.5);background:rgba(255,180,80,.10);'
-      + 'border-radius:10px;padding:11px 14px;margin:10px 0;display:flex;align-items:center;gap:12px;flex-wrap:wrap">'
-      + '<div style="flex:1;min-width:260px">'
-      + '<div style="font-weight:700;color:#ffd08a">⚠️ ' + nobind.length
-      + ' eszköznél a gyári csomag FENT VAN, de még a Windows alapdriverén fut</div>'
-      + '<div style="font-size:12px;color:var(--text3);margin-top:3px">'
-      + esc(nobind.slice(0, 4).join(', ')) + (nobind.length > 4 ? ' …' : '')
-      + ' — nem a telepítés hiányzik, hanem a kötés. Az újrakötés ezt rendbe teszi '
-      + '(a végén a gép újraindul).</div></div>'
-      + '<button class="btn btn-sm btn-primary" onclick="document.getElementById(\'hw-rescan-offer\').innerHTML=\'\';rebindDrivers()">🔄 Eszközök újrakötése</button>'
-      + kozos + '</div>';
+    uzenet = nobind.length + ' eszköznél a gyári csomag FELKERÜLT a gépre, de az eszköz '
+      + 'még a Windows alapdriverén fut:\n\n   • '
+      + nobind.slice(0, 6).join('\n   • ') + (nobind.length > 6 ? '\n   • …' : '')
+      + '\n\nItt nem a telepítés hiányzik, hanem a KÖTÉS — ezt csak az eszközök '
+      + 'újrafelderítése és egy újraindítás teszi rendbe.\n\n';
+  } else {
+    uzenet = telepitve + ' driver települt.\n\nChipset- és USB-driver után új eszközök '
+      + 'bukkanhatnak elő, és egy frissen telepített driver egy része is csak újraindítás '
+      + 'után lép életbe.\n\n';
+  }
+  uzenet += 'Elvégezzem most az eszközök újraszkennelését?\n\n'
+    + '⚠️ A művelet végén a GÉP ÚJRAINDUL (10 másodperces visszaszámlálás után), '
+    + 'hogy a driverek a helyükre kerüljenek. Mentsd el, amin dolgozol.';
+
+  const valasz = await showConfirm(
+    nobind.length ? '🔄 Ajánlott: eszközök újraszkennelése' : '🔄 Eszközök újraszkennelése',
+    uzenet);
+  if (valasz) {
+    // A hozzájárulás a fenti ablakban megvan - ne kérdezzük meg másodszor is.
+    rebindDrivers(true);
     return;
   }
-  el.innerHTML = '<div style="border:1px solid rgba(118,185,0,.45);background:rgba(118,185,0,.08);'
+  /* NEMRE IS MARAD NYOM: ha a technikus most nem ér rá, a csík ott marad, hogy később
+     is egy kattintásra elérje - de már tudja, miről van szó. */
+  const el = document.getElementById('hw-rescan-offer');
+  if (!el) return;
+  el.innerHTML = '<div style="border:1px solid rgba(255,180,80,.45);background:rgba(255,180,80,.08);'
     + 'border-radius:10px;padding:10px 14px;margin:10px 0;display:flex;align-items:center;gap:12px;flex-wrap:wrap">'
-    + '<span>🔁 ' + (data && data.installed ? data.installed + ' driver települt. ' : '')
-    + 'Új eszközök bukkanhattak elő - érdemes újra szkennelni!</span>'
-    + '<button class="btn btn-sm btn-success" onclick="document.getElementById(\'hw-rescan-offer\').innerHTML=\'\';startHwScan()">🔍 Új szkennelés</button>'
-    + kozos + '</div>';
+    + '<span style="flex:1;min-width:240px">🔄 Az eszközök újraszkennelése még hátravan'
+    + (nobind.length ? ' — ' + nobind.length + ' eszköz a gyári csomag ellenére alapdriveren fut.' : '.')
+    + ' A gép a végén újraindul.</span>'
+    + '<button class="btn btn-sm btn-primary" onclick="document.getElementById(\'hw-rescan-offer\').innerHTML=\'\';rebindDrivers()">🔄 Most elvégzem</button>'
+    + '<button class="btn btn-sm" onclick="document.getElementById(\'hw-rescan-offer\').innerHTML=\'\'">Elrejtés</button>'
+    + '</div>';
 }
 
 /* A VIDEOKÁRTYA-GYÁRTÓI KÁRTYÁK (NVIDIA/AMD/Intel) INNEN KIKERÜLTEK (2026-09-02,
@@ -3813,11 +3838,21 @@ function renderActivationStatus(data) {
             + esc(p.reason_text || '—') + (p.reason_hex ? ' <span class="winact-key">'
             + esc(p.reason_hex) + '</span>' : '') + '</div>'
           : '')
-      + (p.licensed_but_stale
-          ? '<div style="font-size:12px;color:var(--text3);margin-top:4px">ℹ️ A termék '
-            + '<b>licencelt és működik</b> — az Office ezért mutathatja magát aktiváltnak '
+      /* A "MOST MŰKÖDIK" TÉNYT ELŐRE ÉS ZÖLDDEL (2026-09-03, explicit user decision:
+         *"ha aktiválva van és működik akkor legyen az zöld ne piros… most épp aktív,
+         ez a lényeg"*). A jelvény színe már a `working` állapotot tükrözi (winact_core:
+         LICENSE_STATUS), itt pedig a magyarázat is a lényeggel kezd: működik. A
+         "később figyelmeztetni fog" utána jön, halványan - az a jövő, nem a jelen. */
+      + (p.working && p.licensed_but_stale
+          ? '<div style="font-size:12px;margin-top:4px">'
+            + '<span style="color:#8effc4;font-weight:700">✅ A termék licencelt és MOST MŰKÖDIK</span>'
+            + '<span style="color:var(--text3)"> — az Office aktiváltnak is mutatja magát '
             + '(Word → Fiók). Újraaktiválás nélkül viszont egy idő után figyelmeztetni fog, '
-            + 'majd csökkentett működésre vált.</div>'
+            + 'majd csökkentett működésre vált — ezért érdemes rendezni, de nem sürgős.</span></div>'
+          : '')
+      + (!p.working && p.licensed_but_stale
+          ? '<div style="font-size:12px;color:var(--text3);margin-top:4px">ℹ️ A licenc érvényes, '
+            + 'de a türelmi idő lejárt — az Office csökkentett működésre válthat. Aktiválás szükséges.</div>'
           : '')
       + '</div>').join('')
       + (o.ospp ? '<div class="winact-note">Kézi beavatkozáshoz: <span class="winact-key">' + esc(o.ospp) + '</span></div>' : '');
@@ -4491,8 +4526,13 @@ async function clearDebugLogs() {
    amik a Windows alapdriverén ragadtak (mert a driver felment, de az eszköz nem indult el
    rajta - ilyenkor a hibakód 0, tehát semmilyen hibakód-alapú ellenőrzés nem látja).
    A backend: app/gui/rebind.py: rescan_and_rebind_drivers(). */
-async function rebindDrivers() {
-  const ok = await showConfirm('Eszközök újrakötése',
+/* `skipConfirm`: a hívó MÁR elkérte a hozzájárulást (a telepítés végi ablak, lásd
+   showRescanOffer). Enélkül a technikus KÉT egymás utáni ablakot kapna ugyanarról a
+   műveletről - és a második egy már meghozott döntést kérdezne újra, ami pont az a
+   "kattintgatás", amit ezzel a lépéssel meg akartunk szüntetni. A gomb (btn-rebind)
+   továbbra is kérdez: onnan indítva ez az EGYETLEN hozzájárulás. */
+async function rebindDrivers(skipConfirm = false) {
+  const ok = skipConfirm || await showConfirm('Eszközök újrakötése',
     'Minden olyan eszközt újra felderíttet a Windowszal, ami most a Windows ÁLTALÁNOS ' +
     'driverén fut. Ha van hozzá gyári csomag a gépen, azt fogja megkapni; ha nincs, ' +
     'ugyanazt kapja vissza - rosszabb nem lesz tőle.\n\n' +
