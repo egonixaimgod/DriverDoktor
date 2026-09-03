@@ -287,10 +287,33 @@ td input[type="checkbox"]{accent-color:var(--accent);width:16px;height:16px;curs
 .hw-setup-head{display:flex;align-items:baseline;gap:10px;margin-bottom:10px;flex-wrap:wrap}
 .hw-setup-title{font-size:13px;font-weight:800;color:var(--text2);letter-spacing:0.3px}
 .hw-setup-hint{font-size:11.5px;color:var(--text3)}
+/* A mód-kártyák és a nagy Telepítés gomb EGY sorban: a kártyák nyúlnak, a gomb a jobb
+   szélen, függőlegesen középen. A gomb a szken UTÁN jelenik meg (előtte nincs mit
+   telepíteni), és a `.btn-big` méretével a fenti szkennelő gomb párja - a nézet két fő
+   művelete így azonos súllyal, egy tengelyen áll. Szűk ablakban a gomb a kártyák alá
+   csordul (`flex-wrap`), és teljes szélességű lesz, tehát nem szorul össze. */
+.hw-setup-row{display:flex;align-items:center;gap:12px;flex-wrap:wrap}
+.hw-setup-row .mc-mode{flex:1 1 300px}
+/* TÖMÖR gradiens, mint a `.btn-primary` szkennelő gombé - egy áttetsző, halvány kitöltés
+   pont azt a "nem is látom" hatást hozná vissza, ami miatt a gomb idekerült. Zöld, hogy
+   a lila szkenneléstől első pillantásra megkülönböztethető legyen: az egyik keres, a
+   másik TELEPÍT (visszafordíthatatlanabb művelet). */
+.hw-install-big{flex:0 0 auto;min-width:280px;justify-content:center;
+  background:linear-gradient(135deg,#2ee08a,#14b869);border-color:transparent;
+  color:#04361f;font-weight:800;text-shadow:none;box-shadow:0 0 26px rgba(46,224,138,0.28)}
+.hw-install-big:hover:not(:disabled){background:linear-gradient(135deg,#5cf0a8,#1ad07a);
+  border-color:transparent;box-shadow:0 0 38px rgba(46,224,138,0.5)}
+/* Letiltva NEM a globális `opacity:0.4` marad: egy 280 px-es, 40%-ban áttetsző zöld folt
+   olvashatatlan lenne. Semleges, lapos kinézetet kap, ami láthatóan "nem most" - de a
+   felirata ("Nincs kijelölve driver") olvasható marad, mert az mondja meg, miért. */
+.hw-install-big:disabled{opacity:1;background:rgba(120,120,140,0.14);
+  border-color:rgba(180,160,220,0.25);color:var(--text3);box-shadow:none;text-shadow:none}
+@media (max-width:1180px){.hw-install-big{flex:1 1 100%;min-width:0}}
 .hw-setup .mc-mode{margin-top:0;margin-left:0;margin-bottom:8px}
-/* A mély keresés a katalógus ALVÁLASZTÁSA: csak akkor számít, ha a katalógus be van
-   kapcsolva. A behúzás ezt mutatja ránézésre; a letiltott állapotot a syncHwModes()
-   teszi rá, hogy gyors módban ne tűnjön élő döntésnek. */
+/* A második kapcsoló ("meglévő driverekhez is keres újabbat", belső neve `deep`) a
+   katalógus ALVÁLASZTÁSA: csak akkor számít, ha a katalógus be van kapcsolva. A behúzás
+   ezt mutatja ránézésre; a letiltott állapotot a syncHwModes() teszi rá, hogy gyors
+   módban ne tűnjön élő döntésnek. */
 .hw-setup .mc-mode-sub{margin-left:22px}
 .hw-setup .mc-mode-sub.mc-mode-off{opacity:0.45}
 .hw-setup .mc-mode-sub.mc-mode-off .toggle-track{border-style:dashed}
@@ -330,11 +353,16 @@ td input[type="checkbox"]{accent-color:var(--accent);width:16px;height:16px;curs
 .hw-tab.tab-ok.active{background:rgba(110,230,160,0.15);border-color:#2ee08a;color:#a7f0cb;
   box-shadow:0 0 12px rgba(46,224,138,0.2)}
 
-/* 4) RAGADÓS MŰVELET-SÁV a lista alján: a Telepítés gomb sose görögjön ki a képből. */
-.hw-actionbar{position:sticky;bottom:0;display:flex;align-items:center;gap:9px;flex-wrap:wrap;
-  margin-top:12px;padding-top:12px;border-top:1px solid rgba(180,100,255,0.22);
-  background:linear-gradient(to top,var(--bg-primary) 55%,transparent)}
-.hw-actionbar-info{flex:1;min-width:120px;font-size:12px;color:var(--text3);text-align:right}
+/* 4) KIJELÖLŐ SÁV a fülek és a lista között. A gombok 2026-09-03-ig `.btn-sm`-ként a
+      lista alján, a Telepítés mellett szorongtak ("olyan kicsi ez a ket cucc hogy nem is
+      latom"); most teljes szélességű, keretezett sáv, normál méretű gombokkal. A helye
+      is logikusabb: a FÜL dönti el, mit látsz, ez a sáv azt, mi legyen kipipálva belőle.
+      A Telepítés gomb NEM itt van, hanem fent a mód-kártyák mellett (.hw-install-big). */
+.hw-selbar{display:flex;align-items:center;gap:10px;flex-wrap:wrap;
+  padding:10px 13px;margin-bottom:11px;border-radius:var(--r-sm);
+  background:rgba(60,35,90,0.35);border:1px solid rgba(180,100,255,0.22)}
+.hw-selbar-info{flex:1;min-width:140px;font-size:12.5px;color:var(--text2);text-align:right}
+.hw-selbar-info b{color:var(--accent);font-weight:800}
 
 /* 5) ÜRES / HIBA ÁLLAPOT a szken előtt. */
 .hw-empty{padding:34px 22px;text-align:center}
@@ -1002,6 +1030,7 @@ td input[type="checkbox"]{accent-color:var(--accent);width:16px;height:16px;curs
             <span class="hw-setup-title">⚙️ Keresési mód</span>
             <span class="hw-setup-hint" id="hw-setup-hint"></span>
           </div>
+          <div class="hw-setup-row">
           <label class="toggle mc-mode" id="hw-catalog-row" data-on="1"
                  title="Alapból BE. Kikapcsolva a szken CSAK a Windows Update ügynökét kérdezi meg, a Microsoft Update Catalogot egyáltalán nem - ez a GYORS MÓD. Sokkal gyorsabb, de a katalógus-only találatok elvesznek: egy mért Dell laptopon a Windows Update időtúllépésbe futott, és mind a 16 driver a katalógusból jött volna.">
             <input type="checkbox" id="hw-use-catalog" checked onchange="syncHwModes()">
@@ -1011,15 +1040,38 @@ td input[type="checkbox"]{accent-color:var(--accent);width:16px;height:16px;curs
               <span class="mc-mode-hint" id="hw-catalog-hint">Ajánlott. Lassabb, de olyan drivert is megtalál, amit a Windows Update nem ad.</span>
             </span>
           </label>
+          <!-- A KAPCSOLÓ BELSŐ NEVE `deep` (start_hw_scan(deep=...)), a FELIRATA viszont
+               2026-09-03 óta NEM "mély keresés" - explicit user decision: *"ezt meg en se
+               ertem nemhogy egy ugyfel"*. A régi név két okból volt megtévesztő:
+                 (a) azt sugallta, hogy a katalóguson BELÜL keres mélyebben (több lapon),
+                     holott valójában azt dönti el, HÁNY ESZKÖZRE kérdezünk rá;
+                 (b) a katalóguson belüli mélyebb lapozás LÉTEZIK is (_catalog_fetch_rows
+                     deep=True, Windows-alapdriveres eszköz saját SUBSYS-kulcsán) - vagyis
+                     két KÜLÖNBÖZŐ dolgot hívtunk "mély"-nek, és a felületen az látszott,
+                     amelyik NEM a lapozás.
+               Amit a kapcsoló valójában eldönt: a már MŰKÖDŐ gyári drivereket is
+               megnézzük-e, hogy van-e hozzájuk újabb kiadás. Ezt mondja ki a felirat. -->
           <label class="toggle mc-mode mc-mode-sub" id="hw-deep-row" data-on="1"
-                 title="Bekapcsolva a program a Microsoft Update Catalogot MINDEN eszközre megkérdezi, nem csak a hibásakra és a Windows-alapdriveren futókra. Így egy régi, de működő gyári driver is frissülhet - a Windows Update ilyet nem ajánl fel. Cserébe a szken 1-2 perccel hosszabb.">
+                 title="Bekapcsolva a program azokat az eszközöket is megnézi, amik MÁR gyári driveren futnak és hibátlanul működnek - hátha van hozzájuk újabb kiadás. A Windows Update ilyet soha nem ajánl fel (szerinte az eszköz rendben van), tehát e nélkül egy több éves, de működő gyári driver sosem frissülne. Mért példa: egy AMD SMBus 2017-es driverén ült, a katalógusban egy 2025-ös csomag várt rá. Cserébe a szken 1-2 perccel hosszabb.">
             <input type="checkbox" id="hw-deep-scan" checked onchange="syncHwModes()">
             <span class="toggle-track"></span>
             <span>
-              <span class="mc-mode-title" id="hw-deep-title">🌐 MÉLY KERESÉS – minden eszközre rákérdez</span>
-              <span class="mc-mode-hint" id="hw-deep-hint">A régi, de működő gyári drivereket is frissíti. +1-2 perc.</span>
+              <span class="mc-mode-title" id="hw-deep-title">🔄 MEGLÉVŐ DRIVEREKHEZ IS KERES ÚJABBAT</span>
+              <span class="mc-mode-hint" id="hw-deep-hint">A már működő gyári drivereket is megnézi, hátha van hozzájuk újabb kiadás. +1-2 perc.</span>
             </span>
           </label>
+          <!-- A TELEPÍTÉS GOMB ITT VAN, NEM A LISTA ALJÁN (2026-09-03, explicit user
+               decision: *"a telepites gomb legyen felul... jobbra kozepen a mély keresés
+               mellett és legyen olyan nagy... jol lathato"*). Korábban a lista alján, egy
+               `.btn-sm`-nyi ragadós sávban ült, és a technikus jelentése szerint "olyan
+               kicsi hogy nem is latom". Itt viszont a szkennelő gombbal EGY függőleges
+               tengelyen áll: keresés fent jobbra -> telepítés alatta jobbra, vagyis a
+               nézet két fő művelete ugyanott van, azonos súllyal.
+               Szken előtt REJTVE (nincs mit telepíteni), utána a kijelölés-szám látszik
+               rajta - lásd updateHwButtons(). -->
+          <button class="btn btn-big btn-success hw-install-big" onclick="installSelectedHw()"
+                  id="btn-install-hw" disabled style="display:none">🚀 Kijelöltek Telepítése</button>
+          </div>
           <!-- ESZKÖZ-ÚJRAKÖTÉS: nem keres és nem tölt le semmit - azokat az eszközöket
                köti vissza a MÁR FENT LÉVŐ gyári driverre, amik a Windows alapdriverén
                ragadtak. Terepen (T580) pont ez az eset okozta a szaggató tapipadot. -->
@@ -1069,13 +1121,18 @@ td input[type="checkbox"]{accent-color:var(--accent);width:16px;height:16px;curs
           <div class="hw-summary" id="hw-summary"></div>
           <div id="hw-rescan-offer"></div>
           <div class="hw-tabs" id="hw-tabs"></div>
-          <div class="hw-tree" id="hw-tree"></div>
-          <div class="hw-actionbar" id="hw-actionbar">
-            <button class="btn btn-sm" onclick="selectAllHw()" id="btn-sel-all-hw" disabled>☑ Összes</button>
-            <button class="btn btn-sm" onclick="deselectAllHw()" id="btn-desel-all-hw" disabled>☐ Egyik se</button>
-            <span class="hw-actionbar-info" id="hw-sel-info"></span>
-            <button class="btn btn-success" onclick="installSelectedHw()" id="btn-install-hw" disabled>🚀 Kijelöltek Telepítése</button>
+          <!-- KIJELÖLŐ SÁV a fülek ALATT, teljes szélességben (2026-09-03, explicit user
+               decision: *"az összes meg egyikse gomb pedig legyen ott... a teendő hibás
+               alá és legyen az is jol lathato olyan kicsi ez a ket cucc hogy nem is
+               latom"*). Korábban `.btn-sm` gombokként a lista alján, a Telepítés mellett
+               szorongtak. Itt a fülek és a lista KÖZÖTT vannak, ami a helyes hely is:
+               a fül eldönti, mit LÁTSZ, ez a sáv pedig azt, mi legyen KIPIPÁLVA belőle. -->
+          <div class="hw-selbar" id="hw-selbar">
+            <button class="btn" onclick="selectAllHw()" id="btn-sel-all-hw" disabled>☑ Összes kijelölése</button>
+            <button class="btn" onclick="deselectAllHw()" id="btn-desel-all-hw" disabled>☐ Kijelölés törlése</button>
+            <span class="hw-selbar-info" id="hw-sel-info"></span>
           </div>
+          <div class="hw-tree" id="hw-tree"></div>
         </div>
 
         <!-- Szken előtti / hibaüzenet-sáv. Külön az eredmény-paneltől, hogy egy
@@ -2834,8 +2891,8 @@ async function deleteDupDrivers() {
    (syncCatalogMode): a szín ÉS a felirat is az AKTUÁLIS ÁLLAPOTOT mondja ki, nem a
    kapcsoló nevét - egy "Microsoft Update Catalog keresés" feliratú csúszkáról a
    technikus nem tudja eldönteni, hogy a bekapcsolt állapot mit CSINÁL.
-   A mély keresés a katalógus alválasztása: gyors módban nincs mit mélyíteni, ezért
-   ott letiltjuk és halványítjuk - így nem tűnik élő döntésnek. */
+   A második kapcsoló a katalógus alválasztása: gyors módban nincs miből újabbat keresni,
+   ezért ott letiltjuk és halványítjuk - így nem tűnik élő döntésnek. */
 function syncHwModes() {
   const cat = document.getElementById('hw-use-catalog');
   const deep = document.getElementById('hw-deep-scan');
@@ -2850,22 +2907,26 @@ function syncHwModes() {
   document.getElementById('hw-catalog-hint').textContent = on
     ? 'Ajánlott. Lassabb, de olyan drivert is megtalál, amit a Windows Update nem ad.'
     : 'Sokkal gyorsabb, de ha a Windows Update nem válaszol, a gép egyáltalán nem kap drivert.';
-  // Mély keresés csak teljes keresésnél értelmezhető.
+  // A második kapcsoló csak teljes keresésnél értelmezhető (a katalógusból dolgozik).
   deep.disabled = !on;
   deepRow.classList.toggle('mc-mode-off', !on);
   const deepOn = on && !!deep.checked;
   deepRow.dataset.on = deepOn ? '1' : '0';
+  // A FELIRATOK AZT MONDJÁK KI, MI TÖRTÉNIK AZ ESZKÖZÖKKEL - nem a kapcsoló belső nevét
+  // ("mély keresés"), ami a felhasználónak semmit nem mondott, és ráadásul mást
+  // sugallt (mélyebb lapozás a katalógusban), mint amit csinál (szélesebb eszközkör).
   document.getElementById('hw-deep-title').textContent = deepOn
-    ? '🌐 MÉLY KERESÉS – minden eszközre rákérdez'
-    : (on ? '🌐 Mély keresés: KI – csak a hibás és alapdriveres eszközök'
-          : '🌐 Mély keresés – gyors módban nem értelmezhető');
+    ? '🔄 MEGLÉVŐ DRIVEREKHEZ IS KERES ÚJABBAT'
+    : (on ? '🎯 CSAK A HIÁNYZÓ ÉS HIBÁS DRIVEREK'
+          : '🔄 Meglévő driverek frissítése – ehhez a katalógus kell');
   document.getElementById('hw-deep-hint').textContent = deepOn
-    ? 'A régi, de működő gyári drivereket is frissíti. +1-2 perc.'
-    : (on ? 'Gyorsabb, de egy régi (bár működő) gyári driver frissítése kimarad.'
-          : 'A katalógus ki van kapcsolva, így nincs mit mélyíteni.');
+    ? 'A már működő gyári drivereket is megnézi, hátha van hozzájuk újabb kiadás. +1-2 perc.'
+    : (on ? 'Ami már gyári driveren működik, azt békén hagyja. Gyorsabb, de egy több éves (bár működő) driver frissítése kimarad.'
+          : 'A Microsoft katalógus ki van kapcsolva, e nélkül nincs miből újabbat keresni.');
   const hint = document.getElementById('hw-setup-hint');
   if (hint) hint.textContent = on
-    ? (deepOn ? 'teljes keresés, minden eszközre' : 'teljes keresés, csak a problémás eszközökre')
+    ? (deepOn ? 'teljes keresés — a meglévő driverekhez is keres újabbat'
+              : 'teljes keresés — csak a hiányzó és hibás driverek')
     : 'gyors mód — csak Windows Update';
 }
 
@@ -2892,8 +2953,11 @@ async function startHwScan() {
   document.getElementById('btn-hw-scan').disabled = true;
   updateHwButtons();
   try {
-    /* Mély keresés: a katalógust minden eszközre megkérdezzük (lásd a checkbox title-jét
-       és app/gui/hwscan.py: start_hw_scan(deep=...)). Alapértelmezés: be.
+    /* A "meglévő driverekhez is keres újabbat" kapcsoló - a Python oldalon a neve `deep`
+       (start_hw_scan(deep=...)), a felületen viszont szándékosan MÁS a felirata, mert a
+       "mély keresés" nevet a felhasználó sem értette, és ráadásul mást sugallt (mélyebb
+       lapozás a katalógusban), mint amit tesz (a már működő gyári drivereket is megnézi).
+       Alapértelmezés: be.
        A 2. és 3. paraméter a tároló/firmware engedély: 2026-09-02 óta MINDIG false, a
        felületen nincs is hozzá kapcsoló. A Python a maga oldalán is False-ra zárja, tehát
        ezt itt nem lehet "véletlenül" bekapcsolni - a paraméter csak azért maradt a
@@ -3411,20 +3475,25 @@ function renderOemCard(data) {
 function updateHwButtons() {
   const hasPool = hwPool.length > 0;
   const hasSel = hwSelectedIndices.size > 0;
-  document.getElementById('btn-install-hw').disabled = !hasSel;
-  document.getElementById('btn-install-hw').textContent = hasSel ? '🚀 Telepítés ('+hwSelectedIndices.size+' db)' : '🚀 Kijelöltek Telepítése';
+  const btn = document.getElementById('btn-install-hw');
+  // A nagy Telepítés gomb a mód-kártyák mellett, FENT ül. Szken előtt REJTVE: ott még
+  // nincs mit telepíteni, és egy örökre letiltott nagy gomb csak zavarna a beállítások
+  // mellett. A szken eredménye kapcsolja be (hasPool), a kijelölés a feliratát adja.
+  btn.style.display = hasPool ? '' : 'none';
+  btn.disabled = !hasSel;
+  btn.textContent = hasSel ? '🚀 Telepítés (' + hwSelectedIndices.size + ' db)'
+                           : '🚀 Nincs kijelölve driver';
   document.getElementById('btn-sel-all-hw').disabled = !hasPool;
   document.getElementById('btn-desel-all-hw').disabled = !hasPool;
-  // A művelet-sáv számlálója: a Telepítés gomb ragadós az aljon, de a "miből mennyi"
-  // csak akkor derül ki, ha ki is írjuk - egy 90 soros listában a pipák nem
-  // számolhatók szemmel.
+  // A kijelölő sáv számlálója: a "miből mennyi" csak akkor derül ki, ha ki is írjuk -
+  // egy 90 soros listában a pipák nem számolhatók szemmel.
   const info = document.getElementById('hw-sel-info');
   if (info) {
     const dead = hwPool.filter(d => d.prev_no_bind).length;
     const real = hwPool.length - dead;
-    info.textContent = hasPool
-      ? (hwSelectedIndices.size + ' / ' + real + ' kijelölve'
-         + (dead ? '  ·  ' + dead + " nem telepíthető (külön fülön)" : ''))
+    info.innerHTML = hasPool
+      ? ('<b>' + hwSelectedIndices.size + ' / ' + real + '</b> driver kijelölve'
+         + (dead ? '  ·  ' + dead + ' nem telepíthető (külön fülön)' : ''))
       : '';
   }
 }

@@ -239,6 +239,19 @@ class GuiHwScanMixin:
         lekérdezés, 10 szálon), cserébe ez az egyetlen mód, amivel egy RÉGI, de hibátlanul
         működő gyári driver is frissülni tud. deep=False: a korábbi, szűk kiegészítés.
 
+        A FELÜLETEN EZ NEM "MÉLY KERESÉS"-KÉNT SZEREPEL (2026-09-03, explicit user
+        decision: *"ezt meg en se ertem nemhogy egy ugyfel"*). A felirat GUI-ban
+        "🔄 MEGLÉVŐ DRIVEREKHEZ IS KERES ÚJABBAT" / kikapcsolva "🎯 CSAK A HIÁNYZÓ ÉS
+        HIBÁS DRIVEREK", a CLI-ben "A MÁR MŰKÖDŐ gyári driverekhez is keressek újabbat?".
+        A régi név két okból volt rossz: (a) azt sugallta, hogy a katalóguson BELÜL keres
+        mélyebben, holott azt dönti el, HÁNY ESZKÖZRE kérdezünk rá; (b) a katalóguson
+        belüli mélyebb lapozás LÉTEZIK IS - `_catalog_fetch_rows(deep=True)`, Windows-
+        alapdriveres eszköz saját SUBSYS-kulcsán, automatikusan, kapcsoló nélkül -, tehát
+        két KÜLÖNBÖZŐ dolgot hívtunk "mély"-nek. A paraméter neve szándékosan maradt
+        `deep`: a `wu_core.deep_catalog_candidates`, az AUTOFIX_DEEP_CATALOG és a CLI is
+        ezt használja, az átnevezés hívási helyek tucatját érintené nulla haszonért -
+        de ha a kódban "mély szken"-t olvasol, a felületen EZT a feliratot keresd.
+
         allow_storage / allow_firmware: **2026-09-02 ÓTA MINDIG False, A PARAMÉTERTŐL
         FÜGGETLENÜL** (explicit user decision: "ne lehessen bekapcsolni sose... inkább ne
         tudják bekapcsolni az ügyfelek mert abbol sok baj lehet"). A felületről eltűnt a két

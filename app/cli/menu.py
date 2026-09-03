@@ -327,7 +327,11 @@ def _hwscan_flow(api):
                              'de a katalógus-only találatok elvesznek)', True)
     deep = True
     if use_catalog:
-        deep = ui.confirm('Mély keresés (a katalógus MINDEN eszközre — lassabb, de többet talál)?', True)
+        # A kérdés szövege 2026-09-03-ig "Mély keresés" volt - a felhasználó szerint
+        # érthetetlen, ráadásul mást sugallt (mélyebb lapozás a katalógusban), mint amit
+        # tesz. A belső paraméter neve maradt `deep`; itt azt mondjuk ki, mi történik.
+        deep = ui.confirm('A MÁR MŰKÖDŐ gyári driverekhez is keressek újabbat? '
+                          '(nem = csak a hiányzó és hibás driverek, gyorsabb)', True)
     ui.write('')
     # TÁROLÓ/FIRMWARE: 2026-09-02 óta nem kérdés, hanem rögzített szabály (lásd
     # app/gui/hwscan.py: start_hw_scan). A CLI is teljes értékű felület, ezért ha ITT
