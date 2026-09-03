@@ -74,6 +74,7 @@ from app.common import spawn_failed
 from app.common import CMD_TIMEOUT_RETURNCODE
 from app.drivers_core import DELETE_DRIVER_TIMEOUT
 from app.gui.hwscan import PNP_ERROR_CODE_DESCRIPTIONS
+from app.gui.hwscan import _device_stem
 from datetime import datetime
 # === /AUTO-IMPORTS ===
 
@@ -1680,7 +1681,7 @@ class GuiAutofixMixin:
             return {}
 
     @staticmethod
-    def _health_report_worth_listing(dev, inst):
+    def _health_report_worth_listing(dev, inst, pkg_devices=None):
         """Érdemes-e ezt az inbox-driveres eszközt KIÍRNI a záró egészségjelentésbe?
 
         Nem szűrő a keresés felé: a katalógust minden eszközre megkérdezzük. Ez kizárólag
@@ -1714,9 +1715,28 @@ class GuiAutofixMixin:
         # a szűrő megszüntetni hivatott. A kivétel célja a BEÉPÍTETT beviteli eszköz
         # (`ACPI\VEN_LEN&DEV_009B` tapipad, `ACPI\SYNA30A0` I2C precíziós tapipad), amihez
         # a gyártó katalógusában valóban van csomag - azok viszont sosem VID_/PID_ alakúak.
+        # ...ÉS A KIVÉTELHEZ BIZONYÍTÉK IS KELL, HOGY LÉTEZIK GYÁRI CSOMAG (2026-09-03,
+        # terepen mérve, HP Pavilion x360 / Win11). A `VID_`/`PID_` kizárása a KÜLSŐ USB-s
+        # perifériákat fogta meg, de egy laptop BEÉPÍTETT HID-eszközei `HID\VEN_HPQ&DEV_6001`
+        # alakúak - `VEN_`+`DEV_`, tehát "gyártó-kódos" -, így MINDEGYIK átment a kivételen.
+        # A záró jelentés ettől 21 sorra hízott, amiből 17 sor beépített HID/beviteli eszköz
+        # volt (`input.inf`, `keyboard.inf`, `hidserv.inf`, `hidi2c.inf`, `msgpiowin32.inf`),
+        # mind HELYESEN a Windows driverén - ugyanaz a "sok sorból kevés a valódi" hiba,
+        # amit ez a szűrő megszüntetni hivatott, csak egy másik azonosító-alakon.
+        #
+        # A kivétel EREDETI célja egy konkrét eset volt: a T580 tapipadja, amihez a gyártó
+        # katalógusában VAN csomag. A helyes feltétel tehát nem az azonosító alakja, hanem
+        # az, hogy találtunk-e valaha csomagot ehhez az eszközhöz. Ezt a lánc tudja: a
+        # `pkg_devices` halmaz azoknak az eszközöknek a törzsét tartalmazza, amikre a
+        # keresés bármelyik forrásból adott ajánlatot, vagy amikhez van stage-elt gyári
+        # csomag a gépen. Ha ilyen nincs, a technikusnak NINCS TEENDŐJE - a sor puszta zaj.
         cls = (dev.get('pclass') or '').strip().upper()
+        van_csomag = bool(pkg_devices
+                          and _device_stem(dev.get('pnp_id') or dev.get('id') or '')
+                          in pkg_devices)
         vendor_coded_input = (cls in ('MOUSE', 'HIDCLASS', 'KEYBOARD')
-                              and not _USB_PERIPHERAL_HWID_RE.search(dev.get('id') or ''))
+                              and not _USB_PERIPHERAL_HWID_RE.search(dev.get('id') or '')
+                              and van_csomag)
         if (inst.get('inf') or '').strip().lower() in HEALTH_REPORT_SKIP_INFS and not vendor_coded_input:
             return False
         return True
@@ -1765,6 +1785,29 @@ class GuiAutofixMixin:
             # nem is kereste. Külön soron a helye, a valódi okkal.
             gated = STORAGE_RISK_CLASSES if not getattr(self, '_autofix_allow_storage', False) else set()
             gated_fw = FIRMWARE_RISK_CLASSES if not getattr(self, '_autofix_allow_firmware', False) else set()
+            # MELY BEVITELI ESZKÖZÖKHÖZ VAN EGYÁLTALÁN GYÁRI CSOMAG A GÉPEN (2026-09-03).
+            # A `_health_report_worth_listing` kivétel-szabálya ezt kérdezi: egy beépített
+            # HID-eszközt csak akkor érdemes felsorolni, ha a technikusnak van vele TEENDŐJE
+            # - vagyis ha létezik hozzá gyári csomag. Az `_staged_vendor_inf_for` (rebind.py)
+            # pontosan ezt tudja, és a lánc végén amúgy is lefutott, tehát olcsó.
+            # Hibára üres halmaz: olyankor a régi, szűkebb viselkedés marad (nem sorolunk
+            # fel HID-eszközt), ami rosszabb esetben egy sort hallgat el - nem hazudik.
+            self._health_pkg_devices = set()
+            try:
+                third = self._get_third_party_drivers() or []
+                for dev in devices or []:
+                    if (dev.get('pclass') or '').strip().upper() not in ('MOUSE', 'HIDCLASS', 'KEYBOARD'):
+                        continue
+                    path, _orig = self._staged_vendor_inf_for(dev, third)
+                    if path:
+                        self._health_pkg_devices.add(
+                            _device_stem(dev.get('pnp_id') or dev.get('id') or ''))
+                logging.info(f"[HEALTH] {len(self._health_pkg_devices)} beviteli eszközhöz van "
+                             f"stage-elt gyári csomag a gépen - csak ezeket soroljuk fel "
+                             f"(a többinél nincs mit tenni).")
+            except Exception as e:
+                logging.debug(f"[HEALTH] A gyári-csomag felmérés nem sikerült ({e}) - "
+                              f"a beviteli eszközök a skip-listán maradnak.")
             worth, by_design, skipped_by_user = [], 0, []
             for dev in devices or []:
                 if dev.get('err_code'):
@@ -1775,7 +1818,7 @@ class GuiAutofixMixin:
                 pclass = (dev.get('pclass') or '').strip().upper()
                 if pclass in gated or pclass in gated_fw:
                     skipped_by_user.append((dev, inst))
-                elif self._health_report_worth_listing(dev, inst):
+                elif self._health_report_worth_listing(dev, inst, self._health_pkg_devices):
                     worth.append((dev, inst))
                 else:
                     by_design += 1

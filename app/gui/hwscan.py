@@ -772,6 +772,11 @@ class GuiHwScanMixin:
                     inst = inst_info.get((dev.get('pnp_id') or '').upper()) or {}
                     if not inst or not _is_inbox_driver(inst):
                         continue
+                    # `pkg_devices` nélkül hívjuk (alapértelmezés: None), tehát a beépített
+                    # HID/beviteli eszközök itt NEM kerülnek a listára. Szándékos: ez a
+                    # számítás csak a naplóba megy (a felületről 2026-09-03-án kikerült),
+                    # és a "van-e hozzá stage-elt gyári csomag" felmérés egy `dism`-hívás -
+                    # egy naplósorért nem éri meg. A lánc záró jelentése átadja.
                     if self._health_report_worth_listing(dev, inst):
                         inbox_worth.append({
                             'name': dev.get('name') or dev.get('id'),
@@ -2149,9 +2154,27 @@ try {
             # újrakötés-kör való. Az 1 kattintásos fix ezt a lánc végén magától lefuttatja
             # (`_autofix_closing_rebind`), a kézi úton viszont eddig a technikusnak kellett
             # kitalálnia, hogy ez a dolga - pedig a program pontosan tudja, hogy kellene.
+            #
+            # AZ ABLAK MINDEN BEFEJEZETT TELEPÍTÉS VÉGÉN FELJÖN (2026-09-03, terepen
+            # mérve). A feltétel `success > 0 or nobind` volt, és pont a jelentett
+            # futásban egyik sem teljesült:
+            #
+            #   --- Katalógus: Sikeres: 0, Sikertelen: 0, Kihagyott: 3 ---
+            #   Tételes mérleg: [('nosource', ...), ('nosource', ...), ('nosource', ...)]
+            #
+            # Mind a hármat az INF-vétó fogta meg, tehát `success=0` és `nobind=[]` -> az
+            # esemény el sem sült, és a technikus jogosan mondta, hogy "még mindig nem
+            # dobja fel". A helyes szabály nem a darabszám: a felajánlás azért kell, mert
+            # a TELEPÍTÉS LEFUTOTT, és utána mindig érdemes egy újrafelderítés (új eszközök
+            # bukkanhatnak elő, a kötés a bootnál dől el). Ha semmi nem változott, az
+            # ablak szövege ezt ki is mondja - lásd showRescanOffer.
+            #
+            # Megszakításnál NEM ajánljuk fel: ott a technikus épp leállította a műveletet,
+            # egy azonnali "újraindítsam?" kérdés a szándéka ellen menne.
             nobind = list(getattr(self, '_catalog_staged_nobind', None) or [])
-            if (success > 0 or nobind) and not self.target_os_path:
-                self.emit('offer_rescan', {'installed': success, 'rebind_devices': nobind})
+            if not self.target_os_path:
+                self.emit('offer_rescan', {'installed': success, 'rebind_devices': nobind,
+                                           'nothing_changed': (success == 0 and not nobind)})
 
         self._safe_thread('wu_install', worker)
 

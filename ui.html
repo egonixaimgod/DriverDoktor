@@ -3492,6 +3492,15 @@ async function showRescanOffer(data) {
       + nobind.slice(0, 6).join('\n   • ') + (nobind.length > 6 ? '\n   • …' : '')
       + '\n\nItt nem a telepítés hiányzik, hanem a KÖTÉS — ezt csak az eszközök '
       + 'újrafelderítése és egy újraindítás teszi rendbe.\n\n';
+  } else if (data && data.nothing_changed) {
+    /* SEMMI NEM VÁLTOZOTT (0 telepítve, semmi nem ragadt kötés nélkül). Az ablak ilyenkor
+       is feljön - a technikus a telepítés végén itt áll, és ez a hely, ahol el kell
+       mondani, hogy nincs teendő -, de NEM állítjuk, hogy ajánlott: egy újraindítást
+       kérni azért, mert "hátha", pont az a fajta zaj, amit ez a nézet ma irtott ki. */
+    uzenet = 'Ebben a körben egyetlen driver sem települt fel — vagy már minden naprakész '
+      + 'volt, vagy a program bizonyította, hogy a talált csomagok nem ehhez a géphez '
+      + 'valók (a részletek fent, a listában).\n\n'
+      + 'Emiatt az újraszkennelés most valószínűleg nem hoz újat.\n\n';
   } else {
     uzenet = telepitve + ' driver települt.\n\nChipset- és USB-driver után új eszközök '
       + 'bukkanhatnak elő, és egy frissen telepített driver egy része is csak újraindítás '
@@ -3501,9 +3510,12 @@ async function showRescanOffer(data) {
     + '⚠️ A művelet végén a GÉP ÚJRAINDUL (10 másodperces visszaszámlálás után), '
     + 'hogy a driverek a helyükre kerüljenek. Mentsd el, amin dolgozol.';
 
-  const valasz = await showConfirm(
-    nobind.length ? '🔄 Ajánlott: eszközök újraszkennelése' : '🔄 Eszközök újraszkennelése',
-    uzenet);
+  /* A CÍM IS AZ ÁLLAPOTOT MONDJA, nem egy általános feliratot: "Ajánlott" csak akkor,
+     ha tényleg van miért. Ha semmi nem változott, a cím se sürgessen. */
+  const cim = nobind.length ? '🔄 Ajánlott: eszközök újraszkennelése'
+            : ((data && data.nothing_changed) ? '🔄 Eszközök újraszkennelése (nem szükséges)'
+                                              : '🔄 Ajánlott: eszközök újraszkennelése');
+  const valasz = await showConfirm(cim, uzenet);
   if (valasz) {
     // A hozzájárulás a fenti ablakban megvan - ne kérdezzük meg másodszor is.
     rebindDrivers(true);

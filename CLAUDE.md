@@ -26,6 +26,7 @@ Jump to what you need:
 | **anything touching the one-click fix** | [**The acceptance criterion**](#the-acceptance-criterion-for-the-one-click-fix-press-it-walk-away-come-back-to-a-finished-machine) — unattended, finished, 0 errors, any brand |
 | **a device that ended up with no driver** | [**Re-driver from ZERO — never back up & restore**](#the-products-whole-point-re-driver-from-zero-never-back-up-the-old-driver-and-put-it-back) — read this BEFORE designing anything, then [OEM driver packs](#oem-driver-packs--the-universal-fourth-source-measured-2026-08-25) |
 | **a device that keeps being offered, or won't install** | [**MINDEN ESZKÖZ KAPJON DRIVERT — a tiltólista SOHA nem megoldás**](#minden-eszköz-kapjon-drivert--a-tiltólista-soha-nem-megoldás-explicit-user-decision-2026-09-03) — keresd a valódi okot, ne a listát rövidítsd |
+| **bármi, ami egy DRIVER TÖRLÉSÉT korlátozná** | [**MINDEN DRIVERT LEHESSEN TÖRÖLNI**](#minden-drivert-lehessen-törölni--a-törlésbe-soha-ne-tegyél-új-szűrőt-explicit-user-decision-2026-09-03) — **NE TEDD.** Olvasd el, mielőtt egy sort is írnál |
 | **checking that your change works** (no test suite here) | [Verifying logic without a machine to break](#verifying-logic-without-a-machine-to-break) |
 | a bug report (a pasted log) | [Field logs are the primary bug report](#field-logs-are-the-primary-bug-report) |
 | where a feature lives | [Code layout](#code-layout-refactored-2026-07-from-a-single-8000-line-driver_toolpy) |
@@ -295,6 +296,24 @@ Unpack what that actually demands, because each clause is a hard constraint on d
 
 When adding anything to the chain, ask first: *does this still work with nobody sitting at the machine, and can the machine still finish?* If the answer needs a human, it does not belong in the AutoFix — put it in the manual scan view instead.
 
+### MINDEN DRIVERT LEHESSEN TÖRÖLNI — a törlésbe SOHA ne tegyél új szűrőt (explicit user decision, 2026-09-03)
+
+> **HA EZT A FÁJLT MOST OLVASOD ELŐSZÖR, EZ AZ EGYIK LEGFONTOSABB SZABÁLY. Ha egy leletre az jut eszedbe, hogy „ezt a driver-osztályt inkább ne töröljük", ÁLLJ MEG. A válasz NEM. Nem firmware-re, nem tárolóra, nem semmire.**
+
+**A felhasználó szó szerint, miután pontosan ezt a hibát elkövettem:** *„ami third party driver, ott jó ha töröl mindent, nem probléma ha nem megy vissza!!! ilyen ne legyen hogy a third party drivereknél szűrjön bármire is, ott mindig mutassa meg az összes third party drivert… mi van akkor ha a firmware driver miatt nem bootol a gép? Bebootolok egy másik windowsból és a büdös életben nem tudom kitörölni a firmware drivert, mert nem jeleníti meg a program, mert te letiltottad… MINDEN drivert lehessen törölni, ne legyen ilyen korlátozás"* és *„ne is próbálj meg ilyen baromságot csinálni soha többet"*.
+
+**A HÁROM OK, amiért ez nem opcionális:**
+
+1. **EZ A PRODUKTUM LÉNYEGE.** A fix úgy javít, hogy MINDENT letöröl és nulláról újradriverez. Egy néma kizárás nem „óvatosság", hanem a termék működésének megcsonkítása.
+2. **AZ OFFLINE JAVÍTÁS AZ UTOLSÓ MENTSVÁR.** Ha egy rossz driver miatt nem indul a gép, a technikus egy másik Windowsból nyitja meg a sérült telepítést, és pont AZT a csomagot akarja kitörölni. Ha elrejted, elvetted tőle az egyetlen javítási utat — a legrosszabb pillanatban.
+3. **A DRIVERT NEM FELTÉTLENÜL MI TETTÜK FEL.** Az ügyfél behozza a gépet egy máshonnan telepített, rossz driverrel. Az az érvelés, hogy „ezt úgysem telepítjük, ezért ne is töröljük", ilyenkor a fejére áll: pont az ilyen csomagot kell tudni eltávolítani.
+
+**AMI MA IS ÍGY MŰKÖDIK, és így is kell maradnia** (ellenőrizve 2026-09-03): a `GuiDriversMixin.delete_drivers` **semmit nem szűr** — amit a technikus kipipál, az törlődik, firmware és tároló is; a lista (`load_drivers`) egyetlen szűrője a **nyomtató-pipa**, amit a felhasználó kapcsol, és az is csak elrejt, nem tilt; offline módban ugyanez az út él.
+
+**AZ EGYETLEN LÉTEZŐ KIVÉTELEK, és miért nem precedens:** a boot-útvonal védelme **kizárólag az AutoFix törlés-fázisában** van (ott senki nem ül a gép előtt, és a futó rendszer boot-driverének törlése `INACCESSIBLE_BOOT_DEVICE`-t adna, amit már semmilyen visszaállításunk nem javít), és még az is **példány-azonosító szerint célzott, nem osztály-alapú**. A többi kivétel mind **nevesített, ember által, a képernyőn meghozott döntés**: nyomtató-pipa, Wi-Fi mód, csomagonkénti opt-out. Egy néma, osztály-alapú kizárás egyikbe sem fér bele.
+
+**EGY MÁR ELKÖVETETT HIBA, hogy felismerhető legyen:** 2026-09-03-án egy terepi naplóból azt olvastam ki, hogy a lánc törli a gyártó firmware-csomagját, amit soha nem telepít vissza — és ebből „logikus" következtetésként osztály-alapú `FW-PROTECT` védelmet írtam a törlés-fázisba. A szabály, ami ezt tiltja, **már benne volt ebben a fájlban**, csak nem néztem meg a változtatás előtt. Ha legközelebb egy javításod egy új szűrő vagy kizárás a törlési oldalon, az szinte biztosan ugyanez a hiba.
+
 ### MINDEN ESZKÖZ KAPJON DRIVERT — a tiltólista SOHA nem megoldás (explicit user decision, 2026-09-03)
 
 **Ez a szekció egy GONDOLKODÁSMÓD-szabály, nem egy funkció leírása. A felhasználó szó szerint ezt kérte:** *„arra hogy fel se települ arra nem az a megoldás hogy akkor berakom egy tiltolistaba hogy többet ne dobja be mert akkor a device nem fog kapni drivert sose ez nem jo… az a cél hogy minden kaphon drivert!!! tehat meg kell talalni a fő okot hogy miért dobja be ha nem tudja feltelepíteni, ha meg azért dobja be mert fel tudná akkor meg kell nézni hogy miért nem telepíti mégis fel!!!"* és *„ilyen nincs h sikertelen vagy tiltolista vagy nem is probalunk drivert keresni vmihez feladjuk, ilyen nincs, nem fogadom ezt el, ne is legyen ez a gondolatmenet es ne is probalj meg te se igy kodolni"*.
@@ -321,6 +340,8 @@ When adding anything to the chain, ask first: *does this still work with nobody 
 - ha tényleg nincs csomag, azt **nevesítve, teendővel** kell kiírni (`no_source`), nem egy számként elrejteni.
 
 **És amit TILT:** új „skip/ignore/blacklist" lista bevezetése egy telepítési probléma megoldásaként. Ha egy javításhoz ilyen kell, a javítás nem kész — a valódi okot kell megtalálni.
+
+**UGYANEZ A TÖRLÉSI OLDALON MÉG SZIGORÚBB:** ott ÚJ SZŰRŐ EGYÁLTALÁN NEM LEHET — lásd [MINDEN DRIVERT LEHESSEN TÖRÖLNI](#minden-drivert-lehessen-törölni--a-törlésbe-soha-ne-tegyél-új-szűrőt-explicit-user-decision-2026-09-03). A keresésnél a rossz szűrő egy elmaradt drivert jelent; a törlésnél egy meg nem javítható gépet.
 
 #### A KATALÓGUS RÉSZLETLAPJA FELSOROLJA A TÁMOGATOTT HARDVER-AZONOSÍTÓKAT — letöltés előtt (2026-09-03, élőben mérve)
 
@@ -946,6 +967,37 @@ Szétválasztva: gyári driveren futó eszköz is kap tartalékot a saját kulcs
 #### A „Kihagyott: N" magyarázata a képernyőn
 
 Terepi kérdés: *„7 telepitendo van 5 sikeres 0 sikertelen a maradek 2 vel mi tortenik ilyenkor?"*. A szám önmagában megválaszolatlan kérdés volt, és a technikus joggal olvasta úgy, hogy „2 driver a levegőben maradt". A kör most kimondja, hogy a kihagyott tétel **nem sikertelen telepítés**: vagy időközben naprakésznek bizonyult, vagy a program bizonyította, hogy a csomag más gépgyártó változata — és hogy a következő szkennelés már **nem is ajánlja fel**, mert feljegyeztük. (Ez utóbbi az 1. hiba javítása nélkül **nem volt igaz** — pont ezért érezte a technikus végtelennek a kört.)
+
+### ~~AMIT SOSEM TELEPÍTÜNK, AZT NE IS TÖRÖLJÜK~~ — MEGÍRVA ÉS UGYANAZNAP VISSZAVONVA (2026-09-03)
+
+**Ez a szabály MEGSZÜLETETT, KÓDBA IS KERÜLT (`FW-PROTECT`), MAJD MÉG AZNAP VISSZAVONTUK. A tanulság az, hogy miért volt rossz — ezért marad itt.**
+
+**Ami a naplóban látszott** (HP Pavilion x360, Build 299, egyébként 0 ERROR-os, 1 óra 12 perces lánc):
+
+```
+15:48:10  Törölve: oem73.inf (insydesystemfirmware.inf) - HP Inc. [Firmware]
+16:47:09  REGRESSZIÓ: ELŐTTE oem73.inf (HP Inc. 15.18.0.0) -> MOST c_firmware.inf (Microsoft)
+16:47:09  a csomag nincs stage-elve, nincs mit újrakötni
+```
+
+**A téves következtetésem:** mivel a firmware-TELEPÍTÉS 2026-09-02 óta véglegesen tiltva, a törlés viszont elviszi a gyártó firmware-csomagját, ez „egyirányú veszteség", tehát osztály-alapú védelmet kell tenni a törlés-fázisba.
+
+**MIÉRT VOLT EZ ROSSZ — két, egymástól független ok, mindkettő döntő:**
+
+1. **A TERMÉK LÉNYEGÉT SÉRTETTE.** Ez a fájl külön szabályként rögzíti: *„Deleting EVERY third-party package is the whole point of AutoFix — never »improve« it into selective deletion… no »skip drivers that look important« filter may be added."* A törlésnek pontosan egy fajta kivétele van: **nevesített, ember által, a képernyőn meghozott döntés** (nyomtató-pipa, Wi-Fi mód, csomagonkénti opt-out) plusz a boot-útvonal védelme — és még az is példány-azonosító szerint célzott, nem osztály-alapú. Egy néma, osztály-alapú kizárás egyik kategóriába sem fér bele. A CLAUDE.md-t olvastam, a szabályt mégsem ellenőriztem a változtatás előtt: ez a hiba maga is tanulság.
+2. **AZ OFFLINE JAVÍTÁST TETTE VOLNA LEHETETLENNÉ** (a felhasználó érve, és ez a nyomósabb): *„mi van akkor, ha a firmware driver miatt nem bootol a gép? Bebootolok egy másik Windowsból, és a büdös életben nem tudom kitörölni, mert nem jeleníti meg a program."* A program egyik fő funkciója pont az, hogy egy **offline** Windows-kötetről is lehessen csomagot törölni. Ha egy osztályt elrejtünk a törlésből, azzal a technikustól veszünk el egy javítási utat — méghozzá pont abban a helyzetben, amikor a legnagyobb szüksége van rá.
+
+**Ami viszont IGAZ MARAD a leletből, és nem hiba:** a gyártói firmware-csomag törlődik és nem jön vissza. Ez **nem kár, hanem a tervezett működés** — a felhasználó szavaival: *„ami third party driver, ott jó ha töröl mindent, nem probléma ha nem megy vissza."* A lánc ezt már ma is őszintén jelenti (regresszió-sor + a „nem került vissza" lista), tehát a technikus tud róla; ennél többet nem kell tenni.
+
+**A VALÓDI, ÁLTALÁNOSÍTHATÓ TANULSÁG:** ha egy leletre a válaszod egy ÚJ SZŰRŐ vagy KIZÁRÁS, előbb keresd meg ebben a fájlban, hogy az adott lista miért olyan amilyen. Ennek a projektnek a szűrői mind vérrel írt szabályok — és a törlés-oldali szűrés kifejezetten tiltott. Egy „logikusnak tűnő" új kizárás itt szinte mindig egy már meghozott termékdöntés felülírása.
+
+### A ZÁRÓ JELENTÉS SZŰRŐJE: A GYÁRTÓ-KÓDOS AZONOSÍTÓ ÖNMAGÁBAN NEM TEENDŐ (2026-09-03, ugyanaz a napló)
+
+A záró egészségjelentés **21 sorra hízott, amiből 17 zaj volt**: beépített HID/beviteli eszközök (`input.inf`, `keyboard.inf`, `hidserv.inf`, `hidi2c.inf`, `msgpiowin32.inf`), mind HELYESEN a Windows driverén. Ez ugyanaz a „sok sorból kevés a valódi" hiba, amit a szűrő megszüntetni hivatott — csak egy másik azonosító-alakon.
+
+**Az ok:** a 2026-08-25-i kivétel (`vendor_coded_input`) a `VID_`/`PID_`-es KÜLSŐ USB-perifériákat zárta ki, egy laptop BEÉPÍTETT HID-eszközei viszont `HID\VEN_HPQ&DEV_6001` alakúak — `VEN_`+`DEV_`, tehát „gyártó-kódos" —, így mind átment.
+
+**A helyes feltétel nem az azonosító alakja, hanem az, hogy VAN-E EGYÁLTALÁN GYÁRI CSOMAG.** A kivétel eredeti célja egy konkrét eset volt (a T580 tapipadja, amihez a Lenovo katalógusában van csomag); ha nincs csomag, a technikusnak nincs teendője, a sor puszta zaj. A `_health_report_worth_listing` ezért új, opcionális `pkg_devices` paramétert kapott, amit a lánc az `_staged_vendor_inf_for` (rebind.py) felmérésével tölt fel. A `hwscan.py` hívása szándékosan nem adja át (ott a számítás csak a naplóba megy, egy `dism`-hívást nem ér meg) — a `None` alapértelmezés a szűkebb, biztonságos viselkedés.
 
 ### A DRIVER-KERESÉS NÉZET ÁTÉPÍTÉSE — öt dobozból egy lista (2026-09-03)
 
