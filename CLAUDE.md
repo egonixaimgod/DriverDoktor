@@ -762,6 +762,82 @@ Három szabály ebből:
 2. **Ne adj át egy függvénynek olyan paramétert, amit nem használ.** A `task_id`/`title` semmit nem csinált, viszont pont ez adta a nem létező névre hivatkozás lehetőségét.
 3. **A `py_compile` és az import-teszt EZT NEM FOGJA MEG** — egy nem definiált név csak futáskor derül ki, ráadásul csak azon az ágon. A projekt ellenőrző-repertoárjába ezért kell egy statikus névellenőrzés is (pyflakes vagy AST-alapú), különösen a beágyazott függvényekre, amikből ez a kódbázis sokat használ.
 
+### „SOSE LESZ MINDEN NAPRAKÉSZ" — négy külön hiba egy terepi naplóból (2026-09-03, HP EliteDesk 800 G2, Build 294)
+
+Terepi jelentés: *„olyan mintha hiaba telepitgetnem a drivereket folyamatosan sose tudom azt elérni hogy minden naprakész legyen"*, *„a realtek hangkártya drivert felrakta már a program… mégis folyamatosan ajánlgatja"*, *„kiírja hogy hibás a videokartya driverem code 18 azt mondja telepítsem újra… de most telepitettem fel es mukodik"*. **Négy, egymástól független hiba adta össze ezt az élményt, és mind a négy a naplóból bizonyítható.** Ez a szekció azért részletes, mert mindegyik ugyanabba a hibaosztályba tartozik, amit ez a fájl végig üldöz: **a program némán mást csinált, mint amit magáról állított.**
+
+#### 1. A tartós no-bind tár HALOTT volt — `_device_stem` kétszer futott ugyanazon az értéken
+
+**A hiba.** `_no_bind_record` a MÁR letörzselt azonosítót menti (`{'pnp': k[0]}`, ahol `k[0] = _device_stem(...)`), az olvasó oldal viszont **mégegyszer** lefuttatta rajta. A régi `rsplit('\\', 1)[0]` egy egy-backslashes törzsből a puszta **buszneveet** csinálta:
+
+```
+írás   : HDAUDIO\FUNC_01&VEN_10EC&DEV_0221&SUBSYS_103C8054&REV_1001   (törzs, helyes)
+olvasás: HDAUDIO                                                       (!!)
+keresés: HDAUDIO\FUNC_01&VEN_10EC&DEV_0221&SUBSYS_103C8054&REV_1001   (a teljes pnp_id-ből)
+```
+
+A két kulcs **soha** nem egyezett. Élőben mérve a napló `known_no_bind={'PCI': [...]}` sora mutatja: a szótár kulcsa a busznév.
+
+**Amit elrontott — három dolog egyszerre:** (a) a `prev_no_bind` jelölés sosem került fel, tehát a **bizonyítottan nem alkalmazható** csomagot a felület minden szken után **újra ELŐRE BEJELÖLVE** ajánlotta (ez a „folyamatosan ajánlgatja" panasz); (b) a bejegyzések nem deduplikálódtak — a gépen ugyanaz az Intel-bejegyzés **négyszer** szerepelt; (c) a sikeres kötés utáni **kivezetés** sem talált rá semmire, tehát a tár csak hízott, sosem tisztult.
+
+**A javítás:** `_device_stem` az első **két** útvonal-elemet tartja meg, így teljes azonosítóra és törzsre ugyanazt adja — **idempotens**, akárhányszor futtatható.
+
+**A TANULSÁG, ami általánosítható: egy normalizáló függvényt úgy kell megírni, hogy a saját kimenetére alkalmazva ugyanazt adja.** Ha ez nem teljesül, előbb-utóbb valaki kétszer futtatja, és a hiba **néma** lesz — itt egy egész kényelmi funkció halt meg tőle úgy, hogy semmi nem hibázott. A 2026-08-31-i eredeti stem-javítás helyes volt, csak nem gondolta végig, hogy az írás és az olvasás **ugyanazt** a függvényt hívja majd.
+
+#### 2. A felületi előtag beszivárgott az azonosító kulcsba
+
+A megjelenítéshez a katalógus-találat címe elé `MS Katalógus: ` kerül (`_catalog_find_driver`), a tartalék-jelöltek viszont a **nyers** címmel jegyződtek fel. Ugyanaz a csomag így **két kulcson** ült (élőben mérve mindkét változat ott volt a fájlban), tehát a dedup és a maszkolás is kettévált rajta. `_nb_title` most levágja az előtagot minden kulcs-számításnál. **Tanulság: egy megjelenítési előtag soha nem lehet része egy azonosító kulcsnak** — ha a kulcs és a kiírt szöveg ugyanabból a mezőből jön, az előbb-utóbb elválik.
+
+#### 3. A program SAJÁT MAGA rontotta el a videokártyát — Code 18 (a takarítás a PnP-felderítés ELŐTT futott)
+
+A napló, szó szerint:
+
+```
+13:20:01  4/9 INF illeszkedik erre a gépre - csak azokat telepítjük:
+          ['cui_dch.inf', 'igcc_dch.inf', 'iigd_dch.inf', 'IntcDAud.inf']
+13:21:04  ✅ Intel(R) HD Graphics 530 telepítve!
+13:21:04  a csomag 4 INF-jéből 2 egyetlen jelen lévő eszközön sem használt
+          - kivezetés a DriverStore-ból: ['cui_dch.inf', 'igcc_dch.inf']
+13:21:05  pnputil /delete-driver oem21.inf   -> deleted
+13:21:05  pnputil /delete-driver oem31.inf   -> deleted
+13:21:05  pnputil /scan-devices              <- CSAK EZUTÁN!
+```
+
+A `cui_dch.inf` / `igcc_dch.inf` a DCH-driver **kísérő komponensei** (Intel Graphics Control Panel / Command Center). A hozzájuk tartozó `SoftwareComponent` eszköz-csomópontokat a Windows csak a PnP **újra-felderítéskor** hozza létre — a takarítás viszont **azelőtt** futott, tehát „egyetlen jelen lévő eszköz sem használja", és kivezette őket. Két másodperccel később a `/scan-devices` létrehozta a csomópontokat, amiknek addigra **már nem volt csomagjuk** → `Code 18: A drivert újra kell telepíteni`. A felület hibás eszközként jelentette, a technikus újratelepítette, a takarítás megint törölte: **végtelen kör, amit a program hozott létre a semmiből.**
+
+**A javítás:** amit a `select_applicable_infs` kiválasztott, azt a takarítás **soha nem veheti ki** (új `selected_infs` paraméter). Miért ez a helyes szabály és miért nem elég a `/scan-devices` előrehozása: a szűkítés a **jelen lévő eszközök hardver-azonosítói** alapján döntött, tehát a program **már kimondta**, hogy ezek az INF-ek ehhez a géphez valók — ha utána a takarítás mégis kiveszi őket, a program **két helyen mond ellent önmagának**. A takarítás eredeti feladata (Razer-eset: 212 INF-ből 1 kell) ettől nem sérül: ott a szűkítés 1 INF-et választ, tehát nincs is mit kivezetni, a `sel is None` ág (nem eldönthető → csillagos telepítés) pedig változatlanul takarít — és pont az a Razer-eset.
+
+**A TANULSÁG: ha két lépés ugyanarról a dologról hoz döntést, a KÉSŐBBI nem bírálhatja felül a korábbit anélkül, hogy tudná, mit döntött az.** És: **egy „jelen lévő eszköz használja-e?" kérdés csak akkor válaszolható meg, ha a PnP-stack már felderítette az eszközöket** — telepítés után ez nem teljesül.
+
+#### 4. Egy 8 MÁSODPERCES DNS-KIESÉS egy egész telepítési kört vitt el
+
+```
+13:15:56  1/3 csonka letöltés: 45 194 494 / 338 956 520 byte jött le
+13:16:00  2/3 <urlopen error [Errno 11001] getaddrinfo failed>
+13:16:03  3/3 ugyanaz          ->  VÉGLEG sikertelen
+```
+
+Három próbálkozás fix 3 másodperces szünetekkel = **hét másodperc**, és pont a kiesés ablakába esett. Ugyanez a kiesés sorban megölte a köteg többi elemét is: **HD Graphics, Management Engine, SMBus, AMT SOL, Alaplap erőforrásai, HD Audio vezérlő** — hat eszköz, egyetlen pillanatnyi hálózati hibából, és a naplóból nézve mind „sikertelen csomag"-nak látszik, pedig a csomagokkal semmi baj nem volt.
+
+**Két javítás, és a második a fontosabb:**
+
+- **A hálózati hiba nem égeti el a próbálkozásokat.** `getaddrinfo`/timeout/kapcsolat-hiba esetén a program a meglévő `_wait_for_internet`-tel **megvárja a hálózatot** (ez DNS-t is ellenőriz — lásd a 2026-09-01-i javítást), és az a kör **nem számít bele** a keretbe. Korlátos: `CATALOG_DL_NET_REFUNDS` = 2 jóváírás, különben egy ingadozó kapcsolat végtelen körbe vinne.
+- **A LETÖLTÉSI BUKÁS NEM „MEGPRÓBÁLTUK".** Az AutoFix a `catalog_done` listát **szándékosan a telepítés ELŐTT** írja ki, hogy egy crash után ne kezdjen elölről egy több száz MB-os letöltést — csakhogy egy le sem töltött csomag így ugyanúgy megjelöltnek számított, a lánc **többi lába kihagyta** az eszközt, ráadásul a képernyőn a **valótlan** *„már felment, de az eszköz nem vette át"* szöveggel. `_install_catalog_sync` ezért `_catalog_dl_failed`-be gyűjti a csak-letöltésen-bukott tételeket, és az AutoFix **visszavonja** rájuk a jelölést.
+
+**Amit ez a vizsgálat KIZÁRT, és fontos kimondani:** a letöltési bukás **soha nem** számított sikeresnek, és **soha nem** került a tartós no-bind tárba (a `fail` számlálót növelte és `return`-nel kilépett) — tehát a **kézi szken** mindig újra felajánlotta. A hiba kizárólag a **láncon belüli** kihagyás volt. A felület most ki is mondja: *„Ez NEM azt jelenti, hogy a csomag rossz — le sem jött. A következő szkennelés újra felajánlja."*
+
+**A TANULSÁG: külön kell választani a „bizonyítottuk, hogy nem jó" és a „el sem jutott hozzánk" állapotot.** Egy hálózati hiba nem mond semmit a csomagról, tehát nem hozhat létre tartós következményt. Ugyanez az elv máshol is: a `_check_internet` DNS-javítása, a WU-keresés időkorlátja, a katalógus-lekérdezés gyorsítótára — mind arra épül, hogy **hibás lekérdezést sosem teszünk el.**
+
+#### Amit a napló még megmutatott, és nem volt hiba
+
+- **`catOrder is not defined`** — a napló ötször tartalmazza. Ez a [nézet-átépítésnél](#a-driver-keresés-nézet-átépítése--öt-dobozból-egy-lista-2026-09-03) leírt, Build 288 óta élő `ReferenceError`, ami a telepített driverek listáját tüntette el. **Élő terepi megerősítése annak a javításnak** — a hiba nem elméleti volt.
+- **`[INTEL] Gyári driver ellenőrzés sikertelen: HTTP 403`** — a napló **öt buildet** ölel át (290-294), és ezek a sorok a **2026-09-02 10:28**-as, Build 290-es futásból valók, tehát a videokártya-gyártói ág törlése ELŐTTRŐL. **Ez a fajta tévedés könnyen elkövethető: egy hosszú naplóban mindig ellenőrizd, MELYIK build írta a sort** (`grep "ELINDITVA (Build"`), mielőtt élő hibaként kezelnéd.
+- **`pnputil /delete-driver` visszatérési kód `3758096957`** (0xE0000BFD) a duplikátum-takarításban: a csomag használatban van, a pnputil elutasítja. Ez a takarítás **tervezett** viselkedése (sima `/delete-driver`, se `/uninstall`, se `/force` — ha bármi használja, marad), nem hiba.
+
+#### A „Kihagyott: N" magyarázata a képernyőn
+
+Terepi kérdés: *„7 telepitendo van 5 sikeres 0 sikertelen a maradek 2 vel mi tortenik ilyenkor?"*. A szám önmagában megválaszolatlan kérdés volt, és a technikus joggal olvasta úgy, hogy „2 driver a levegőben maradt". A kör most kimondja, hogy a kihagyott tétel **nem sikertelen telepítés**: vagy időközben naprakésznek bizonyult, vagy a program bizonyította, hogy a csomag más gépgyártó változata — és hogy a következő szkennelés már **nem is ajánlja fel**, mert feljegyeztük. (Ez utóbbi az 1. hiba javítása nélkül **nem volt igaz** — pont ezért érezte a technikus végtelennek a kört.)
+
 ### A DRIVER-KERESÉS NÉZET ÁTÉPÍTÉSE — öt dobozból egy lista (2026-09-03)
 
 **Explicit user decision**, terepi visszajelzés: *„egyszerűen kurvara lehetetlen kiigazodni, csinald ujra az egész oldal frontendjét… annyi felesleges dolgot kiír a program… olyan mint amikor megnyomod az 1 katt fixet és ott is szépen meg lett csinálva átláthatóra"*. A nézet fokozatosan **öt párhuzamos dobozzá** hízott (gyártói kártya, hibás eszközök, alapdriveres eszközök, tároló/firmware magyarázat, találati fa), és mindegyik ugyanarról a gépről beszélt, néha ellentmondva egymásnak. Az új szerkezet: **hero (benne az indítógomb) → keresési mód kártyák → EGY eredmény-panel: összefoglaló csík → szűrő-fülek → egyetlen lista → ragadós művelet-sáv.**

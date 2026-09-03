@@ -1090,6 +1090,30 @@ class GuiAutofixMixin:
                                      f"már próbáltuk'-ként: {[d.get('name') for d in found][:8]}")
                         s, _f, _c = self._install_catalog_sync(found, task_id=task_id)
                         total_installed_in_session += s
+                        # A "MÁR PRÓBÁLTUK" JELÖLÉS VISSZAVONÁSA AZOKRA, AMIK EL SEM JUTOTTAK
+                        # A GÉPRE (2026-09-03, terepen mérve). A `catalog_done`-t szándékosan
+                        # a telepítés ELŐTT írjuk ki, hogy egy crash után ne induljon elölről
+                        # egy több száz MB-os letöltés - de ez CSAK akkor helyes, ha a csomag
+                        # tényleg megérkezett. Egy hálózat-kiesésnél a jelölés ugyanúgy ott
+                        # maradna, és a lánc TÖBBI LÁBA kihagyná az eszközt, ráadásul a
+                        # képernyőn a valótlan "már felment, de az eszköz nem vette át"
+                        # szöveggel. Mérve: egy 8 másodperces DNS-kiesés így hat eszközt vitt
+                        # el egyszerre (HD Graphics, Management Engine, SMBus, AMT SOL,
+                        # Alaplap erőforrásai, HD Audio vezérlő) - a technikus pedig azt
+                        # látta, hogy "hiába telepítgetem, sose lesz minden naprakész".
+                        dl_bad = [((d.get('pnp_id') or '').upper(), d.get('wu_title') or '')
+                                  for d in (getattr(self, '_catalog_dl_failed', None) or [])]
+                        if dl_bad:
+                            keep = [t for t in (self._autofix_stats_get('catalog_done') or [])
+                                    if (t.get('pnp', ''), t.get('title', '')) not in set(dl_bad)]
+                            self._autofix_stats_set('catalog_done', keep)
+                            logging.warning(f"[AUTOFIX] {len(dl_bad)} csomag CSAK a letöltésen bukott el "
+                                            f"(hálózat) - a 'már próbáltuk' jelölést visszavontuk, a "
+                                            f"következő láb újra megpróbálja: "
+                                            f"{[d.get('name') for d in self._catalog_dl_failed][:8]}")
+                            self.emit('task_progress', {'task': task_id, 'log':
+                                      f'↻ {len(dl_bad)} csomag le sem jött (hálózati hiba) - a következő '
+                                      f'kör ÚJRA megpróbálja, nem íródik le véglegesen sikertelenként.'})
                         # Amit most nem vett át az eszköz, azt jegyezzük fel a következő lábnak.
                         # A BUKÁS OKA is elmegy: a záró jelentés csak ebből tudja
                         # megkülönböztetni a két, gyökeresen mást jelentő esetet -

@@ -94,7 +94,15 @@ PNP_ERROR_CODE_REMEDIES = {
     10: 'Próbáld az "Eszközök újrakötése" gombot, majd telepíts újabb drivert. Ha marad, hardverhiba is lehet.',
     12: 'Két eszköz ugyanazt az erőforrást kéri. BIOS-ban tiltsd le a nem használt eszközöket, vagy tedd másik PCIe-portba a kártyát.',
     14: 'Indítsd újra a gépet — ez a hibakód ettől magától eltűnik.',
-    18: 'Telepítsd újra a drivert: szkennelés → jelöld be az eszközt → Telepítés.',
+    # A 18-as kód a DCH-driverek KÍSÉRŐ komponensein (Intel Graphics Command Center /
+    # Control Panel, SoftwareComponent osztály) a leggyakoribb - ott a driver-fájl maga
+    # hiányzik a DriverStore-ból. Build 294-ig ezt a program SAJÁT MAGA okozta: a
+    # telepítés utáni INF-takarítás kivezette a kísérő INF-eket, mielőtt a Windows
+    # létrehozta volna a hozzájuk tartozó eszközöket (lásd _cleanup_unused_staged_infs).
+    18: 'Telepítsd újra a drivert: szkennelés → jelöld be az eszközt → Telepítés. '
+        '(Videokártya kísérő-komponenseinél — Intel Graphics Command Center, Control Panel — '
+        'ez a driver újratelepítésével rendbe jön; a hozzájuk tartozó alkalmazást a Microsoft '
+        'Store hozza le magától.)',
     19: 'Sérült registry-bejegyzés. Az "Eszközök újrakötése" gomb újraépíti; ha nem elég, az 1 kattintásos fix megoldja.',
     21: 'A Windows épp eltávolítja — várj pár másodpercet, majd szkennelj újra. Ha marad, indítsd újra a gépet.',
     22: 'Az eszköz le van tiltva. Kattints a sor melletti "Engedélyezés" gombra.',
@@ -195,8 +203,48 @@ def _device_stem(pnp_id):
 
     A törzs maga a hardver-azonosító, ami újrafelderítés után is ugyanaz. Két azonos
     eszköznél közös - ez helyes: ami az egyikre nem alkalmazható, az az ikertestvérére
-    sem. Régi bejegyzésekhez is működik, nem kell séma-váltás."""
-    return (pnp_id or '').upper().rsplit('\\', 1)[0]
+    sem. Régi bejegyzésekhez is működik, nem kell séma-váltás.
+
+    IDEMPOTENS KELL LEGYEN, ÉS 2026-09-03-IG NEM VOLT AZ - ez volt a "sose lesz minden
+    naprakész" érzés fő oka (terepen mérve, HP EliteDesk 800 G2). A régi kód
+    `rsplit('\\', 1)[0]`-t használt, ami a TELJES példány-azonosítón helyes:
+
+        HDAUDIO\\FUNC_01&...&REV_1001\\5&337FEF56&0&0001  ->  HDAUDIO\\FUNC_01&...&REV_1001
+
+    csakhogy a tartós no-bind tár a MÁR LETÖRZSELT értéket menti el (`_no_bind_record`
+    a `k[0]`-t írja ki), és az olvasó oldal (`_no_bind_load` hívói) MÉGEGYSZER
+    lefuttatta rajta - egy egy-backslashes törzsből pedig a puszta BUSZNEVET csinálta:
+
+        HDAUDIO\\FUNC_01&...&REV_1001  ->  HDAUDIO        <- olvasási kulcs
+        (a keresési kulcs közben a helyes teljes törzs maradt)
+
+    A kettő SOHA nem egyezett, tehát a tár gyakorlatilag halott volt. Három dolog
+    romlott el tőle egyszerre: (a) a `prev_no_bind` jelölés sosem került fel, így a
+    bizonyítottan NEM alkalmazható csomagot a felület minden szken után újra ELŐRE
+    BEJELÖLVE ajánlotta; (b) a bejegyzések nem deduplikálódtak (élőben mérve: ugyanaz
+    az Intel-bejegyzés NÉGYSZER a fájlban); (c) a sikeres kötés utáni KIVEZETÉS sem
+    talált rá semmire, tehát a tár csak hízott.
+
+    A javítás az első KÉT útvonal-elem megtartása, ami teljes azonosítóra és törzsre
+    egyaránt ugyanazt adja - vagyis akárhányszor futtatható."""
+    parts = (pnp_id or '').upper().split('\\')
+    return '\\'.join(parts[:2])
+
+
+# A tartós no-bind tár CÍM-oldali kulcsa. A megjelenítéshez a katalógus-találat címe elé
+# `MS Katalógus: ` kerül (lásd `_catalog_find_driver`), a tartalék-jelöltek viszont a
+# NYERS címmel jegyződnek fel - ugyanaz a csomag így KÉT kulcson landolt. Élőben mérve
+# (2026-09-03, HP EliteDesk): ugyanaz az Intel-csomag egyszerre szerepelt
+# `MS Katalógus: Intel(R) Corporation - System - 9.21.0.4561` és
+# `Intel(R) Corporation - System - 9.21.0.4561` néven, tehát a dedup és a maszkolás is
+# kettévált rajta. Egy FELÜLETI előtag nem lehet része egy azonosító kulcsnak.
+_NB_TITLE_PREFIX = 'ms katalógus:'
+
+
+def _nb_title(title):
+    """A no-bind kulcshoz használt, megjelenítési előtag nélküli cím."""
+    t = (title or '').strip()
+    return t[len(_NB_TITLE_PREFIX):].strip() if t.lower().startswith(_NB_TITLE_PREFIX) else t
 # Ha az INF-vizsgálat elveti a nyertes csomagot, ennyi TARTALÉK jelöltet próbálunk még
 # (a nyertessel együtt ennyi letöltés lehet összesen). Csak azonos dátumú jelöltek
 # jönnek szóba, tehát a tartalék sosem lehet régebbi kiadás - lásd _catalog_find_driver.
@@ -1652,7 +1700,7 @@ try {
                     if _device_stem(rec.get('pnp')) != pnp:
                         continue
                     same = (rec.get('guid') and rec['guid'] == hit.get('cat_guid')) or \
-                           (rec.get('title') or '') == title
+                           _nb_title(rec.get('title')) == _nb_title(title)
                     older_variant = (
                         not same and rec.get('title')
                         and catalog_title_family(rec['title']) == catalog_title_family(title)
@@ -1912,19 +1960,19 @@ try {
         """Nem-kötő csomagok feljegyzése + igazoltan átvett telepítések kivezetése."""
         try:
             existing = self._no_bind_load()
-            bound_keys = {(_device_stem(d.get('pnp_id')), d.get('wu_title') or '')
+            bound_keys = {(_device_stem(d.get('pnp_id')), _nb_title(d.get('wu_title')))
                           for d in (bound_ok_items or [])}
             removed = [t.get('name') or t.get('title') for t in existing
-                       if (_device_stem(t.get('pnp')), t.get('title') or '') in bound_keys]
+                       if (_device_stem(t.get('pnp')), _nb_title(t.get('title'))) in bound_keys]
             if removed:
                 existing = [t for t in existing
-                            if (_device_stem(t.get('pnp')), t.get('title') or '') not in bound_keys]
+                            if (_device_stem(t.get('pnp')), _nb_title(t.get('title'))) not in bound_keys]
                 logging.info(f"[CATALOG] {len(removed)} bejegyzés törölve a tartós no-bind listáról "
                              f"(az eszköz most már átvette a csomagot): {removed}")
-            keys = {(_device_stem(t.get('pnp')), t.get('title') or '') for t in existing}
+            keys = {(_device_stem(t.get('pnp')), _nb_title(t.get('title'))) for t in existing}
             added = []
             for d in (no_bind_items or []):
-                k = (_device_stem(d.get('pnp_id')), d.get('wu_title') or '')
+                k = (_device_stem(d.get('pnp_id')), _nb_title(d.get('wu_title')))
                 if not k[1] or k in keys:
                     continue
                 keys.add(k)
@@ -2096,7 +2144,7 @@ try {
         self.emit('task_progress', {'task': task_id, 'log': f'✅ DriverStore-takarítás: {done} fel nem használt INF kivezetve.\n'})
         return done
 
-    def _cleanup_unused_staged_infs(self, pnp_out, name, task_id, defer=False):
+    def _cleanup_unused_staged_infs(self, pnp_out, name, task_id, defer=False, selected_infs=None):
         """Több-INF-es katalógus-csomag FEL NEM HASZNÁLT INF-jeinek kivezetése a DriverStore-ból.
 
         Miért: a `pnputil /add-driver <mappa>\\*.inf /subdirs /install` a csomag MINDEN
@@ -2117,7 +2165,40 @@ try {
         `defer=True` (reboot-igényes telepítés): MOST nem ítélkezünk - a kötés a következő
         bootnál dől el -, de a csomagot NEM ejtjük: feljegyezzük, és a következő láb
         (`_finish_deferred_inf_cleanup`) friss rendszerállapotból dönt róla. Korábban itt
-        egyszerűen véget ért a történet, és a fel nem használt INF-ek örökre bent maradtak."""
+        egyszerűen véget ért a történet, és a fel nem használt INF-ek örökre bent maradtak.
+
+        `selected_infs`: AMIT A `select_applicable_infs` KIVÁLASZTOTT - EZEKET SOSEM
+        VEZETJÜK KI (2026-09-03, terepen mérve, HP EliteDesk 800 G2 + Intel HD 530).
+        A program SAJÁT MAGA rontotta el vele a videokártyát, és ez a "kiírja hogy hibás
+        a videokartya driverem code 18... most telepitettem fel es mukodik" jelentés oka:
+
+          13:20:01  4/9 INF illeszkedik erre a gépre - csak azokat telepítjük:
+                    ['cui_dch.inf', 'igcc_dch.inf', 'iigd_dch.inf', 'IntcDAud.inf']
+          13:21:04  ✅ Intel(R) HD Graphics 530 telepítve!
+          13:21:04  a csomag 4 INF-jéből 2 egyetlen jelen lévő eszközön sem használt
+                    - kivezetés a DriverStore-ból: ['cui_dch.inf', 'igcc_dch.inf']
+          13:21:05  pnputil /delete-driver oem21.inf   -> deleted
+          13:21:05  pnputil /delete-driver oem31.inf   -> deleted
+          13:21:05  pnputil /scan-devices              <- CSAK EZUTÁN!
+
+        A SORREND A HIBA. A `cui_dch.inf` / `igcc_dch.inf` a DCH-driver KÍSÉRŐ
+        komponensei (Intel Graphics Control Panel / Command Center): a hozzájuk tartozó
+        SoftwareComponent eszköz-csomópontokat a Windows csak a PnP újra-felderítéskor
+        hozza létre. A takarítás viszont AZELŐTT futott, tehát "egyetlen jelen lévő
+        eszköz sem használja" - és kivezette őket. Két másodperccel később a
+        `/scan-devices` létrehozta a csomópontokat, amiknek addigra MÁR NEM VOLT
+        csomagjuk -> `Code 18: A drivert újra kell telepíteni`. A felület ezt hibás
+        eszközként jelentette, a technikus újratelepítette, a takarítás megint törölte:
+        végtelen kör, és ebből jött a "sose tudom elérni hogy minden naprakész legyen".
+
+        MIÉRT EZ A HELYES SZABÁLY, és miért nem elég a `/scan-devices` előrehozása: a
+        `select_applicable_infs` a JELEN LÉVŐ eszközök hardver-azonosítói alapján
+        választott, tehát a kiválasztott INF-ekről a program MÁR KIMONDTA, hogy ehhez a
+        géphez valók. Ha utána a takarítás mégis kiveszi őket, a program két helyen
+        mond ellent önmagának. A takarítás eredeti feladata (Razer-eset: 212 INF-ből 1
+        kell) ettől nem sérül: ott a szűkítés 1 INF-et választ, tehát nincs is mit
+        kivezetni; a `sel is None` ág (nem eldönthető -> csillagos telepítés) pedig
+        változatlanul takarít, és pont az a Razer-eset."""
         try:
             blocks = re.split(r'(?=Adding driver package)', pnp_out or '')
             entries = []
@@ -2134,6 +2215,20 @@ try {
                 self._defer_inf_cleanup(entries, name)
                 return
             unused = [(inf, pub) for inf, pub, used in entries if not used]
+            # A KIVÁLASZTOTT INF-EK VÉDETTEK (lásd a docstring Intel/Code 18 esetét).
+            # Fájlnév szerint hasonlítunk (a `sel` teljes útvonalakat tartalmaz, a
+            # pnputil kimenete pedig hol útvonalat, hol csak nevet ad), kisbetűsen.
+            keep = {os.path.basename(x).lower() for x in (selected_infs or [])}
+            if keep:
+                protected = [(inf, pub) for inf, pub in unused
+                             if os.path.basename(inf).lower() in keep]
+                if protected:
+                    logging.info(f"[CATALOG_INSTALL] {name}: {len(protected)} INF-et NEM vezetünk ki, "
+                                 f"mert a szűkítés szerint ehhez a géphez valók (a kísérő "
+                                 f"komponensek eszközei csak a következő PnP-felderítéskor "
+                                 f"jönnek létre): {[os.path.basename(i) for i, _ in protected]}")
+                unused = [(inf, pub) for inf, pub in unused
+                          if os.path.basename(inf).lower() not in keep]
             if not unused:
                 return
             logging.info(f"[CATALOG_INSTALL] {name}: a csomag {len(entries)} INF-jéből {len(unused)} egyetlen "
@@ -2251,6 +2346,20 @@ try {
         # ezt átviszi a következő lábra, hogy ne töltse le újra ugyanazt.
         no_bind = []
         self._catalog_no_bind = no_bind
+        # AMI CSAK A LETÖLTÉSEN BUKOTT EL (hálózat, csonka cab, sérült kicsomagolás).
+        # EZ NEM UGYANAZ, MINT A no_bind, ÉS A KÜLÖNBSÉG LÉTFONTOSSÁGÚ (2026-09-03):
+        # a no_bind azt jelenti, hogy a csomagról BIZONYÍTOTTUK, hogy nem ide való; ez
+        # viszont annyit tesz, hogy a csomag EL SEM JUTOTT a gépre. Az AutoFix a
+        # `catalog_done` listát MÉG A TELEPÍTÉS ELŐTT írja ki ("ebben a láncban már
+        # próbáltuk"), hogy egy crash után ne kezdjen elölről egy több száz MB-os
+        # letöltést - csakhogy egy pillanatnyi hálózat-kiesés így ugyanúgy "megpróbáltuk"
+        # bejegyzést kap, és a lánc TÖBBI LÁBA kihagyja az eszközt, ráadásul a képernyőn
+        # a valótlan *"már felment, de az eszköz nem vette át"* szöveggel. Terepen ez egy
+        # 8 másodperces DNS-kiesésnél hat eszközt vitt el egyszerre. A hívó ezért ezeket
+        # VISSZAVONJA a `catalog_done`-ból - egy le sem töltött csomagot nem szabad
+        # megpróbáltnak tekinteni.
+        dl_failed = []
+        self._catalog_dl_failed = dl_failed
         # Azok az elemek, amiknél a kötés-ellenőrzés IGAZOLTA, hogy az eszköz átvette a
         # drivert - ezek kulcsát a tartós no-bind emlékezetből törölni kell (ha egy
         # korábban nem-kötő csomag most mégis felment, a jelölése elavult).
@@ -2361,6 +2470,13 @@ try {
                 # (b) az expand hibája és a hiányzó INF is újrapróbálást vált ki (sérült
                 # cab), nem végleges hibát.
                 CATALOG_DL_ATTEMPTS = 3
+                # HÁLÓZAT-KIESÉS: mennyit várunk a visszatérésére, és hányszor írhatunk
+                # jóvá emiatt egy próbálkozást. A 180 mp a `_wait_for_internet` szokásos
+                # kerete (ugyanaz a nagyságrend, mint az AutoFix vezetékes várakozása);
+                # a 2 jóváírás azért kell, hogy egy ingadozó kapcsolat se vihessen
+                # végtelen körbe - lásd a ciklusban a részletes indoklást.
+                CATALOG_DL_NET_WAIT = 180
+                CATALOG_DL_NET_REFUNDS = 2
                 chosen = None        # (guid, cím, dátum, url) - amit végül telepítünk
                 # UGYANAZT A CSOMAGOT NEM TÖLTJÜK LE KÉTSZER (lásd lent).
                 tried_urls = set()
@@ -2416,11 +2532,18 @@ try {
                         self.emit('task_progress', {'task': task_id, 'log': f'  ↻ {name}: következő katalógus-jelölt próbája ({cand_title})...'})
                     url = cand_url
                     pkg_ok, last_err = False, None
-                    for attempt in range(1, CATALOG_DL_ATTEMPTS + 1):
+                    # `while` és nem `for`, mert egy HÁLÓZAT-KIESÉS miatti kör NEM számít
+                    # bele a keretbe (lásd lentebb): olyankor `attempt_budget` nő eggyel,
+                    # tehát ugyanannyi VALÓDI próbálkozás marad. A keret így is korlátos -
+                    # `CATALOG_DL_NET_REFUNDS` a maximum, amit a hálózat "visszaadhat",
+                    # különben egy örökké ingadozó kapcsolat végtelen körbe vinne.
+                    attempt, attempt_budget, refunds = 0, CATALOG_DL_ATTEMPTS, 0
+                    while attempt < attempt_budget:
+                        attempt += 1
                         if self._check_cancel():
                             return
                         try:
-                            logging.debug(f"[CATALOG_INSTALL] Letöltés ({attempt}/{CATALOG_DL_ATTEMPTS}): {url[:80]}...")
+                            logging.debug(f"[CATALOG_INSTALL] Letöltés ({attempt}/{attempt_budget}): {url[:80]}...")
                             req = urllib.request.Request(url, headers={'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)'})
                             with urllib.request.urlopen(req, context=ssl_ctx, timeout=120) as resp, open(cab_path, 'wb') as f:
                                 expected_len = resp.headers.get('Content-Length')
@@ -2462,23 +2585,70 @@ try {
                             break
                         except Exception as e:
                             last_err = e
-                            logging.warning(f"[CATALOG_INSTALL] Letöltési/kicsomagolási hiba ({name}, {attempt}/{CATALOG_DL_ATTEMPTS}): {e}")
+                            logging.warning(f"[CATALOG_INSTALL] Letöltési/kicsomagolási hiba ({name}, {attempt}/{attempt_budget}): {e}")
                             try:
                                 if os.path.exists(cab_path):
                                     os.remove(cab_path)
                             except Exception as ce:
                                 logging.debug(f"[CATALOG_INSTALL] A félbemaradt fájl törlése sikertelen ({cab_path}): {ce}")
                             shutil.rmtree(ext_path, ignore_errors=True)
-                            if attempt < CATALOG_DL_ATTEMPTS:
-                                self.emit('task_progress', {'task': task_id, 'log': f'  ↻ {name} letöltése megszakadt ({e}) - újrapróbálás ({attempt + 1}/{CATALOG_DL_ATTEMPTS})...'})
+                            # HÁLÓZAT-KIESÉSNÉL MEGVÁRJUK A HÁLÓZATOT, NEM ÉGETJÜK EL A
+                            # PRÓBÁLKOZÁSOKAT (2026-09-03, terepen mérve, HP EliteDesk).
+                            # A DNS 8 másodpercre elment, és a 3 fix, 3 másodperces szünetű
+                            # próbálkozás pont abba az ablakba esett:
+                            #   13:15:56  1/3 csonka letöltés (45 MB / 339 MB)
+                            #   13:16:00  2/3 <urlopen error [Errno 11001] getaddrinfo failed>
+                            #   13:16:03  3/3 ugyanaz  ->  VÉGLEG sikertelen
+                            # Hét másodperc alatt elfogyott minden esély, és ugyanez a
+                            # kiesés sorban megölte a köteg TÖBBI elemét is (HD Graphics,
+                            # Management Engine, SMBus, AMT SOL, Alaplap erőforrásai) -
+                            # egy 30 másodperces DNS-hiba tehát egy egész telepítési kört
+                            # vitt el. Ez a "hiába telepítgetem, sose lesz minden naprakész"
+                            # érzés harmadik forrása, és a naplóból nézve "sikertelen
+                            # csomag"-nak látszik, pedig a csomaggal semmi baj nem volt.
+                            #
+                            # A hálózati hibát ezért megkülönböztetjük: ilyenkor a szünet
+                            # helyett a MEGLÉVŐ `_wait_for_internet`-tel várunk (DNS-t is
+                            # ellenőriz - lásd a 2026-09-01-i javítást), és a várakozás
+                            # NEM számít bele a próbálkozásokba. Így egy pillanatnyi kiesés
+                            # már nem dönt el semmit; egy tartós viszont továbbra is
+                            # korlátos, mert a `_wait_for_internet` maga is időkorlátos, és
+                            # a hálózat nélküli kísérletek ugyanúgy elfogynak.
+                            net_err = any(s in str(e).lower() for s in (
+                                'getaddrinfo', '11001', 'urlopen error', 'timed out',
+                                'connection', 'unreachable', 'ssl'))
+                            if (net_err and refunds < CATALOG_DL_NET_REFUNDS
+                                    and not self._check_internet(require_dns=True)):
+                                self.emit('task_progress', {'task': task_id, 'log':
+                                          f'  🌐 {name}: megszakadt a hálózat - várunk, amíg visszajön '
+                                          f'(ez a próbálkozás nem vész el)...'})
+                                if self._wait_for_internet(CATALOG_DL_NET_WAIT, task_id=task_id,
+                                                           reason='a driver letöltéséhez'):
+                                    # Volt kiesés, most visszajött: ez a kör nem számít bele.
+                                    refunds += 1
+                                    attempt_budget += 1
+                                    logging.info(f"[CATALOG_INSTALL] {name}: a hálózat visszajött, a "
+                                                 f"{attempt}. próbálkozás nem számít bele "
+                                                 f"({refunds}/{CATALOG_DL_NET_REFUNDS} jóváírás).")
+                                    continue
+                            if attempt < attempt_budget:
+                                self.emit('task_progress', {'task': task_id, 'log': f'  ↻ {name} letöltése megszakadt ({e}) - újrapróbálás ({attempt + 1}/{attempt_budget})...'})
                                 time.sleep(3)
                     if not pkg_ok:
                         # A LETÖLTÉS bukása nem "rossz csomag" - itt nincs értelme a következő
                         # jelöltnek (a hálózat a hibás), ezért az eredeti viselkedés marad.
-                        logging.error(f"[CATALOG_INSTALL] Letöltés/kicsomagolás VÉGLEG sikertelen {CATALOG_DL_ATTEMPTS} próbálkozás után ({name}): {last_err}")
-                        self.emit('task_progress', {'task': task_id, 'log': f'  ❌ {name} letöltési/kicsomagolási hiba {CATALOG_DL_ATTEMPTS} próbálkozás után: {last_err}'})
+                        logging.error(f"[CATALOG_INSTALL] Letöltés/kicsomagolás VÉGLEG sikertelen {attempt} próbálkozás után ({name}): {last_err}")
+                        self.emit('task_progress', {'task': task_id, 'log': f'  ❌ {name} letöltési/kicsomagolási hiba {attempt} próbálkozás után: {last_err}'})
+                        self.emit('task_progress', {'task': task_id, 'log':
+                                  f'     ℹ️ Ez NEM azt jelenti, hogy a csomag rossz - le sem jött. '
+                                  f'A következő szkennelés újra felajánlja.'})
                         with counter_lock:
                             fail += 1
+                            # A hívónak (AutoFix) tudnia kell, hogy ez CSAK letöltési bukás
+                            # volt: a "ebben a láncban már próbáltuk" jelölést vissza kell
+                            # vonnia, különben egy hálózat-kiesés a lánc végéig kizárja az
+                            # eszközt. Lásd a `dl_failed` deklarációjánál a magyarázatot.
+                            dl_failed.append(dict(drv))
                         return
 
                     # ALKALMAZHATÓSÁG-ELLENŐRZÉS a telepítés ELŐTT (lásd wu_core.inf_package_applies):
@@ -2678,7 +2848,11 @@ try {
                 if not is_offline:
                     pkg_reboot = (res.returncode == 3010
                                   or 'reboot is needed' in (res.stdout or '').lower())
-                    self._cleanup_unused_staged_infs(res.stdout or '', name, task_id, defer=pkg_reboot)
+                    # `sel` = amit a select_applicable_infs BIZONYÍTOTTAN ehhez a géphez
+                    # valónak talált. Ezeket a takarítás nem veheti ki - lásd az ottani
+                    # magyarázatot (Intel DCH kísérő-INF-ek / Code 18 eset).
+                    self._cleanup_unused_staged_infs(res.stdout or '', name, task_id,
+                                                     defer=pkg_reboot, selected_infs=sel)
 
             # HALADÁS-JELZÉS CSOMAGONKÉNT (2026-08-31, terepi visszajelzés: *"nincs
             # progress bar nincs szazalek nincs ido nincs semmi csak plain szöveg"*).
@@ -2822,6 +2996,18 @@ try {
         logging.info(f"[CATALOG_INSTALL] Kész - Sikeres: {success}/{total}, Sikertelen: {fail}, Kihagyott: {skipped}")
         self.emit('task_progress', {'task': task_id, 'current': total, 'total': total,
                                     'log': f'\n--- Katalógus: Sikeres: {success}, Sikertelen: {fail}' + (f', Kihagyott: {skipped}' if skipped else '') + ' ---'})
+        # A "KIHAGYOTT" SZÁM ÖNMAGÁBAN MEGVÁLASZOLATLAN KÉRDÉS (2026-09-03, terepi
+        # visszajelzés: *"7 telepitendo van 5 sikeres 0 sikertelen a maradek 2 vel mi
+        # tortenik ilyenkor?"*). A technikus joggal olvassa úgy, hogy "2 driver a
+        # levegőben maradt". Nem ez a helyzet: a kihagyott tétel vagy már naprakész volt,
+        # vagy a program bizonyította, hogy a csomag nem ehhez a géphez való - egyik sem
+        # elvarratlan szál. Ezt ki kell mondani, különben a szám maga kelt hiányérzetet.
+        if skipped:
+            self.emit('task_progress', {'task': task_id, 'log':
+                      f'ℹ️ A {skipped} kihagyott tétel NEM sikertelen telepítés: vagy időközben '
+                      f'naprakésznek bizonyult, vagy a csomag más gépgyártó változata (a program '
+                      f'letöltötte és ellenőrizte). Ezeket a következő szkennelés már nem is '
+                      f'ajánlja fel — feljegyeztük őket.'})
         if no_source:
             logging.warning(f"[CATALOG_INSTALL] Nincs való csomag a katalógusban: {no_source}")
             self.emit('task_progress', {'task': task_id, 'log':
