@@ -319,7 +319,15 @@ def _menu_hwscan(api):
 
 
 def _hwscan_flow(api):
-    deep = ui.confirm('Mély keresés (a katalógus MINDEN eszközre — lassabb, de többet talál)?', True)
+    # GYORS MÓD a kézi szkenben is. A kapcsoló 2026-09-02-án bekerült a GUI-szkenbe és a
+    # CLI AutoFixbe, de INNEN kimaradt - vagyis a négy helyből háromban létezett, a
+    # negyedikben némán mindig teljes keresés futott. Pontosan az a "duplikált logika,
+    # aminek egy példánya lemarad" hiba, amiből ennek a projektnek a legtöbb sebe van.
+    use_catalog = ui.confirm('Microsoft Update Catalog keresés is? (nem = GYORS MÓD, gyorsabb, '
+                             'de a katalógus-only találatok elvesznek)', True)
+    deep = True
+    if use_catalog:
+        deep = ui.confirm('Mély keresés (a katalógus MINDEN eszközre — lassabb, de többet talál)?', True)
     ui.write('')
     # TÁROLÓ/FIRMWARE: 2026-09-02 óta nem kérdés, hanem rögzített szabály (lásd
     # app/gui/hwscan.py: start_hw_scan). A CLI is teljes értékű felület, ezért ha ITT
@@ -327,13 +335,25 @@ def _hwscan_flow(api):
     # a felhasználó kérése viszont az volt, hogy SOHA ne lehessen bekapcsolni.
     ui.dim('Tároló- és firmware-driverek: a program ezekre soha nem keres (rossz tároló-driver')
     ui.dim('után a Windows el sem indul, a firmware-írás pedig visszafordíthatatlan).')
-    _sync(api, api.start_hw_scan, deep, False, False)
+    _sync(api, api.start_hw_scan, deep, False, False, use_catalog)
     res = api._cli_take('hw_scan_result', {})
     ui.write('')
-    ui.kv('Rendszer', res.get('sys_info') or '-')
+    # A `skipped_risky` mező 2026-09-03-án kikerült a payloadból (a "N tároló-eszköz
+    # kihagyva" sor a képernyőről is), ezért az azt kiíró ág is elmaradt innen: egy
+    # örökre hamis `if` pont az az élőnek látszó holt kód, amit ez a projekt máshol irt.
+    ui.kv('Gép', res.get('machine') or res.get('sys_info') or '-')
+    if res.get('dev_count'):
+        ui.kv('Megvizsgált eszköz', str(res['dev_count']))
+    ui.kv('Forrás', res.get('mode') or '-')
     ui.kv('Eltelt idő', res.get('time') or '-')
-    if res.get('skipped_risky'):
-        ui.warn(res['skipped_risky'])
+    # A szűk eredmény OKA - ugyanazok a figyelmeztetések, mint a grafikus felületen.
+    if res.get('catalog_skipped') and res.get('wu_failed'):
+        ui.warn('EGYIK FORRÁS SEM FUTOTT LE: a Windows Update nem válaszolt, a katalógus '
+                'pedig gyors módban ki volt kapcsolva. Futtasd újra teljes kereséssel!')
+    elif res.get('wu_failed'):
+        ui.warn('A Windows Update nem válaszolt (időtúllépés) — az eredmény csak a katalógusból van.')
+    elif res.get('catalog_skipped'):
+        ui.dim('Gyors mód: csak a Windows Update-et kérdeztük meg.')
     _hwscan_table(api, res.get('pool'))
     probs = res.get('problems') or []
     if probs:
@@ -413,6 +433,19 @@ def _hwscan_problems(api):
     rows = [[str(i), p.get('name') or '', str(p.get('code') or ''), p.get('desc') or '',
              'igen' if p.get('has_fix') else '-'] for i, p in enumerate(probs, 1)]
     ui.table(['#', 'Eszköz', 'Kód', 'Leírás', 'Javítható'], rows, widths=[4, 28, 6, 40, 10])
+    # A TEENDŐ IS KIÍRÓDIK, NEM CSAK A HIBAKÓD (2026-09-03, explicit user decision:
+    # "ez mit jelent pl h code 24? irja mar le a program h mit kell vele csinalni h
+    # eltunjon"). A szöveget a Python adja (hwscan.PNP_ERROR_CODE_REMEDIES), ezért a
+    # CLI és a grafikus felület ugyanazt mondja - két külön szöveg előbb-utóbb
+    # ellentmondana egymásnak ugyanarról a hibakódról. Táblázat helyett külön blokk:
+    # ezek 1-2 mondatos utasítások, egy oszlopba tördelve olvashatatlanok lennének.
+    remedies = [p for p in probs if p.get('remedy')]
+    if remedies:
+        ui.write('')
+        for i, p in enumerate(probs, 1):
+            if p.get('remedy'):
+                ui.write(f"  {i}. {p.get('name')} (Code {p.get('code')})")
+                ui.dim(f"     -> {p['remedy']}")
     fixable = [p for p in probs if p.get('has_fix')]
     if not fixable:
         return

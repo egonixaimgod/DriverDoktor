@@ -73,6 +73,41 @@ PNP_ERROR_CODE_DESCRIPTIONS = {
     52: 'A driver aláírása nem ellenőrizhető',
 }
 
+# MIT KELL CSINÁLNI, HOGY A HIBAKÓD ELTŰNJÖN (2026-09-03, explicit user decision:
+# *"ez mit jelent pl h code 24? irja mar le a program h mit kell vele csinalni h
+# eltunjon"*).
+#
+# A puszta leírás ("Az eszköz nincs jelen vagy hibás") pontos, de a technikusnak
+# nem mondja meg, mi a következő mozdulat - a felületen ezért a leírás MELLETT a
+# teendő is megjelenik. A szövegek szándékosan a PROGRAM SAJÁT menüire hivatkoznak
+# ("Szellemeszközök" nézet, "Eszközök újrakötése" gomb), mert azok egy kattintásra
+# vannak; ahol tényleg fizikai beavatkozás kell (kihúzás-visszadugás, kábel), ott
+# azt mondjuk ki. Ahol nincs értelmes teendő a program keretein belül (28/39:
+# egyszerűen nincs driver), ott a keresés/gyártói oldal a válasz - ez a
+# leggyakoribb eset, és a felület enélkül csak annyit mondana, hogy "hibás".
+#
+# A kulcshalmaznak NEM kell fednie a PNP_ERROR_CODE_DESCRIPTIONS-t: hiányzó kódnál
+# a felület egyszerűen nem ír teendőt, ami jobb, mint egy általános semmitmondás.
+PNP_ERROR_CODE_REMEDIES = {
+    1:  'Futtasd a szkennelést és telepítsd a talált drivert. Ha nincs találat, a gyártó oldaláról kell driver.',
+    3:  'Telepítsd újra a drivert (szkennelés → telepítés). Ha marad, kevés a memória vagy sérült a driver-fájl.',
+    10: 'Próbáld az "Eszközök újrakötése" gombot, majd telepíts újabb drivert. Ha marad, hardverhiba is lehet.',
+    12: 'Két eszköz ugyanazt az erőforrást kéri. BIOS-ban tiltsd le a nem használt eszközöket, vagy tedd másik PCIe-portba a kártyát.',
+    14: 'Indítsd újra a gépet — ez a hibakód ettől magától eltűnik.',
+    18: 'Telepítsd újra a drivert: szkennelés → jelöld be az eszközt → Telepítés.',
+    19: 'Sérült registry-bejegyzés. Az "Eszközök újrakötése" gomb újraépíti; ha nem elég, az 1 kattintásos fix megoldja.',
+    21: 'A Windows épp eltávolítja — várj pár másodpercet, majd szkennelj újra. Ha marad, indítsd újra a gépet.',
+    22: 'Az eszköz le van tiltva. Kattints a sor melletti "Engedélyezés" gombra.',
+    24: 'A készülék nincs a gépben (kihúzott/leszerelt eszköz maradványa). Ha kell: dugd vissza. Ha nem kell: Szellemeszközök menü → törlés, ettől eltűnik a listáról.',
+    28: 'Nincs rá driver. Futtasd a szkennelést; ha az sem talál, a gép/alaplap gyártójának oldaláról kell letölteni.',
+    31: 'Telepíts újabb drivert, vagy nyomd meg az "Eszközök újrakötése" gombot, hogy a Windows újraválassza.',
+    32: 'A driver szolgáltatása le van tiltva. Telepítsd újra a drivert — ez visszaállítja az indítási módot.',
+    37: 'A driver nem tudott elindulni. Telepíts újabb verziót; ha nincs, az "Eszközök újrakötése" gomb visszateheti a gyárira.',
+    39: 'Hiányzó vagy sérült driver. Szkennelj és telepítsd a találatot; ha nincs, a gyártó oldaláról kell driver.',
+    43: 'Az eszköz maga jelzett hibát. Indítsd újra a gépet; ha marad, telepíts újabb drivert. Gyakran valódi hardverhiba.',
+    52: 'Aláíratlan driver. Vagy a gyártó hivatalos (aláírt) csomagját telepítsd, vagy kapcsold ki az aláírás-kényszerítést.',
+}
+
 
 # A WUA-keresés (`_search_wu_api`) időkorlátja másodpercben.
 #
@@ -345,9 +380,14 @@ class GuiHwScanMixin:
                 # + generikus-driveres + mély szken), és ha a kapu ágakként ülne, egyetlen
                 # hibakód elég lenne a megkerüléséhez. Ezért itt, a legelején, mielőtt
                 # bármelyik ág hozzáérne a listához.
-                risky_dropped = {}
+                #
+                # A visszaadott `risky_dropped` bontást 2026-09-03 óta SEHOL NEM HASZNÁLJUK
+                # (a "N tároló-eszköz kihagyva" képernyő-sor törölve, lásd lentebb) - ezért
+                # nem is vesszük át változóba: egy soha nem olvasott érték csak azt a
+                # látszatot keltené, hogy még van rá funkció. A kizárt eszközöket maga a
+                # `filter_autofix_risky_devices` naplózza, névvel, `[HW-SCAN]` cimkével.
                 if not (allow_storage and allow_firmware):
-                    devices_to_check, risky_dropped = filter_autofix_risky_devices(
+                    devices_to_check, _ = filter_autofix_risky_devices(
                         devices_to_check, allow_storage=allow_storage,
                         allow_firmware=allow_firmware, log_tag='HW-SCAN',
                         context='a kézi driver-keresésből')
@@ -538,8 +578,33 @@ class GuiHwScanMixin:
                         self._catalog_search(todo, installed_info=inst_info)
 
                 # A "telepített/naprakész" lista: minden eszköz, amire végül nincs találat.
+                #
+                # A SORHOZ ODAKERÜL A TÉNYLEGESEN TELEPÍTETT DRIVER IS (2026-09-03, explicit
+                # user decision: *"írja ki azt is a program hogy jelenleg mik vannak
+                # feltelepítve"*). Eddig ezek a sorok csak a nevet és a "Naprakész" szót
+                # mutatták, vagyis a szken 91 eszközből 89-ről semmi érdemit nem mondott -
+                # pedig a `inst_info` már a memóriában van (a találatok "telepítve: X"
+                # cimkéjéhez amúgy is lekérdeztük), tehát ez nulla extra munka.
                 pool_hwids = {p.get('hwid') for p in self.hw_updates_pool}
-                self._hw_installed_devs = [dev for dev in devices_to_check if dev['id'] not in pool_hwids]
+                self._hw_installed_devs = []
+                for dev in devices_to_check:
+                    if dev['id'] in pool_hwids:
+                        continue
+                    inst = inst_info.get((dev.get('pnp_id') or '').upper()) or {}
+                    self._hw_installed_devs.append({
+                        **dev,
+                        'installed_version': inst.get('version') or '',
+                        'installed_date': inst.get('date') or '',
+                        'installed_provider': inst.get('provider') or '',
+                        'installed_inf': inst.get('inf') or '',
+                    })
+                # SZÁNDÉKOSAN NINCS "is_inbox" JELÖLŐ EZEKEN A SOROKON. Kézenfekvő lenne
+                # (az `_is_inbox_driver` egy hívás innen), de az a 2026-09-03-án TÖRÖLT
+                # "N eszköz fut a Windows beépített driverén" funkció visszacsempészése
+                # lenne más néven - lásd a payload-építésnél az indoklást. A gyártónév
+                # (`installed_provider`) amúgy is kimondja: ha ott "Microsoft" áll, az
+                # eszköz a Windows saját driverén fut. Ez tény a telepített driverről,
+                # nem külön teendő-lista.
 
                 # PROBLÉMÁS ESZKÖZÖK: hibakódos eszközök kiemelése, hogy sose maradjon
                 # észrevétlen lyuk - akkor is látszik, ha egyik forrás sem adott rá drivert.
@@ -552,6 +617,11 @@ class GuiHwScanMixin:
                         'name': dev['name'], 'hwid': dev['id'], 'code': code,
                         'pnp_id': dev.get('pnp_id', ''),
                         'desc': PNP_ERROR_CODE_DESCRIPTIONS.get(code, f'Hibakód: {code}'),
+                        # MIT KELL VELE CSINÁLNI (2026-09-03): a leírás megmondja, MI a baj,
+                        # a technikusnak viszont az kell, hogy MIT tegyen. Ismeretlen kódnál
+                        # üres marad - egy általános semmitmondás rosszabb, mint a hallgatás.
+                        'remedy': PNP_ERROR_CODE_REMEDIES.get(code, ''),
+                        'cat': dev.get('cat') or '',
                         'has_fix': dev['id'] in pool_hwids,
                     })
                 if problems:
@@ -564,38 +634,50 @@ class GuiHwScanMixin:
                 found = len(self.hw_updates_pool)
                 final_sys = f"{sys_info_text} | ✅ Kész ({mode})! {found} frissítés ({total_devs} eszköz)"
 
-                # A KIHAGYOTT ESZKÖZÖK A KÉPERNYŐN IS LÁTSZANAK, nem csak a naplóban: e
-                # nélkül a "miért nem talált a gépem SSD-jéhez drivert?" kérdésre a technikus
-                # a felületen semmit nem látna, és hibának hinné a kikapcsolt kapcsolót.
-                skipped_note = ''
-                n_st, n_fw = (len(risky_dropped.get('tároló') or []),
-                              len(risky_dropped.get('firmware') or []))
-                if n_st or n_fw:
-                    parts = ([f'{n_st} tároló'] if n_st else []) + ([f'{n_fw} firmware'] if n_fw else [])
-                    # A szöveg 2026-09-02-ig azt mondta, "kapcsold be a pipát" - a kapcsoló
-                    # azóta nem létezik, tehát az útmutatás hazugság lenne. A helyes válasz
-                    # a gyártó saját oldala; ezt ki is mondjuk, hogy a technikus ne keresse
-                    # a nem létező kapcsolót.
-                    skipped_note = (f"{' és '.join(parts)}-eszköz szándékosan kihagyva "
-                                    f"(a program ezekre soha nem keres - gyártói oldalról, kézzel)")
-                    final_sys += f" | ⛔ {skipped_note}"
-
-                # MI MARADT A WINDOWS BEÉPÍTETT (INBOX) DRIVERÉN? (2026-08-31, explicit
-                # user decision: "írja már ki a program hogy hány driver fut a windows
-                # beépített generikus driverén... hogy tudjam mik nem kapnak drivereket").
+                # A KIHAGYOTT TÁROLÓ-/FIRMWARE-ESZKÖZÖK MÁR NEM MENNEK KI A KÉPERNYŐRE
+                # (2026-09-03, explicit user decision: *"azt se írja ki nekem h a tároló és
+                # firmware driverek kihagyva, senkit se érdekel minek van ott"*). VISSZAVONJA
+                # a 2026-08-28-i szabályt, ami szerint a kihagyott darabszámnak látszania kell
+                # ("különben a 'miért nem talált az SSD-mhez drivert?' hibának tűnik").
                 #
-                # Ez a szken legcsendesebb kimenetele: az eszköz hibakód nélkül működik,
-                # csak épp a Microsoft általános driverén - a listán tehát SEHOL nem
-                # jelenik meg, mert nincs rá találat. Eddig ezt csak az AutoFix záró
-                # jelentése mondta ki; a kézi szken után a technikusnak nem volt honnan
-                # tudnia.
+                # MIÉRT VÁLLALHATÓ A VISSZAVONÁS: 2026-09-02 óta ez nem a technikus egy
+                # elfelejtett pipája, hanem a program RÖGZÍTETT szabálya - nincs is hozzá
+                # kapcsoló, tehát nincs mit "észrevennie". A régi szöveg tehát egy olyan
+                # döntést magyarázott minden szken végén, amit senki nem hozott meg.
+                # A NAPLÓBAN VÁLTOZATLANUL BENNE VAN (`filter_autofix_risky_devices` minden
+                # kizárt eszközt névvel logol `[HW-SCAN]` cimkével), tehát egy terepi
+                # jelentésből a kérdés továbbra is megválaszolható - csak a képernyőt nem
+                # terheli. A `skipped_risky` mező ezért kikerült a payloadból is: egy senki
+                # által nem olvasott mező pont az az élőnek látszó holt kód, amit ez a
+                # projekt máshol is irt.
+
+                # MI MARADT A WINDOWS BEÉPÍTETT (INBOX) DRIVERÉN?
+                #
+                # >>> EZ 2026-09-03 ÓTA CSAK A NAPLÓBA MEGY, A FELÜLETRE NEM. <<<
+                # Explicit user decision: *"ez hogy mennyi eszköz fut a beépített driveren
+                # ez se kell ki lehet onnan törölni a faszba"*. VISSZAVONJA a 2026-08-31-i
+                # kérést (*"írja már ki a program hogy hány driver fut a windows beépített
+                # generikus driverén"*), ami ugyanettől a felhasználótól jött - a szken
+                # nézete időközben öt külön dobozzá hízott, és ez volt az egyik, ami a
+                # valódi teendőt (a találati lista) kiszorította a képernyőről.
+                #
+                # A SZÁMÍTÁS ÉS A NAPLÓZÁS SZÁNDÉKOSAN MARAD, a `hw_scan_result` payloadból
+                # viszont az `inbox` mező KIKERÜLT (a felület nem rendereli). Miért éri meg
+                # így: a "mely eszközök nem kapnak gyári drivert?" a projekt egyik
+                # visszatérő terepi kérdése, és a válasz e nélkül a naplósor nélkül egy
+                # visszaadott gépen már megválaszolhatatlan lenne (Rule 0). A költsége
+                # ~nulla: memóriabeli szűrés a már meglévő listákon, hálózat és
+                # alfolyamat nélkül. Az 1 kattintásos fix ZÁRÓ JELENTÉSE változatlanul
+                # KIÍRJA ezt a képernyőre - ott a technikus a lánc végén áll, és pont az
+                # a "mi maradt" pillanata; a kézi szkennél viszont a találati lista a
+                # lényeg.
                 #
                 # UGYANAZ A SZŰRŐ, amit a záró jelentés használ (`_health_report_worth_listing`,
                 # app/gui/autofix.py) - két külön lista előbb-utóbb ellentmondana egymásnak
                 # ugyanarról a gépről. A szűrő SZÁNDÉKOSAN szűkebb, mint a keresésé: a
-                # katalógust mindenre megkérdezzük, de csak azt írjuk ki, amivel a
-                # szerelőnek TEENDŐJE lehet. A többit egyetlen szám összegzi - mérve
-                # (dev gép): 98 eszközből 71 fut inbox driveren, és ebből 3 az érdekes.
+                # katalógust mindenre megkérdezzük, de csak azt naplózzuk külön, amivel a
+                # szerelőnek TEENDŐJE lehet. Mérve (dev gép): 98 eszközből 71 fut inbox
+                # driveren, és ebből 3 az érdekes.
                 inbox_worth, inbox_by_design = [], 0
                 for dev in devices_to_check:
                     if dev.get('err_code'):
@@ -614,16 +696,20 @@ class GuiHwScanMixin:
                         })
                     else:
                         inbox_by_design += 1
-                inbox = {'total': len(inbox_worth) + inbox_by_design,
-                         'by_design': inbox_by_design, 'items': inbox_worth}
-                logging.info(f"[HW_SCAN] Windows-alapdriveren: {inbox['total']} eszköz "
-                             f"({len(inbox_worth)} érdemi, {inbox_by_design} ehhez gyári driver "
-                             f"nem is létezik). Érdemiek: {[i['name'] for i in inbox_worth]}")
+                logging.info(f"[HW_SCAN] Windows-alapdriveren: {len(inbox_worth) + inbox_by_design} "
+                             f"eszköz ({len(inbox_worth)} érdemi, {inbox_by_design} ehhez gyári "
+                             f"driver nem is létezik). Érdemiek: {[i['name'] for i in inbox_worth]}")
 
                 self.emit('hw_scan_result', {
                     'pool': self.hw_updates_pool, 'installed': self._hw_installed_devs,
                     'problems': problems, 'sys_info': final_sys, 'time': time_str,
-                    'skipped_risky': skipped_note, 'inbox': inbox,
+                    # A FEJLÉC-CSÍK STRUKTURÁLT ADATAI (2026-09-03). A `sys_info` egyetlen,
+                    # egyre hosszabbra toldott mondat volt ("gép | kész | N frissítés | ⛔
+                    # kihagyva..."), amiből a felület csak egy csíkot tudott csinálni - és
+                    # a gépnév ráadásul MÉGEGYSZER megjelent a gyártói kártyán is. A nézet
+                    # most külön mezőkből rakja össze az összefoglalót, a gyártói link
+                    # pedig ugyanabba a csíkba olvad be, tehát a gépnév egyszer szerepel.
+                    'machine': sys_info_text, 'dev_count': total_devs, 'mode': mode,
                     # A felület ebből tudja kiírni, hogy a szűk eredmény a GYORS MÓD
                     # következménye, nem hiány. `wu_failed` mellé téve különösen fontos:
                     # a kettő együtt azt jelenti, hogy egyik forrás sem futott.

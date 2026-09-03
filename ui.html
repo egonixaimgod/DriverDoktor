@@ -273,8 +273,77 @@ td input[type="checkbox"]{accent-color:var(--accent);width:16px;height:16px;curs
 @keyframes scanspin{to{transform:rotate(360deg)}}
 @keyframes indeterminate{0%{margin-left:-30%}100%{margin-left:100%}}
 
+/* ===== HW SZKEN NÉZET (2026-09-03 átépítés) =================================
+   A nézet öt külön dobozból (gyártói kártya, hibás eszközök, alapdriveres eszközök,
+   tároló/firmware magyarázat, találati fa) EGY panelre állt össze: összefoglaló csík
+   -> szűrő-fülek -> egyetlen lista -> ragadós művelet-sáv. Terepi visszajelzés volt
+   rá az ok: "egyszerűen kurvara lehetetlen kiigazodni... annyi felesleges dolgot kiír".
+
+   1) KERESÉSI MÓD kártyák. Ugyanaz a minta, mint az AutoFix dialógusának `.mc-mode`
+      kártyáján: a szín ÉS a felirat is az AKTUÁLIS ÁLLAPOTOT mondja ki. A két
+      kapcsoló korábban 12 px-es szürke checkbox-sor volt, pedig az egyik 20-25
+      percet és a katalógus-találatok egészét dönti el. */
+.hw-setup{padding:14px 16px}
+.hw-setup-head{display:flex;align-items:baseline;gap:10px;margin-bottom:10px;flex-wrap:wrap}
+.hw-setup-title{font-size:13px;font-weight:800;color:var(--text2);letter-spacing:0.3px}
+.hw-setup-hint{font-size:11.5px;color:var(--text3)}
+.hw-setup .mc-mode{margin-top:0;margin-left:0;margin-bottom:8px}
+/* A mély keresés a katalógus ALVÁLASZTÁSA: csak akkor számít, ha a katalógus be van
+   kapcsolva. A behúzás ezt mutatja ránézésre; a letiltott állapotot a syncHwModes()
+   teszi rá, hogy gyors módban ne tűnjön élő döntésnek. */
+.hw-setup .mc-mode-sub{margin-left:22px}
+.hw-setup .mc-mode-sub.mc-mode-off{opacity:0.45}
+.hw-setup .mc-mode-sub.mc-mode-off .toggle-track{border-style:dashed}
+.hw-setup-foot{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-top:12px;
+  padding-top:11px;border-top:1px solid rgba(180,100,255,0.18)}
+.hw-setup-foot-hint{font-size:11.5px;color:var(--text3);flex:1;min-width:180px}
+
+/* 2) ÖSSZEFOGLALÓ CSÍK. Ide olvadt be a gépnév (ami korábban KÉTSZER szerepelt: a
+      fejlécben és a gyártói kártyán) és a gyártói driver-oldal gombja. */
+.hw-summary{display:flex;align-items:center;gap:14px;flex-wrap:wrap;
+  padding:12px 15px;margin-bottom:12px;border-radius:var(--r-sm);
+  background:linear-gradient(135deg,rgba(90,160,255,0.13),rgba(60,80,200,0.08));
+  border:1px solid rgba(100,180,255,0.32)}
+.hw-sum-main{flex:1;min-width:220px}
+.hw-sum-machine{font-size:15px;font-weight:800;color:var(--text);display:block;line-height:1.35}
+.hw-sum-meta{font-size:11.5px;color:var(--text3);margin-top:3px;display:block}
+.hw-sum-note{width:100%;font-size:11.5px;line-height:1.5;padding:8px 11px;border-radius:6px;
+  background:rgba(255,180,80,0.10);border:1px solid rgba(255,180,80,0.3);color:#ffd08a}
+
+/* 3) SZŰRŐ-FÜLEK. Alapból a "Teendő" fül nyílik meg, tehát csak az látszik, amivel a
+      technikusnak dolga van - a 87 naprakész eszköz egy kattintásra van, de nem tolja
+      le a képernyőről a 2 fontosat. */
+.hw-tabs{display:flex;gap:7px;flex-wrap:wrap;margin-bottom:11px}
+.hw-tab{display:inline-flex;align-items:center;gap:7px;padding:8px 15px;border-radius:999px;
+  font-size:12.5px;font-weight:700;cursor:pointer;user-select:none;white-space:nowrap;
+  background:rgba(60,35,90,0.4);border:1px solid rgba(180,100,255,0.22);color:var(--text3);
+  transition:background var(--t),border-color var(--t),color var(--t)}
+.hw-tab:hover{background:rgba(180,100,255,0.15);color:var(--text2)}
+.hw-tab.active{background:rgba(180,100,255,0.22);border-color:var(--accent);color:var(--text);
+  box-shadow:0 0 12px rgba(212,136,255,0.25)}
+.hw-tab .hw-tab-n{font-size:11px;padding:1px 7px;border-radius:999px;
+  background:rgba(0,0,0,0.28);font-variant-numeric:tabular-nums}
+.hw-tab.tab-todo.active{background:rgba(255,180,80,0.2);border-color:#ffb454;color:#ffd9a0;
+  box-shadow:0 0 12px rgba(255,180,80,0.25)}
+.hw-tab.tab-bad.active{background:rgba(255,90,90,0.18);border-color:#ff6b5b;color:#ffb3ab;
+  box-shadow:0 0 12px rgba(255,90,90,0.22)}
+.hw-tab.tab-ok.active{background:rgba(110,230,160,0.15);border-color:#2ee08a;color:#a7f0cb;
+  box-shadow:0 0 12px rgba(46,224,138,0.2)}
+
+/* 4) RAGADÓS MŰVELET-SÁV a lista alján: a Telepítés gomb sose görögjön ki a képből. */
+.hw-actionbar{position:sticky;bottom:0;display:flex;align-items:center;gap:9px;flex-wrap:wrap;
+  margin-top:12px;padding-top:12px;border-top:1px solid rgba(180,100,255,0.22);
+  background:linear-gradient(to top,var(--bg-primary) 55%,transparent)}
+.hw-actionbar-info{flex:1;min-width:120px;font-size:12px;color:var(--text3);text-align:right}
+
+/* 5) ÜRES / HIBA ÁLLAPOT a szken előtt. */
+.hw-empty{padding:34px 22px;text-align:center}
+.hw-empty-icon{font-size:44px;opacity:0.35;margin-bottom:10px}
+.hw-empty-text{font-size:13px;color:var(--text2);max-width:620px;margin:0 auto;line-height:1.7}
+.hw-empty-text b{color:var(--accent)}
+
 /* HW Tree */
-.hw-tree{max-height:calc(100vh - 380px);overflow-y:auto;scrollbar-width:thin;scrollbar-color:rgba(180,100,255,0.3) transparent}
+.hw-tree{max-height:calc(100vh - 430px);min-height:180px;overflow-y:auto;scrollbar-width:thin;scrollbar-color:rgba(180,100,255,0.3) transparent}
 .hw-tree::-webkit-scrollbar{width:6px}
 .hw-tree::-webkit-scrollbar-thumb{background:rgba(180,100,255,0.3);border-radius:3px}
 .hw-cat{margin-bottom:3px}
@@ -302,7 +371,29 @@ td input[type="checkbox"]{accent-color:var(--accent);width:16px;height:16px;curs
 .hw-separator{padding:14px;text-align:center;color:var(--green);font-size:13px;font-weight:700;border-top:2px solid var(--glass-border);border-bottom:2px solid var(--glass-border);margin:10px 0;background:rgba(60,35,90,0.3)}
 .hw-installed .hw-item{opacity:0.6}
 .hw-installed .hw-cat-header{opacity:0.7}
-.sys-info{font-size:15px;font-weight:700;color:var(--accent);margin-bottom:14px;text-shadow:0 0 10px rgba(212,136,255,0.3)}
+
+/* HIBÁS ESZKÖZ SORA. A külön piros doboz helyett rendes lista-sor, de kiemelve - ÉS a
+   hibakód mellett ott a TEENDŐ is (`remedy` a Pythonból, 2026-09-03: "irja mar le a
+   program h mit kell vele csinalni h eltunjon"). A "Code 24" önmagában a technikusnak
+   sem mond semmit arról, mi a következő mozdulat. */
+.hw-item.hw-bad{grid-template-columns:24px 1fr;background:rgba(255,80,80,0.07);
+  border:1px solid rgba(255,80,80,0.3);margin:5px 0;padding:9px 11px}
+.hw-item.hw-bad:hover{background:rgba(255,80,80,0.11)}
+.hw-bad-head{display:flex;align-items:center;gap:9px;flex-wrap:wrap}
+.hw-bad-code{font-size:10.5px;font-weight:800;padding:1px 8px;border-radius:999px;
+  background:rgba(255,80,80,0.22);border:1px solid rgba(255,80,80,0.45);color:#ffb3ab;white-space:nowrap}
+.hw-bad-desc{color:var(--text3);font-size:11.5px}
+.hw-bad-remedy{margin-top:6px;font-size:12px;line-height:1.55;color:#ffd9a0;
+  background:rgba(255,180,80,0.09);border-left:3px solid #ffb454;padding:6px 10px;border-radius:0 6px 6px 0}
+.hw-bad-remedy b{color:#ffb454;font-weight:800}
+
+/* TELEPÍTETT DRIVER adatai a naprakész sorokon (2026-09-03: "írja ki azt is a program
+   hogy jelenleg mik vannak feltelepítve"). Eddig ezek a sorok csak a nevet és a
+   "Naprakész" szót mutatták - 91 eszközből 89-ről semmi érdemit. */
+.hw-inst-drv{color:var(--text2);font-size:11.5px;line-height:1.5}
+.hw-inst-drv .hw-inst-ver{color:var(--text);font-weight:600}
+.hw-inst-drv .hw-inst-meta{color:var(--text3);font-size:11px}
+.hw-inst-none{color:var(--text3);font-style:italic;font-size:11.5px}
 
 /* Cards grid */
 .cards{display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:14px}
@@ -880,86 +971,118 @@ td input[type="checkbox"]{accent-color:var(--accent);width:16px;height:16px;curs
 
       <!-- VIEW: Hardware Info -->
       <div class="view" id="view-hw">
+        <!-- HERO. A nagy indítógomb 2026-09-03 óta ITT van (`.vh-actions`), nem lejjebb
+             a panelben: ez a nézet fő művelete, és a dokumentált hero-minta is ez
+             (cím/leírás/chipek balra, akció jobbra) - eddig ez volt az egyetlen view,
+             ami kilógott belőle. A leírásból kikerült a "kiírja, mi maradt a Windows
+             beépített driverén" mondat: az a doboz törölve (lásd a #hw-result panelt). -->
         <div class="view-hero vh-blue" data-emoji="🖥️">
           <div class="vh-text">
             <div class="vh-title">🖥️ Driver Keresés és Telepítés</div>
-            <div class="vh-sub">Végigszkenneli a gép összes hardverét, és a Windows Update-ről + a Microsoft Update Catalogból megkeresi hozzájuk a legfrissebb drivereket — a telepített verziókkal összevetve, hogy csak a tényleges frissítés látszódjon. A hibás (sárga felkiáltójeles) eszközöket külön kiemeli, és a végén kiírja, mi maradt a Windows beépített driverén.</div>
+            <div class="vh-sub">Végigszkenneli a gép összes hardverét, és a Windows Update-ről + a Microsoft Update Catalogból megkeresi hozzájuk a legfrissebb drivereket — a telepített verziókkal összevetve, hogy csak a tényleges frissítés látszódjon. A végén egyetlen listát kapsz: mi frissíthető, mi hibás, és mi van most feltelepítve.</div>
             <div class="vh-chips">
               <span class="hero-chip">🌐 WU + Catalog keresés</span>
-              <span class="hero-chip">⚠️ Hibás eszközök kiemelve</span>
-              <span class="hero-chip">🏭 Alapdriveres eszközök listája</span>
+              <span class="hero-chip">⚠️ Hibás eszközök + teendő</span>
+              <span class="hero-chip">☑️ Pipáld ki, mit telepítsen</span>
             </div>
+          </div>
+          <div class="vh-actions">
+            <button class="btn btn-big btn-primary" onclick="startHwScan()" id="btn-hw-scan">🔍 Hardverek Szkennelése</button>
           </div>
         </div>
-        <div class="panel glass">
-          <div class="sys-info" id="sys-info">Rendszer információk betöltése...</div>
-          <div class="toolbar">
-            <button class="btn btn-primary" onclick="startHwScan()" id="btn-hw-scan">🔍 Hardverek Scannelése</button>
-            <button class="btn btn-success" onclick="installSelectedHw()" id="btn-install-hw" disabled>🚀 Kijelöltek Telepítése</button>
-            <button class="btn btn-sm" onclick="selectAllHw()" id="btn-sel-all-hw" disabled>☑ Összes</button>
-            <button class="btn btn-sm" onclick="deselectAllHw()" id="btn-desel-all-hw" disabled>☐ Törlés</button>
+
+        <!-- ===== 1. KERESÉSI MÓD =====================================================
+             A két kapcsoló korábban 12 px-es, szürke checkbox-sor volt a gombok alatt
+             ("olyan kicsike kis checkbox észre se veszi az ember"), pedig az egyikük
+             20-25 percet és a katalógus-találatok EGÉSZÉT dönti el. Most az AutoFix
+             dialógusáról már bevált `.mc-mode` mintát követik: a szín ÉS a felirat is
+             az AKTUÁLIS ÁLLAPOTOT mondja ki, nem a kapcsoló nevét. -->
+        <div class="panel glass hw-setup" id="hw-setup">
+          <div class="hw-setup-head">
+            <span class="hw-setup-title">⚙️ Keresési mód</span>
+            <span class="hw-setup-hint" id="hw-setup-hint"></span>
           </div>
-          <div style="margin:-4px 0 10px">
-            <label style="display:inline-flex;align-items:center;gap:8px;font-size:12px;color:var(--text2);cursor:pointer"
-                   title="Alapból BE. Kikapcsolva a szken CSAK a Windows Update ügynökét kérdezi meg, a Microsoft Update Catalogot egyáltalán nem - ez a GYORS MÓD. Sokkal gyorsabb, de a katalógus-only találatok elvesznek: egy mért Dell laptopon a Windows Update időtúllépésbe futott, és mind a 16 driver a katalógusból jött volna. Akkor kapcsold ki, ha csak egy gyors ellenőrzést akarsz.">
-              <input type="checkbox" id="hw-use-catalog" checked>
-              <span>🗂️ Microsoft Update Catalog keresés (kikapcsolva: <b>gyors mód</b>, csak Windows Update)</span>
-            </label>
-          </div>
-          <div style="margin:-4px 0 10px">
-            <label style="display:inline-flex;align-items:center;gap:8px;font-size:12px;color:var(--text2);cursor:pointer"
-                   title="Bekapcsolva a program a Microsoft Update Catalogot MINDEN eszközre megkérdezi, nem csak a hibásakra és a Windows-alapdriveren futókra. Így egy régi, de működő gyári driver is frissülhet - a Windows Update ilyet nem ajánl fel. Cserébe a szken 1-2 perccel hosszabb. (Csak akkor számít, ha a katalógus-keresés fent BE van kapcsolva.)">
-              <input type="checkbox" id="hw-deep-scan" checked>
-              <span>🌐 Mély keresés (a katalógus minden eszközre - lassabb, de a régi gyári drivereket is frissíti)</span>
-            </label>
-          </div>
-          <!-- TÁROLÓ ÉS FIRMWARE: VÉGLEGESEN KI, NINCS HOZZÁ KAPCSOLÓ (2026-09-02, explicit
-               user decision: "ne lehessen bekapcsolni sose... inkább ne tudják bekapcsolni
-               az ügyfelek mert abbol sok baj lehet"). Korábban itt két jelölőnégyzet állt,
-               alapból kikapcsolva. A két hibalehetőség, ami miatt eltűntek: egy rossz
-               tároló-driver után a Windows EL SEM INDUL (INACCESSIBLE_BOOT_DEVICE, csak
-               helyreállító médiával javítható), egy firmware-írás pedig visszafordíthatatlan.
-               Csak MAGYARÁZÓ sor maradt, mert a "miért nem talált az SSD-mhez drivert?"
-               kérdésre a felületen is kell válasz - lásd a szken végi `skipped_risky` sort. -->
-          <div class="hw-risk-note" title="Ez nem beállítás, hanem rögzített védelem: a program a tárolóvezérlőkre (NVMe/SATA/RAID), a lemezekre és a firmware-re (UEFI/BIOS, SSD-vezérlő, TPM, dokkoló) SOHA nem keres és nem telepít drivert. Egy rossz tároló-driver után a gép a következő indításnál nem biztos, hogy elindul, a firmware-írás pedig nem vonható vissza sem visszaállítási ponttal, sem Windows-újratelepítéssel.">
-            🔒 <b>Tároló- és firmware-driverek: kihagyva</b> – a program ezekre szándékosan
-            soha nem keres. Rossz tároló-driver után a Windows el sem indul, a firmware-írás
-            pedig visszafordíthatatlan. Ezeket a gyártó saját oldaláról, kézzel kell frissíteni.
-          </div>
+          <label class="toggle mc-mode" id="hw-catalog-row" data-on="1"
+                 title="Alapból BE. Kikapcsolva a szken CSAK a Windows Update ügynökét kérdezi meg, a Microsoft Update Catalogot egyáltalán nem - ez a GYORS MÓD. Sokkal gyorsabb, de a katalógus-only találatok elvesznek: egy mért Dell laptopon a Windows Update időtúllépésbe futott, és mind a 16 driver a katalógusból jött volna.">
+            <input type="checkbox" id="hw-use-catalog" checked onchange="syncHwModes()">
+            <span class="toggle-track"></span>
+            <span>
+              <span class="mc-mode-title" id="hw-catalog-title">🗂️ TELJES KERESÉS – a Microsoft katalógust is végignézi</span>
+              <span class="mc-mode-hint" id="hw-catalog-hint">Ajánlott. Lassabb, de olyan drivert is megtalál, amit a Windows Update nem ad.</span>
+            </span>
+          </label>
+          <label class="toggle mc-mode mc-mode-sub" id="hw-deep-row" data-on="1"
+                 title="Bekapcsolva a program a Microsoft Update Catalogot MINDEN eszközre megkérdezi, nem csak a hibásakra és a Windows-alapdriveren futókra. Így egy régi, de működő gyári driver is frissülhet - a Windows Update ilyet nem ajánl fel. Cserébe a szken 1-2 perccel hosszabb.">
+            <input type="checkbox" id="hw-deep-scan" checked onchange="syncHwModes()">
+            <span class="toggle-track"></span>
+            <span>
+              <span class="mc-mode-title" id="hw-deep-title">🌐 MÉLY KERESÉS – minden eszközre rákérdez</span>
+              <span class="mc-mode-hint" id="hw-deep-hint">A régi, de működő gyári drivereket is frissíti. +1-2 perc.</span>
+            </span>
+          </label>
           <!-- ESZKÖZ-ÚJRAKÖTÉS: nem keres és nem tölt le semmit - azokat az eszközöket
                köti vissza a MÁR FENT LÉVŐ gyári driverre, amik a Windows alapdriverén
-               ragadtak. Terepen (T580) pont ez az eset okozta a szaggató tapipadot, és
-               a technikus addig csak az SSD ki-be pakolásával tudta megjavítani. -->
-          <div style="margin:-2px 0 12px">
+               ragadtak. Terepen (T580) pont ez az eset okozta a szaggató tapipadot. -->
+          <div class="hw-setup-foot">
             <button class="btn btn-sm" onclick="rebindDrivers()" id="btn-rebind"
                     title="Nem tölt le semmit. MINDEN Windows-alapdriveren futó eszközt újra felderíttet a Windowszal (újratelepítés, majd ha kell, az eszköz újraenumerálása) - kivéve a tárolóvezérlőket, a lemezt, a firmware-t és a rendszerlemez eszközláncát. Ha van a gépen hozzá gyári csomag, azt kapja meg; ha nincs, ugyanazt kapja vissza, rosszabb nem lesz. Erre akkor van szükség, ha egy driver felment, de az eszköz nem indult el rajta: ilyenkor a Windows némán visszaesik a saját driverére, hibakód nélkül. Tipikus tünet: szaggató/ugráló tapipad, nem működő extra gombok. A kör az USB-vezérlőt is érintheti, ezért a végén a gép automatikusan újraindul.">
-              🔄 Eszközök újrakötése a gyári driverre (ha valami az alapdriveren ragadt)
+              🔄 Eszközök újrakötése a gyári driverre
             </button>
+            <span class="hw-setup-foot-hint">ha egy eszköz a Windows alapdriverén ragadt, pedig van hozzá gyári csomag a gépen</span>
           </div>
-          <!-- ÉLŐ FOLYAMATJELZŐ. A szken 3-5 percig is tarthat, és korábban csak egy
-               animált csík + egy ritkán frissülő szöveg volt: a technikus nem tudta
-               eldönteni, dolgozik-e a program vagy beragadt. Most látszik a fázis, a
-               tényleges százalék, az épp vizsgált eszköz és a percre pontos eltelt idő. -->
-          <div class="scan-live" id="hw-live" style="display:none">
-            <div class="scan-live-head">
-              <span class="scan-spinner" id="hw-spinner"></span>
-              <span class="scan-phase" id="hw-phase">Indul...</span>
-              <span class="scan-elapsed" id="hw-elapsed">0:00</span>
-            </div>
-            <div class="progress" id="hw-progress"><div class="progress-fill" id="hw-progress-fill"></div></div>
-            <div class="scan-detail" id="hw-detail"></div>
+        </div>
+
+        <!-- ===== 2. ÉLŐ FOLYAMATJELZŐ ================================================
+             A szken 3-5 percig is tarthat, és korábban csak egy animált csík + egy
+             ritkán frissülő szöveg volt: a technikus nem tudta eldönteni, dolgozik-e a
+             program vagy beragadt. Az eltelt idő órája a legfontosabb elem: a WU-keresés
+             egyetlen, percekig tartó blokkoló hívás, ami közben SEMMILYEN adatot nem küld. -->
+        <div class="panel glass scan-live" id="hw-live" style="display:none">
+          <div class="scan-live-head">
+            <span class="scan-spinner" id="hw-spinner"></span>
+            <span class="scan-phase" id="hw-phase">Indul...</span>
+            <span class="scan-elapsed" id="hw-elapsed">0:00</span>
           </div>
-          <div style="margin-bottom:10px">
-            <div id="hw-status" style="color:var(--text2);font-size:12px;margin-top:6px"></div>
-          </div>
+          <div class="progress" id="hw-progress"><div class="progress-fill" id="hw-progress-fill"></div></div>
+          <div class="scan-detail" id="hw-detail"></div>
+        </div>
+
+        <!-- ===== 3. EREDMÉNY =========================================================
+             EGY panel, benne: összefoglaló csík (gépnév + számok + gyártói link) ->
+             szűrő-fülek -> egyetlen eszközlista -> ragadós művelet-sáv.
+
+             AMI INNEN 2026-09-03-án KIKERÜLT, és miért (explicit user decision - a nézet
+             öt külön dobozzá hízott, és "kurvara lehetetlen kiigazodni" rajta):
+               - `#oem-card`: a gyártói driver-oldal SAJÁT kártyája. A gép nevét
+                 másodszor is kiírta, közvetlenül a fejléc alatt, ahol az már ott volt.
+                 A link nem veszett el: beolvadt az összefoglaló csíkba.
+               - `#hw-inbox`: "N eszköz fut a Windows beépített driverén" doboz. Az 1
+                 kattintásos fix záró jelentése továbbra is kiírja; itt a találati lista
+                 a lényeg. A Python továbbra is NAPLÓZZA (lásd hwscan.py).
+               - `.hw-risk-note`: "Tároló- és firmware-driverek: kihagyva" magyarázó doboz.
+                 2026-09-02 óta ez a program rögzített szabálya, nem a technikus pipája,
+                 tehát minden szken végén egy meg nem hozott döntést magyarázott.
+               - `#hw-problems`: a hibás eszközök KÜLÖN piros doboza. Nem veszett el: a
+                 lista tetején, "🔴 Hibás" fülön, sorokként jelennek meg - immár azzal
+                 együtt, hogy MIT KELL VELÜK CSINÁLNI (`remedy`). -->
+        <div class="panel glass" id="hw-result" style="display:none">
+          <div class="hw-summary" id="hw-summary"></div>
           <div id="hw-rescan-offer"></div>
-          <div id="oem-card" style="display:none"></div>
-          <div id="hw-problems"></div>
-          <!-- Windows-alapdriveren maradt eszközök: a szken legcsendesebb kimenetele -
-               az eszköz hibakód nélkül működik, csak épp a Microsoft általános driverén,
-               tehát a találati listán SEHOL nem jelenik meg. -->
-          <div id="hw-inbox"></div>
+          <div class="hw-tabs" id="hw-tabs"></div>
           <div class="hw-tree" id="hw-tree"></div>
+          <div class="hw-actionbar" id="hw-actionbar">
+            <button class="btn btn-sm" onclick="selectAllHw()" id="btn-sel-all-hw" disabled>☑ Összes</button>
+            <button class="btn btn-sm" onclick="deselectAllHw()" id="btn-desel-all-hw" disabled>☐ Egyik se</button>
+            <span class="hw-actionbar-info" id="hw-sel-info"></span>
+            <button class="btn btn-success" onclick="installSelectedHw()" id="btn-install-hw" disabled>🚀 Kijelöltek Telepítése</button>
+          </div>
+        </div>
+
+        <!-- Szken előtti / hibaüzenet-sáv. Külön az eredmény-paneltől, hogy egy
+             "Nincs internet" ne egy üres, fülekkel teli panelben landoljon. -->
+        <div class="panel glass hw-empty" id="hw-empty">
+          <div class="hw-empty-icon">🖥️</div>
+          <div class="hw-empty-text" id="hw-status">Nyomd meg a <b>Hardverek Szkennelése</b> gombot — a program végigméri a gép összes eszközét, és megmutatja, mihez van újabb driver.</div>
         </div>
       </div>
 
@@ -1666,6 +1789,15 @@ let hwPool = [];
 let hwInstalled = [];
 let hwSelectedIndices = new Set();
 let hwProblems = [];  // a legutóbbi szken problémás (hibakódos) eszközei - a gyorsjavítás gombokhoz
+let hwScanMeta = null;  // a legutóbbi hw_scan_result (gépnév, eszközszám, mód, idő, gyors mód / WU-hiba jelzők)
+let hwOemInfo = null;   // gyártói driver-oldal (oem_driver_info) - a szken UTÁN, aszinkron érkezik
+let hwTab = 'todo';     // aktív szűrő-fül: todo | bad | dead | ok | all
+/* A kategória-sorrend MODUL-SZINTŰ, mert két render-függvény is olvassa. Amíg a
+   `renderHwTree`-n belüli `const` volt, a Build 288-ban külön függvénybe emelt
+   `renderHwInstalled` ReferenceError-t dobott rá, és a telepített driverek listája
+   NÉGY BUILDIG nem jelent meg (a szeparátora igen - a hiba csak utána következett,
+   ezért látszott a képernyőn egy fejléc, alatta semmivel). */
+const HW_CAT_ORDER = ['🎮 Videókártya (VGA)','🎵 Hangkártya (Audio)','🌐 Hálózat (LAN/Wi-Fi)','🔵 Bluetooth','📷 Webkamera','🖱️ Periféria','🔒 Ujjlenyomat / Biometria','🔌 USB Vezérlő','⚙️ Rendszereszköz','🔄 WU Driver'];
 let confirmResolver = null;
 let progressStartTime = 0;
 let progressTimer = null;
@@ -1959,7 +2091,11 @@ function switchView(name) {
   if (name === 'bitlocker') checkBitlockerStatus();
   // (A tároló/firmware kapcsolók 2026-09-02-én eltűntek a nézetből - nincs mit
   //  visszaállítani belépéskor, a program soha nem keres rájuk.)
-  if (name === 'hw' && !hwPool.length && !hwInstalled.length) { /* first visit, don't auto-scan */ }
+  // A keresési-mód kártyák feliratát/színét be kell állítani a nézetbe lépéskor: a
+  // kezdőállapotot a HTML csak a `checked` attribútummal írja le, a hozzá tartozó
+  // szöveget és a `data-on` jelzőt a JS adja. E nélkül a kártya az első kattintásig
+  // a HTML-be írt statikus feliratot mutatná, ami egy kikapcsolt állapotnál hazudna.
+  if (name === 'hw') syncHwModes();
 }
 
 /* ========== KIJELZŐ & SZÍNKEZELÉS ========== */
@@ -2687,17 +2823,72 @@ async function deleteDupDrivers() {
   }
 }
 
-/* ========== HARDWARE SCAN ========== */
+/* ========== HARDWARE SCAN ==========
+   A nézet 2026-09-03-án át lett építve (explicit user decision, terepi visszajelzés:
+   "egyszerűen kurvara lehetetlen kiigazodni... annyi felesleges dolgot kiír"). Az öt
+   külön doboz helyett EGY panel: összefoglaló csík -> szűrő-fülek -> egyetlen lista ->
+   ragadós művelet-sáv. A törölt dobozokról és az indoklásukról lásd a HTML-markup
+   kommentjét a #hw-result panelnél. */
+
+/* A KERESÉSI MÓD KÁRTYÁK ÁLLAPOTA. Ugyanaz az elv, mint az AutoFix dialógusán
+   (syncCatalogMode): a szín ÉS a felirat is az AKTUÁLIS ÁLLAPOTOT mondja ki, nem a
+   kapcsoló nevét - egy "Microsoft Update Catalog keresés" feliratú csúszkáról a
+   technikus nem tudja eldönteni, hogy a bekapcsolt állapot mit CSINÁL.
+   A mély keresés a katalógus alválasztása: gyors módban nincs mit mélyíteni, ezért
+   ott letiltjuk és halványítjuk - így nem tűnik élő döntésnek. */
+function syncHwModes() {
+  const cat = document.getElementById('hw-use-catalog');
+  const deep = document.getElementById('hw-deep-scan');
+  if (!cat || !deep) return;
+  const catRow = document.getElementById('hw-catalog-row');
+  const deepRow = document.getElementById('hw-deep-row');
+  const on = !!cat.checked;
+  catRow.dataset.on = on ? '1' : '0';
+  document.getElementById('hw-catalog-title').textContent = on
+    ? '🗂️ TELJES KERESÉS – a Microsoft katalógust is végignézi'
+    : '⚡ GYORS MÓD – csak Windows Update, katalógus NÉLKÜL';
+  document.getElementById('hw-catalog-hint').textContent = on
+    ? 'Ajánlott. Lassabb, de olyan drivert is megtalál, amit a Windows Update nem ad.'
+    : 'Sokkal gyorsabb, de ha a Windows Update nem válaszol, a gép egyáltalán nem kap drivert.';
+  // Mély keresés csak teljes keresésnél értelmezhető.
+  deep.disabled = !on;
+  deepRow.classList.toggle('mc-mode-off', !on);
+  const deepOn = on && !!deep.checked;
+  deepRow.dataset.on = deepOn ? '1' : '0';
+  document.getElementById('hw-deep-title').textContent = deepOn
+    ? '🌐 MÉLY KERESÉS – minden eszközre rákérdez'
+    : (on ? '🌐 Mély keresés: KI – csak a hibás és alapdriveres eszközök'
+          : '🌐 Mély keresés – gyors módban nem értelmezhető');
+  document.getElementById('hw-deep-hint').textContent = deepOn
+    ? 'A régi, de működő gyári drivereket is frissíti. +1-2 perc.'
+    : (on ? 'Gyorsabb, de egy régi (bár működő) gyári driver frissítése kimarad.'
+          : 'A katalógus ki van kapcsolva, így nincs mit mélyíteni.');
+  const hint = document.getElementById('hw-setup-hint');
+  if (hint) hint.textContent = on
+    ? (deepOn ? 'teljes keresés, minden eszközre' : 'teljes keresés, csak a problémás eszközökre')
+    : 'gyors mód — csak Windows Update';
+}
+
+/* Üres/hiba állapot: az eredmény-panel helyett egy magyarázó sáv. Egy "Nincs internet"
+   ne egy üres, fülekkel teli panelben landoljon - a technikus ne azt higgye, hogy a
+   lista töltődik még. */
+function hwShowEmpty(html) {
+  document.getElementById('hw-result').style.display = 'none';
+  const box = document.getElementById('hw-empty');
+  box.style.display = '';
+  document.getElementById('hw-status').innerHTML = html;
+}
+
 async function startHwScan() {
   hwPool = []; hwInstalled = []; hwSelectedIndices.clear(); hwProblems = [];
+  hwOemInfo = null; hwScanMeta = null; hwTab = 'todo';
   document.getElementById('hw-tree').innerHTML = '';
-  document.getElementById('hw-problems').innerHTML = '';
-  const _ib = document.getElementById('hw-inbox'); if (_ib) _ib.innerHTML = '';
+  document.getElementById('hw-tabs').innerHTML = '';
+  document.getElementById('hw-summary').innerHTML = '';
   document.getElementById('hw-rescan-offer').innerHTML = '';
-  document.getElementById('oem-card').style.display = 'none';
-  document.getElementById('oem-card').innerHTML = '';
+  document.getElementById('hw-result').style.display = 'none';
+  document.getElementById('hw-empty').style.display = 'none';
   hwScanStart();
-  document.getElementById('hw-status').textContent = '';
   document.getElementById('btn-hw-scan').disabled = true;
   updateHwButtons();
   try {
@@ -2715,7 +2906,7 @@ async function startHwScan() {
                               catEl ? !!catEl.checked : true);
   } catch (e) {
     hwScanStop();
-    document.getElementById('hw-status').textContent = '❌ Hiba: ' + e;
+    hwShowEmpty('❌ Hiba a szken indításakor: ' + esc(String(e)));
     document.getElementById('btn-hw-scan').disabled = false;
     toast('Hardver scan hiba: ' + e, 'error');
   }
@@ -2761,7 +2952,6 @@ function updateHwScanProgress(data) {
   // A `detail` az épp vizsgált eszköz neve: ez mozog akkor is, amikor a százalék
   // egy lassú lekérdezés alatt áll.
   if (data.detail !== undefined) document.getElementById('hw-detail').textContent = data.detail || '';
-  if (data.sys_info) document.getElementById('sys-info').textContent = data.sys_info;
   const bar = document.getElementById('hw-progress');
   if (data.determinate && data.total > 0) {
     bar.classList.remove('progress-indeterminate');
@@ -2774,16 +2964,26 @@ function updateHwScanProgress(data) {
 function onHwScanResult(data) {
   hwPool = data.pool || [];
   hwInstalled = data.installed || [];
-  renderHwProblems(data.problems || []);
-  renderHwInbox(data.inbox);
+  hwProblems = data.problems || [];
+  hwScanMeta = data;
   document.getElementById('btn-hw-scan').disabled = false;
   hwScanStop();
   document.getElementById('hw-progress').classList.remove('progress-indeterminate');
   document.getElementById('hw-progress-fill').style.width = '100%';
   document.getElementById('hw-phase').textContent = '✅ Kész';
   document.getElementById('hw-detail').textContent = '';
-  document.getElementById('hw-status').textContent = '✅ ' + hwPool.length + ' letölthető + ' + hwInstalled.length + ' telepített driver' + (data.time ? ' (' + data.time + ')' : '');
-  if (data.sys_info) document.getElementById('sys-info').textContent = data.sys_info;
+  setTimeout(() => { document.getElementById('hw-live').style.display = 'none'; }, 2500);
+
+  // HIBAÁG: a Python a megszakadt/elutasított szkeneknél `machine` nélkül, csak egy
+  // `sys_info` hibaszöveggel tér vissza ("❌ Nincs Internet!", "❌ Scan hiba", offline
+  // mód, másik művelet fut). Ilyenkor NEM az eredmény-panelt nyitjuk ki üresen - az
+  // úgy nézne ki, mintha a lista töltődne még -, hanem a magyarázó sávot.
+  if (!data.machine) {
+    hwShowEmpty(esc(data.sys_info || '❌ A szkennelés nem futott le.'));
+    updateHwButtons();
+    return;
+  }
+
   // Select all available by default - KIVÉVE (a) a downgrade-jelölteket (a WU a
   // telepítettnél régebbi drivert ajánl), (b) a KOCKÁZATOS, tárolóvezérlő/lemez
   // találatokat (telepítésük tudatos emberi döntést kíván, lásd
@@ -2793,27 +2993,128 @@ function onHwScanResult(data) {
   // előre kipipálva.
   hwSelectedIndices.clear();
   hwPool.forEach((d, i) => { if (!d.downgrade && !d.risky && !d.prev_no_bind) hwSelectedIndices.add(i); });
+
+  // Alapból a "Teendő" fül nyílik meg, de ha nincs teendő, a naprakész listát mutatjuk
+  // - egy üres lista "nincs találat" hangulata félrevezető lenne egy hibátlan gépen.
+  hwTab = (hwPool.length || hwProblems.length) ? 'todo' : 'ok';
+  document.getElementById('hw-empty').style.display = 'none';
+  document.getElementById('hw-result').style.display = '';
+  renderHwSummary();
+  renderHwTabs();
   renderHwTree();
   updateHwButtons();
-  setTimeout(() => { document.getElementById('hw-live').style.display = 'none'; }, 2500);
+}
+
+/* ÖSSZEFOGLALÓ CSÍK. Ide olvadt be a gépnév (ami korábban KÉTSZER szerepelt: a
+   fejlécben `sys-info`-ként és a gyártói kártyán is) és a gyártói driver-oldal gombja.
+   A gyártói adat aszinkron, a szken UTÁN érkezik (`oem_driver_info`), ezért a
+   renderelés `hwOemInfo`-ból dolgozik, és az esemény újrarajzoltatja a csíkot. */
+function renderHwSummary() {
+  const box = document.getElementById('hw-summary');
+  if (!box || !hwScanMeta) return;
+  const d = hwScanMeta;
+  const meta = [];
+  if (d.dev_count) meta.push(d.dev_count + ' eszköz megvizsgálva');
+  if (d.mode) meta.push('forrás: ' + d.mode);
+  if (d.time) meta.push(d.time);
+  // A gyors mód / WU-hiba KIÍRÁSA a képernyőn: e nélkül a szűk eredmény hiánynak
+  // látszik, nem a bekapcsolt gyors mód következményének. A kettő EGYÜTT a legrosszabb
+  // eset - olyankor egyik forrás sem futott le, és a gép nulla drivert kapna.
+  let note = '';
+  if (d.catalog_skipped && d.wu_failed) {
+    note = '⛔ <b>Egyik forrás sem futott le:</b> a Windows Update nem válaszolt, a Microsoft '
+         + 'katalógus pedig gyors módban ki volt kapcsolva. Kapcsold be a teljes keresést és futtasd újra!';
+  } else if (d.wu_failed) {
+    note = '⚠️ <b>A Windows Update nem válaszolt</b> (időtúllépés), így az eredmény csak a Microsoft '
+         + 'katalógusból származik. Érdemes később újra megpróbálni.';
+  } else if (d.catalog_skipped) {
+    note = '⚡ <b>Gyors mód:</b> csak a Windows Update-et kérdeztük meg. Ha kevés a találat, '
+         + 'kapcsold be a teljes keresést a fenti kártyán.';
+  }
+  box.innerHTML =
+      '<div class="hw-sum-main">'
+    +   '<span class="hw-sum-machine">' + esc(d.machine || '') + '</span>'
+    +   '<span class="hw-sum-meta">' + esc(meta.join(' · ')) + '</span>'
+    + '</div>'
+    + (hwOemInfo && hwOemInfo.url
+        ? '<button class="btn btn-sm" onclick="openVendorPage(\'' + esc(hwOemInfo.url) + '\')" '
+          + 'title="' + esc((hwOemInfo.desc || 'A gyártói oldalon vannak modell-specifikus driverek (hotkey, power, dokkoló...), amiket a Windows Update nem ad.')
+                            + (hwOemInfo.note ? ' — ' + hwOemInfo.note : '')) + '">🌐 '
+          + esc(hwOemInfo.vendor) + ' driver-oldal</button>'
+        : '')
+    + (note ? '<div class="hw-sum-note">' + note + '</div>' : '');
+}
+
+/* SZŰRŐ-FÜLEK. Egy lista, felette állapot-fülek - a korábbi külön dobozok (hibás
+   eszközök, nem telepíthető ajánlatok, naprakész lista) itt fülként élnek tovább,
+   így nem tolják le egymást a képernyőről. */
+const HW_TABS = [
+  {key:'todo', cls:'tab-todo', label:'⚡ Teendő'},
+  {key:'bad',  cls:'tab-bad',  label:'🔴 Hibás'},
+  {key:'dead', cls:'',         label:'🚫 Nem telepíthető'},
+  {key:'ok',   cls:'tab-ok',   label:'✅ Naprakész'},
+  {key:'all',  cls:'',         label:'📋 Mind'},
+];
+function hwTabCounts() {
+  const dead = hwPool.filter(d => d.prev_no_bind).length;
+  return {
+    todo: (hwPool.length - dead) + hwProblems.length,
+    bad: hwProblems.length,
+    dead: dead,
+    ok: hwInstalled.length,
+    all: hwPool.length + hwInstalled.length + hwProblems.length,
+  };
+}
+function renderHwTabs() {
+  const box = document.getElementById('hw-tabs');
+  if (!box) return;
+  const n = hwTabCounts();
+  // Üres fül nem jelenik meg - kivéve a "Teendő"-t, aminek a 0-ja maga a jó hír.
+  box.innerHTML = HW_TABS.filter(t => n[t.key] > 0 || t.key === 'todo').map(t =>
+      '<div class="hw-tab ' + t.cls + (hwTab === t.key ? ' active' : '') + '" '
+    + 'onclick="setHwTab(\'' + t.key + '\')">' + t.label
+    + '<span class="hw-tab-n">' + n[t.key] + '</span></div>').join('');
+}
+function setHwTab(key) {
+  hwTab = key;
+  renderHwTabs();
+  renderHwTree();
+  updateHwButtons();
 }
 function renderHwTree() {
   const container = document.getElementById('hw-tree');
   container.innerHTML = '';
-  const catOrder = ['🎮 Videókártya (VGA)','🎵 Hangkártya (Audio)','🌐 Hálózat (LAN/Wi-Fi)','🔵 Bluetooth','📷 Webkamera','🖱️ Periféria','🔒 Ujjlenyomat / Biometria','🔌 USB Vezérlő','⚙️ Rendszereszköz','🔄 WU Driver'];
-  // Group available
-  if (hwPool.length > 0) {
+  // A kategória-sorrend modul-szintű (HW_CAT_ORDER) - lásd az ottani kommentet arról,
+  // hogy a függvény-lokális `catOrder` négy buildig hogyan tüntette el a telepített
+  // driverek listáját.
+  const n = hwTabCounts();
+  const showOffers = (hwTab === 'todo' || hwTab === 'all');
+  const showBad    = (hwTab === 'todo' || hwTab === 'bad' || hwTab === 'all');
+  const showDead   = (hwTab === 'dead' || hwTab === 'all');
+  const showOk     = (hwTab === 'ok'   || hwTab === 'all');
+
+  // HIBÁS ESZKÖZÖK a lista TETEJÉN. Korábban ez egy külön, nagy piros doboz volt a
+  // találati fa FÖLÖTT ("olyan nagyba hát érted atlathatatlan az egész"); most rendes
+  // sorok, de kiemelve - és a hibakód mellett ott a TEENDŐ is.
+  if (showBad && hwProblems.length) {
+    const bad = document.createElement('div');
+    bad.className = 'hw-cat';
+    bad.innerHTML = '<div class="hw-cat-header open" onclick="toggleHwCatExpand(this)">'
+      + '<span class="chevron">▸</span>'
+      + '<span style="color:#ff8f84">🔴 Hibás eszközök (' + hwProblems.length + ' db)</span></div>'
+      + '<div class="hw-cat-children" style="padding-left:12px">'
+      + hwProblems.map(hwBadRowHtml).join('') + '</div>';
+    container.appendChild(bad);
+  }
+
+  // TELEPÍTHETŐ TALÁLATOK, kategóriánként.
+  if (showOffers && hwPool.length > 0) {
     const cats = {};
-    // A BIZONYÍTOTTAN nem illeszkedő ajánlatok külön csoportba (lásd renderDeadOffers):
-    // ezek a katalógusban léteznek, de a csomag INF-je más gépgyártóra szabott, és a
-    // program egy korábbi futásban már letöltötte és ellenőrizte is őket.
-    const deadItems = [];
     hwPool.forEach((d, i) => {
-      const it = {idx:i, ...d};
-      if (d.prev_no_bind) { deadItems.push(it); return; }
-      const c = d.cat || '🔧 Egyéb'; if(!cats[c]) cats[c]=[]; cats[c].push(it);
+      if (d.prev_no_bind) return;   // saját füle van (lásd renderDeadOffers)
+      const c = d.cat || '🔧 Egyéb'; if(!cats[c]) cats[c]=[]; cats[c].push({idx:i, ...d});
     });
-    const sortedCats = [...catOrder.filter(c=>cats[c]), ...Object.keys(cats).filter(c=>!catOrder.includes(c))];
+    const sortedCats = [...HW_CAT_ORDER.filter(c=>cats[c]), ...Object.keys(cats).filter(c=>!HW_CAT_ORDER.includes(c))];
     sortedCats.forEach((cat, catIdx) => {
       const items = cats[cat];
       const catDiv = document.createElement('div');
@@ -2828,9 +3129,52 @@ function renderHwTree() {
         + '<div class="hw-cat-children">' + items.map(hwRowHtml).join('') + '</div>';
       container.appendChild(catDiv);
     });
-    renderDeadOffers(container, deadItems);
   }
-  renderHwInstalled(container);
+
+  if (showDead) renderDeadOffers(container, hwPool.map((d,i)=>({idx:i, ...d})).filter(d=>d.prev_no_bind));
+  if (showOk) renderHwInstalled(container);
+
+  // Üres fül: mondjuk ki, MIÉRT üres - egy néma üres doboz hibának néz ki.
+  if (!container.children.length) {
+    const msg = (hwTab === 'todo')
+      ? (n.all ? '🎉 <b>Nincs teendő!</b> Minden eszköz naprakész driveren fut, és egyetlen hibás eszköz sincs a gépben.'
+               : 'Nincs megjeleníthető eszköz.')
+      : 'Ezen a szűrőn nincs egyetlen eszköz sem.';
+    const div = document.createElement('div');
+    div.style.cssText = 'padding:26px 16px;text-align:center;color:var(--text2);font-size:13px;line-height:1.7';
+    div.innerHTML = msg;
+    container.appendChild(div);
+  }
+}
+
+/* EGY HIBÁS ESZKÖZ SORA - a hibakód MELLETT azzal, hogy MIT KELL VELE CSINÁLNI.
+   2026-09-03, explicit user decision: *"ez mit jelent pl h code 24? irja mar le a
+   program h mit kell vele csinalni h eltunjon"*. A `remedy` szöveget a Python adja
+   (PNP_ERROR_CODE_REMEDIES), hogy a kód-specifikus tudás egy helyen éljen, és hogy a
+   CLI-nek is ugyanaz jusson. Ismeretlen kódnál üresen marad - egy általános
+   semmitmondás rosszabb, mint a hallgatás. */
+function hwBadRowHtml(p) {
+  const i = hwProblems.indexOf(p);
+  const canFix = p.pnp_id && HW_QUICKFIX_CODES.includes(p.code);
+  return '<div class="hw-item hw-bad">'
+    + '<span>' + (p.has_fix ? '🟡' : '🔴') + '</span>'
+    + '<span>'
+    +   '<span class="hw-bad-head">'
+    +     '<span style="font-weight:700" title="' + esc(p.hwid||'') + '">' + esc(p.name) + '</span>'
+    +     (p.cat ? '<span class="hw-bad-desc">' + esc(p.cat) + '</span>' : '')
+    +     '<span class="hw-bad-code">Code ' + p.code + '</span>'
+    +     '<span class="hw-bad-desc">' + esc(p.desc || '') + '</span>'
+    +     (p.has_fix
+          ? '<span style="color:var(--green);font-size:11.5px;font-weight:700">van rá driver a listában — pipáld ki és telepítsd</span>'
+          : '')
+    +     (canFix
+          ? '<button class="btn btn-sm" id="hwfix-btn-'+i+'" onclick="quickFixDevice('+i+')" '
+            + 'title="' + (p.code===22 ? 'Az eszköz engedélyezése (Enable-PnpDevice)' : 'Az eszköz újraindítása (letiltás + engedélyezés) - az Eszközkezelő \'eszköz újraindítása\' megfelelője') + '">'
+            + (p.code===22 ? '▶️ Engedélyezés' : '🔄 Gyorsjavítás') + '</button>'
+          : '')
+    +   '</span>'
+    +   (p.remedy ? '<div class="hw-bad-remedy"><b>👉 Teendő:</b> ' + esc(p.remedy) + '</div>' : '')
+    + '</span></div>';
 }
 
 /* Egy találati sor HTML-je. Külön függvény, mert két helyről kell: a normál
@@ -2846,7 +3190,7 @@ function hwRowHtml(it) {
           + (it.downgrade ? ' <span style="color:#ffb454;font-size:11px;font-weight:700" title="A felajánlott driver RÉGEBBI a jelenleg telepítettnél - telepítése visszabutítás lenne, ezért alapból nincs kijelölve">⚠️ régebbi, mint a telepített!</span>' : '')
           + (it.generic_replace ? ' <span style="color:#5fb2ff;font-size:11px;font-weight:700" title="Ezen az eszközön most a Windows beépített, generikus drivere fut. A chip gyártójának saját drivere elérhető a Microsoft Update Catalogban - jellemzően többet tud (hang-DSP, energiakezelés, offload). Ha a csere után az eszköz hibás lenne, a program automatikusan visszaáll a Windows driverére.">🏭 most Windows alapdriver → gyári elérhető</span>' : '')
           + (it.risky ? ' <span style="color:#ff5f6d;font-size:11px;font-weight:800" title="'+esc(it.risk_reason||'')+'">'+esc(it.risk_label||'⛔ KOCKÁZATOS - telepítése tudatos döntést kíván!')+'</span>' : '')
-          + (it.prev_no_bind ? ' <span style="color:#b9a7e8;font-size:11px;font-weight:700" title="Egy korábbi futásban ez a csomag már feltelepült vagy kipróbáltuk, de az eszköz nem vette át'+(it.prev_no_bind_reason?' ('+esc(it.prev_no_bind_reason)+')':'')+' - jellemzően más gépgyártóra szabott változat. Bejelölhető és újrapróbálható, de várhatóan most sem ezt választaná a Windows. GPU-nál a lenti NVIDIA/AMD/Intel gyártói kártya, alaplapi eszköznél az alaplapgyártó oldala a jobb forrás.">↷ korábban nem vette át az eszköz</span>' : '')
+          + (it.prev_no_bind ? ' <span style="color:#b9a7e8;font-size:11px;font-weight:700" title="Egy korábbi futásban ez a csomag már feltelepült vagy kipróbáltuk, de az eszköz nem vette át'+(it.prev_no_bind_reason?' ('+esc(it.prev_no_bind_reason)+')':'')+' - jellemzően más gépgyártóra szabott változat. Bejelölhető és újrapróbálható, de várhatóan most sem ezt választaná a Windows. A jobb forrás a hardver gyártójának saját letöltőoldala (videokártyánál NVIDIA/AMD/Intel, alaplapi eszköznél az alaplapgyártó).">↷ korábban nem vette át az eszköz</span>' : '')
           + '</span></span>'
           + '<span class="hwid">'+esc(it.hwid||'')+'</span></div>';
 }
@@ -2883,29 +3227,69 @@ function renderDeadOffers(container, dead) {
   container.appendChild(div);
 }
 
+/* A NAPRAKÉSZ ESZKÖZÖK LISTÁJA - MOSTANTÓL A TÉNYLEGESEN TELEPÍTETT DRIVERREL EGYÜTT
+   (2026-09-03, explicit user decision: *"írja ki azt is a program hogy jelenleg mik
+   vannak feltelepítve"*). Eddig ezek a sorok csak a nevet és a "Naprakész" szót
+   mutatták, vagyis egy 91 eszközös gépen 89-ről semmi érdemit nem mondtak. A verziót,
+   dátumot, gyártót és INF-nevet a Python küldi (`installed_version`/`_date`/
+   `_provider`/`_inf`), a már amúgy is lekérdezett `inst_info`-ból - nulla extra munka.
+
+   ...ÉS EZ A LISTA NÉGY BUILDIG EGYÁLTALÁN NEM JELENT MEG. A `catOrder` a
+   `renderHwTree`-ben volt `const`, ez a függvény viszont a Build 288-ban külön
+   függvénybe került - a hivatkozás tehát ReferenceError-t dobott. A szeparátor addigra
+   már bekerült a DOM-ba, ezért a képernyőn egy fejléc állt, alatta SEMMIVEL. A javítás
+   a modul-szintű HW_CAT_ORDER. Tanulság: ha egy blokkot külön függvénybe emelsz, a
+   benne olvasott KÜLSŐ neveket is vidd vele.
+
+   A csoportok alapból ÖSSZECSUKVA nyílnak: ez a leghosszabb lista (jellemzően 85-90
+   sor), kinyitva letolná a képernyőről a teendőket.
+
+   Ha a gyártó "Microsoft", az eszköz a Windows saját driverén fut. Ezt SZÁNDÉKOSAN nem
+   emeljük ki külön jelöléssel: a "N eszköz fut a beépített driverén" doboz 2026-09-03-án
+   törölve lett, és egy badge ugyanannak a visszacsempészése lenne más néven. A gyártónév
+   maga kimondja annak, aki keresi. */
 function renderHwInstalled(container) {
-  // Separator + installed
   if (hwInstalled.length > 0) {
     const sep = document.createElement('div');
     sep.className = 'hw-separator';
-    sep.textContent = '━━━━━━━━━ ✅ Telepített / Naprakész driverek ━━━━━━━━━';
+    sep.textContent = '✅ Naprakész — nincs újabb driver ezekhez (' + hwInstalled.length + ' eszköz)';
     container.appendChild(sep);
+    // NYITVA a saját fülén, ÖSSZECSUKVA a "Mind" nézetben. Aki a "Naprakész" fülre
+    // kattint, épp azért teszi, hogy lássa, mi van a gépen - ott egy összecsukott
+    // kategória-fejléc pont azt az információt rejtené el, amiért odament. A "Mind"
+    // fülön viszont ez a leghosszabb lista (85-90 sor), és nyitva letolná a teendőket.
+    const instOpen = (hwTab === 'ok');
     const instCats = {};
     hwInstalled.forEach(d => { const c = d.cat||'🔧 Egyéb'; if(!instCats[c]) instCats[c]=[]; instCats[c].push(d); });
-    const sortedCats = [...catOrder.filter(c=>instCats[c]), ...Object.keys(instCats).filter(c=>!catOrder.includes(c))];
+    const sortedCats = [...HW_CAT_ORDER.filter(c=>instCats[c]), ...Object.keys(instCats).filter(c=>!HW_CAT_ORDER.includes(c))];
     sortedCats.forEach(cat => {
       const items = instCats[cat];
       const catDiv = document.createElement('div');
       catDiv.className = 'hw-cat hw-installed';
-      catDiv.innerHTML = '<div class="hw-cat-header" onclick="toggleHwCatExpand(this)">'
+      catDiv.innerHTML = '<div class="hw-cat-header'+(instOpen?' open':'')+'" onclick="toggleHwCatExpand(this)">'
         + '<span class="chevron">▸</span>'
         + '<span>✅ '+esc(cat)+' ('+items.length+' db)</span></div>'
-        + '<div class="hw-cat-children collapsed">' + items.map(it =>
-          '<div class="hw-item"><span></span><span class="name" title="'+esc(it.name)+'">'+esc(it.name)+'</span><span class="wu" style="color:var(--green)">Naprak\u00e9sz</span><span class="hwid" title="'+esc(it.id||'')+'">'+esc(it.id||'')+'</span></div>'
-        ).join('') + '</div>';
+        + '<div class="hw-cat-children'+(instOpen?'':' collapsed')+'">' + items.map(hwInstalledRowHtml).join('') + '</div>';
       container.appendChild(catDiv);
     });
   }
+}
+
+/* Egy naprak\u00e9sz eszk\u00f6z sora: MI VAN RAJTA MOST (gy\u00e1rt\u00f3 \u2014 verzi\u00f3 [d\u00e1tum] / INF-n\u00e9v). */
+function hwInstalledRowHtml(it) {
+  const drv = it.installed_version
+    ? '<span class="hw-inst-drv">'
+      + (it.installed_provider ? esc(it.installed_provider) + ' \u2014 ' : '')
+      + '<span class="hw-inst-ver">' + esc(it.installed_version) + '</span>'
+      + (it.installed_date ? ' <span class="hw-inst-meta">[' + esc(it.installed_date) + ']</span>' : '')
+      + (it.installed_inf ? '<br><span class="hw-inst-meta">' + esc(it.installed_inf) + '</span>' : '')
+      + '</span>'
+    : '<span class="hw-inst-none">nincs k\u00fcl\u00f6n driver-bejegyz\u00e9s</span>';
+  return '<div class="hw-item">'
+    + '<span></span>'
+    + '<span class="name" title="'+esc(it.name)+'">'+esc(it.name)+'</span>'
+    + '<span class="wu">' + drv + '</span>'
+    + '<span class="hwid" title="'+esc(it.id||'')+'">'+esc(it.id||'')+'</span></div>';
 }
 function toggleHwCatExpand(header) {
   header.classList.toggle('open');
@@ -2945,76 +3329,19 @@ function selectAllHw() {
 }
 function deselectAllHw() { hwSelectedIndices.clear(); renderHwTree(); updateHwButtons(); }
 
-/* Problémás (hibakódos) eszközök kiemelése - akkor is látszik, ha egyik driver-forrás
-   sem adott rá találatot, hogy sose maradjon észrevétlen lyuk a gépben.
-   Gyorsjavítás gomb: kód-függő eszköz-akció (22 -> engedélyezés, egyéb -> eszköz
-   újraindítása) a Python fix_problem_device hívásán át. Driver-hiányos kódoknál
-   (28/39) az akciónak nincs értelme, ott nem jelenik meg gomb. */
+/* GYORSJAVITHATO HIBAKODOK. A gomb kod-fuggo eszkoz-akciot hiv (22 -> engedelyezes,
+   egyeb -> eszkoz ujrainditasa) a Python fix_problem_device hivasan at. Driver-hianyos
+   kodoknal (28/39) az akcionak nincs ertelme, ott nem jelenik meg gomb.
+
+   A renderHwProblems() ES a renderHwInbox() 2026-09-03-an TOROLVE lett innen:
+     - a hibas eszkozok kulon piros doboza beolvadt a fo listaba (hwBadRowHtml),
+       immar azzal egyutt, hogy MIT KELL VELUK CSINALNI (`remedy`);
+     - a "N eszkoz fut a Windows beepitett driveren" doboz megszunt (explicit user
+       decision). A Python tovabbra is NAPLOZZA, es az 1 kattintasos fix zaro
+       jelentese tovabbra is KIIRJA - csak a kezi szken nezetebol kerult ki, ahol a
+       talalati lista a lenyeg. */
 const HW_QUICKFIX_CODES = [10, 14, 21, 22, 31, 37, 43];
-function renderHwProblems(problems) {
-  hwProblems = problems || [];
-  const box = document.getElementById('hw-problems');
-  box.innerHTML = '';
-  if (!hwProblems.length) return;
-  const rows = hwProblems.map((p, i) =>
-    '<div style="display:flex;gap:8px;align-items:center;padding:4px 0;font-size:12px;flex-wrap:wrap">'
-    + '<span>' + (p.has_fix ? '🟡' : '🔴') + '</span>'
-    + '<span style="font-weight:600" title="'+esc(p.hwid||'')+'">'+esc(p.name)+'</span>'
-    + '<span style="color:var(--text3)">— '+esc(p.desc)+' (Code '+p.code+')</span>'
-    + ((p.pnp_id && HW_QUICKFIX_CODES.includes(p.code))
-        ? '<button class="btn btn-sm" id="hwfix-btn-'+i+'" onclick="quickFixDevice('+i+')" '
-          + 'title="'+(p.code===22?'Az eszköz engedélyezése (Enable-PnpDevice)':'Az eszköz újraindítása (letiltás + engedélyezés) - az Eszközkezelő \'eszköz újraindítása\' megfelelője')+'">'
-          + (p.code===22?'▶️ Engedélyezés':'🔄 Gyorsjavítás')+'</button>'
-        : '')
-    + '<span style="margin-left:auto;color:'+(p.has_fix?'var(--green)':'var(--red)')+'">'
-    + (p.has_fix ? 'van rá driver a listában ⬇' : 'NINCS automatikus megoldás - kézi driver kell!')
-    + '</span></div>'
-  ).join('');
-  box.innerHTML = '<div style="border:1px solid rgba(255,80,80,.35);background:rgba(255,80,80,.07);'
-    + 'border-radius:10px;padding:10px 14px;margin-bottom:10px">'
-    + '<div style="font-weight:700;margin-bottom:4px">⚠️ Problémás eszközök ('+hwProblems.length+' db)</div>'
-    + rows + '</div>';
-}
-/* MI MARADT A WINDOWS BEÉPÍTETT (GENERIKUS) DRIVERÉN?
-   A szken listája csak azt mutatja, amire VAN találat. Egy eszköz viszont futhat
-   hibakód nélkül a Microsoft általános driverén - ilyenkor sehol nem jelenik meg,
-   pedig pont ez az, amiről a technikusnak tudnia kell ("mik nem kapnak drivert").
-   A Python oldal ugyanazzal a szűrővel válogat, amit az 1 kattintásos fix záró
-   jelentése használ, tehát a két helyen látott lista nem mondhat ellent egymásnak. */
-function renderHwInbox(inbox) {
-  const box = document.getElementById('hw-inbox');
-  if (!box) return;
-  box.innerHTML = '';
-  if (!inbox || !inbox.total) return;
-  const items = inbox.items || [];
-  // A "van rá találat a listán" eseteket külön jelöljük: ott nincs teendő, elég
-  // feltelepíteni, amit a szken talált.
-  const rows = items.map(d =>
-    '<div style="display:flex;gap:8px;align-items:center;padding:4px 0;font-size:12px;flex-wrap:wrap">'
-    + '<span>' + (d.has_offer ? '🟢' : '🏭') + '</span>'
-    + '<span style="font-weight:600" title="' + esc(d.hwid || '') + '">' + esc(d.name) + '</span>'
-    + (d.cat ? '<span style="color:var(--text3)">' + esc(d.cat) + '</span>' : '')
-    + '<span style="color:var(--text3)">— most: ' + esc(d.inf || '?')
-    + (d.provider ? ' (' + esc(d.provider) + ')' : '') + '</span>'
-    + '<span style="margin-left:auto;color:' + (d.has_offer ? 'var(--green)' : 'var(--text3)') + '">'
-    + (d.has_offer ? 'van rá driver a listában ⬇' : 'nincs rá találat — gyártói oldalról kell')
-    + '</span></div>').join('');
-  box.innerHTML =
-    '<div style="border:1px solid rgba(180,120,255,.35);background:rgba(180,120,255,.07);'
-    + 'border-radius:10px;padding:10px 14px;margin-bottom:10px">'
-    + '<div style="font-weight:700;margin-bottom:4px">🏭 ' + inbox.total
-    + ' eszköz fut a Windows beépített (generikus) driverén</div>'
-    + (items.length
-        ? '<div style="color:var(--text3);font-size:11.5px;margin-bottom:6px">Ezek működnek, '
-          + 'de nem a gyártó saját driverével — itt lehet teendő:</div>' + rows
-        : '')
-    + (inbox.by_design
-        ? '<div style="color:var(--text3);font-size:11.5px;margin-top:6px">ℹ️ További '
-          + inbox.by_design + ' eszköz szintén Windows-driveren fut, de ez így HELYES — '
-          + 'buszvezérlők, hidak, általános egér/billentyűzet: ezekhez gyári driver nem is létezik.</div>'
-        : '')
-    + '</div>';
-}
+
 async function quickFixDevice(i) {
   const p = hwProblems[i];
   if (!p) return;
@@ -3070,18 +3397,16 @@ async function openVendorPage(url) {
    A címet/leírást a Python küldi (title/desc) - a régi OEM-szöveg ("gép", "dokkoló")
    alaplapra értelmetlen; a fallback-ek a régi viselkedést tartják meg. */
 function renderOemCard(data) {
-  const card = document.getElementById('oem-card');
-  if (!card) return;
-  if (!data || !data.vendor || !data.url) { card.style.display = 'none'; return; }
-  card.innerHTML = '<div style="border:1px solid rgba(100,160,255,.4);background:rgba(100,160,255,.07);'
-    + 'border-radius:10px;padding:10px 14px;margin-bottom:10px;display:flex;align-items:center;gap:12px;flex-wrap:wrap">'
-    + '<span style="font-size:20px">🏭</span>'
-    + '<div style="flex:1;min-width:200px"><div style="font-weight:700">'+esc(data.title || (data.vendor+' gép: '+(data.model||'')))+'</div>'
-    + '<div style="font-size:12px;color:var(--text3)">'+esc(data.desc || 'A gyártói oldalon vannak modell-specifikus driverek (hotkey, power, dokkoló...), amiket a WU nem ad.')
-    + (data.note ? ' <b>'+esc(data.note)+'</b>' : '') + '</div></div>'
-    + '<button class="btn" onclick="openVendorPage(\''+esc(data.url)+'\')">🌐 '+esc(data.vendor)+' driver-oldal</button>'
-    + '</div>';
-  card.style.display = 'block';
+  // 2026-09-03: EZ MÁR NEM SAJÁT KÁRTYÁT RAJZOL. A gyártói kártya a gép nevét
+  // MÁSODSZOR is kiírta, közvetlenül az összefoglaló alatt, ahol az már ott volt -
+  // ez volt az egyik doboz, amitől a nézet olvashatatlanná hízott. A link nem veszett
+  // el: a gomb beolvadt az összefoglaló csíkba (renderHwSummary).
+  //
+  // Az esemény a szken UTÁN, aszinkron érkezik, ezért csak eltároljuk és
+  // újrarajzoltatjuk a csíkot - ha épp nincs kirajzolt eredmény, a renderHwSummary
+  // magától nem csinál semmit, és a következő szken úgyis nullázza a `hwOemInfo`-t.
+  hwOemInfo = (data && data.vendor && data.url) ? data : null;
+  renderHwSummary();
 }
 function updateHwButtons() {
   const hasPool = hwPool.length > 0;
@@ -3090,6 +3415,18 @@ function updateHwButtons() {
   document.getElementById('btn-install-hw').textContent = hasSel ? '🚀 Telepítés ('+hwSelectedIndices.size+' db)' : '🚀 Kijelöltek Telepítése';
   document.getElementById('btn-sel-all-hw').disabled = !hasPool;
   document.getElementById('btn-desel-all-hw').disabled = !hasPool;
+  // A művelet-sáv számlálója: a Telepítés gomb ragadós az aljon, de a "miből mennyi"
+  // csak akkor derül ki, ha ki is írjuk - egy 90 soros listában a pipák nem
+  // számolhatók szemmel.
+  const info = document.getElementById('hw-sel-info');
+  if (info) {
+    const dead = hwPool.filter(d => d.prev_no_bind).length;
+    const real = hwPool.length - dead;
+    info.textContent = hasPool
+      ? (hwSelectedIndices.size + ' / ' + real + ' kijelölve'
+         + (dead ? '  ·  ' + dead + " nem telepíthető (külön fülön)" : ''))
+      : '';
+  }
 }
 async function installSelectedHw() {
   if (hwSelectedIndices.size === 0) {
