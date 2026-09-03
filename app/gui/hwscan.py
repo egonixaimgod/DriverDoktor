@@ -148,6 +148,27 @@ CATALOG_PAGE_SIZE = 25
 # már a legfrissebb 25 sort tartalmazza; a többi lap csak akkor kell, ha a legfrissebb
 # dátumú holtverseny átlóg a lap végén. 3 lap = 75 sor, bőven fedi a mért eseteket.
 CATALOG_MAX_PAGES = 3
+
+# IDEGEN-GYÁRTÓS JELÖLT KIPRÓBÁLÁSÁNAK MÉRETHATÁRA (MB), 2026-09-03, explicit user decision.
+#
+# A helyzet: a gép saját `SUBSYS_`-kulcsán már a legfrissebb csomag van fent, az általános
+# kulcson viszont vannak frissebb sorok - azok ugyanannak a chipnek MÁS gépgyártókhoz
+# készült változatai. Hogy egy ilyen mégis illik-e, azt CSAK letöltés után, az INF-ből
+# lehet megtudni. A felhasználó döntése: a kicsit próbáljuk ki (úgyis az az igazság
+# egyetlen útja), a nagyot ne.
+#
+# Miért pont 100: a mért hangdriver-csomagok 11-30 MB körül vannak (érdemes kipróbálni),
+# a videokártya-csomagok 240 MB - 1,2 GB (nem éri meg egy olyan csomagért, amiről a gyártó
+# saját kulcsa már megmondta, hogy nem ide való). A méret a katalógus találati sorának
+# Size oszlopából jön, tehát a döntés LETÖLTÉS NÉLKÜL meghozható.
+CATALOG_FOREIGN_TRY_MAX_MB = 100
+
+# Hány jelölt részletlapját kérdezzük le az ALKALMAZHATÓSÁG letöltés előtti eldöntéséhez.
+# Egy lap 44-86 KB / ~2 mp (mérve), tehát néhány jelöltnél ez nagyságrendekkel olcsóbb egy
+# fölösleges letöltésnél (11 MB - 1,2 GB) - egy 25 soros holtversenynél viszont már 25
+# kérés lenne, ezért van felső korlát. A holtverseny amúgy is dátum szerint rendezett,
+# tehát az első néhány a releváns.
+CATALOG_HWID_PROBE_MAX = 6
 CATALOG_SORT_QS = '&scol=DateComputed&sdir=desc'
 # Ennyi holtverseny-jelöltnél kérjük le a részletlapot a "Driver Model" mezőért
 # (letöltés előtti, pár KB-os alkalmasság-jelzés - lásd _catalog_driver_models). PONTOS
@@ -981,6 +1002,26 @@ try {
             rows.append((guid, title, row_text.lower(), date_iso))
         return rows
 
+    @staticmethod
+    def _catalog_row_size_mb(row_text):
+        """A csomag mérete MB-ban a találati sor szövegéből, vagy None.
+
+        A katalógus táblázatának van egy Size oszlopa ("11.2 MB", "1.2 GB"), és a
+        `row_text` a teljes `<tr>` tag-mentesítve - tehát a méret INGYEN megvan, még a
+        letöltés (sőt a DownloadDialog-hívás) ELŐTT. Erre épül a méret-alapú döntés:
+        egy 11 MB-os hangdrivert érdemes kipróbálni akkor is, ha valószínűleg más
+        gépgyártóé, egy 1,2 GB-os videokártya-csomagot viszont nem.
+
+        A dátum-mintát (m/d/yyyy) szándékosan nem zavarja: külön egységet keresünk."""
+        m = re.search(r'(\d+(?:[.,]\d+)?)\s*(kb|mb|gb)\b', row_text or '', re.IGNORECASE)
+        if not m:
+            return None
+        try:
+            ertek = float(m.group(1).replace(',', '.'))
+        except ValueError:
+            return None
+        return {'kb': ertek / 1024.0, 'mb': ertek, 'gb': ertek * 1024.0}[m.group(2).lower()]
+
     # ------------------------------------------------------------------
     # A katalógus-sorok gyorsítótára (lásd CATALOG_ROWS_TTL fenti indoklását)
     # ------------------------------------------------------------------
@@ -1161,6 +1202,64 @@ try {
                 self._cat_rows_dirty = True
         return rows
 
+    def _catalog_detail_page(self, guid, ssl_ctx):
+        """Egy katalógus-tétel részletlapja, GUID szerint gyorsítótárazva (memóriában).
+
+        MIÉRT KÖZÖS (2026-09-03): ugyanezt a lapot kérdezi a "Driver Model" holtverseny-
+        döntő ÉS az új, letöltés előtti alkalmazhatóság-ellenőrzés
+        (`_catalog_supported_hwids`) - két külön kérés ugyanarra a 44-86 KB-os oldalra
+        pazarlás lenne. A tár a példányon él, tehát egy szken erejéig érvényes: a
+        részletlap tartalma amúgy sem változik egy futás alatt."""
+        tar = getattr(self, '_catalog_detail_cache', None)
+        if tar is None:
+            tar = self._catalog_detail_cache = {}
+        if guid in tar:
+            return tar[guid]
+        import urllib.request
+        try:
+            req = urllib.request.Request(
+                'https://www.catalog.update.microsoft.com/ScopedViewInline.aspx?updateid=' + guid,
+                headers={'User-Agent': 'Mozilla/5.0'})
+            html = urllib.request.urlopen(req, context=ssl_ctx, timeout=30).read().decode('utf-8', 'replace')
+        except Exception as e:
+            logging.debug(f"[CATALOG] Részletlap nem jött le ({guid}): {e}")
+            html = ''
+        tar[guid] = html
+        return html
+
+    def _catalog_supported_hwids(self, guid, ssl_ctx):
+        """A csomag TÁMOGATOTT HARDVER-AZONOSÍTÓI a részletlapról, kisbetűsen.
+        `None`, ha a lap nem jött le vagy nincs rajta ilyen szekció (= nem eldönthető).
+
+        EZ A LEGFONTOSABB ADAT, AMIT LETÖLTÉS NÉLKÜL MEG LEHET TUDNI (2026-09-03, élőben
+        mérve). A katalógus a TÖRZS-HWID-re (`...&DEV_0221`) más gépgyártók változatait is
+        visszaadja, és eddig CSAK a letöltött csomag INF-jéből derült ki, hogy nem ide
+        valók - vagyis a program felajánlott valamit, letöltötte, elvetette, majd a
+        technikus joggal kérdezte, hogy akkor minek ajánlotta fel. A részletlapon viszont
+        ott a pontos lista, `<div id="driverhwIDs">` blokkban. Mérve ezen a gépen
+        (HP EliteDesk 800 G2, Realtek ALC221, eszköz: ...&SUBSYS_103C8054):
+
+            HP  6.0.1.8335  ->  44 KB, 1,9 mp,  16 azonosító, a gépé BENNE VAN
+            GEN 6.0.9980.1  ->  86 KB, 2,1 mp, 149 azonosító, a gépé NINCS köztük
+
+        Vagyis a "más gépgyártó változata" eset MÁR A KERESÉSNÉL kiszűrhető, letöltés,
+        kicsomagolás és INF-vizsgálat nélkül.
+
+        A `None` és az üres lista KÜLÖNBÖZIK, és ez fontos: `None` = nem tudjuk (a lapon
+        nincs ilyen szekció, vagy nem jött le) -> SOHA nem vetünk el semmit emiatt, ugyanaz
+        az elv, mint az `inf_package_applies` None-jánál. Csak a NEM ÜRES lista alapján
+        szabad kizárni."""
+        html = self._catalog_detail_page(guid, ssl_ctx)
+        if not html:
+            return None
+        m = re.search(r'id="driverhwIDs"[^>]*>(.*?)</div>\s*</div>', html, re.S | re.I)
+        if not m:
+            return None
+        import html as _html
+        ids = [_html.unescape(' '.join(x.split())).lower()
+               for x in re.findall(r'<div[^>]*>(.*?)</div>', m.group(1), re.S) if x.strip()]
+        return ids or None
+
     def _catalog_driver_models(self, guid, ssl_ctx):
         """Egy katalógus-tétel részletlapjáról a "Driver Model" mező (a TÁMOGATOTT
         ESZKÖZÖK neve), kisbetűsen. Üres string, ha nincs vagy nem jött le.
@@ -1173,14 +1272,8 @@ try {
         "Driver Model: NVIDIA GeForce RTX 3090,...,NVIDIA GeForce RTX 3060,..." - ez az
         egyetlen olyan adat, amiből LETÖLTÉS ELŐTT eldönthető, melyik holtverseny-sor való
         ehhez a géphez."""
-        import urllib.request
-        try:
-            req = urllib.request.Request(
-                'https://www.catalog.update.microsoft.com/ScopedViewInline.aspx?updateid=' + guid,
-                headers={'User-Agent': 'Mozilla/5.0'})
-            html = urllib.request.urlopen(req, context=ssl_ctx, timeout=30).read().decode('utf-8')
-        except Exception as e:
-            logging.debug(f"[CATALOG] Részletlap nem jött le ({guid}): {e}")
+        html = self._catalog_detail_page(guid, ssl_ctx)
+        if not html:
             return ''
         text = re.sub(r'\s+', ' ', re.sub(r'<[^>]+>', ' ',
                                           re.sub(r'<script.*?</script>', '', html, flags=re.S)))
@@ -1322,8 +1415,94 @@ try {
                 return None
             scored = vendor_rows
 
-        best_score = max(s for s, _g, _t, _d in scored)
-        cands = [c for c in scored if c[0] == best_score]
+        # A GÉP SAJÁT `SUBSYS_`-KULCSÁRÓL VALÓ SOROK ELSŐBBSÉGE A NYERTES-VÁLASZTÁSNÁL
+        # (2026-09-03, terepen mérve, HP EliteDesk 800 G2 + Realtek ALC221).
+        #
+        # A `spec_by_guid` eddig CSAK a tartalékok sorrendjét adta, a NYERTEST tisztán a
+        # dátum döntötte el - az összes kulcs sorait egy közös halmazba öntve. Ez volt az
+        # utolsó láncszem a *"felrakom, működik, mégis újra felajánlja"* körben, és a
+        # napló pontosan kimutatja:
+        #
+        #   a gép SAJÁT HP-kulcsa (&SUBSYS_103C8054) -> 14 sor, mind 6.0.1.8xxx,
+        #       a legfrissebb: 6.0.1.8335 [2017-12-26]  <- PONT EZ VAN FENT A GÉPEN
+        #   az ÁLTALÁNOS kulcs (DEV_0221)             -> 25 sor a 264-ből, 2026-osak
+        #
+        # Dátum szerint a 2026-os "újabb", tehát az nyert - csakhogy az MÁS gépgyártó
+        # OEM-változata, és az INF-vizsgálat mind a hármat elvetette. A gép valójában
+        # NAPRAKÉSZ: a HP a saját kulcsán 2017 óta nem adott ki újabbat, és az fent van.
+        #
+        # A SZABÁLY: ha a gyártó publikál EHHEZ A KONKRÉT GÉPHEZ (SUBSYS) szóló csomagot,
+        # akkor arra a kulcsra nézve kell eldönteni, van-e újabb. Egy általános kulcsról
+        # jött, "frissebb" sor definíció szerint egy MÁSIK gép változata. Ettől a
+        # kiadás-kapu (`is_newer_release`) helyes választ ad: nincs újabb -> nincs
+        # ajánlat -> az eszköz végre "naprakész" lesz, nem pedig örökké felajánlott.
+        #
+        # KIVÉTEL: HIBAKÓDOS eszköznél nem szűkítünk. Ott bármilyen driver jobb a
+        # semminél, tehát minden sor jelölt marad (ugyanaz az elv, mint a downgrade-
+        # védelemnél). A tartalék-lista amúgy is a TELJES `scored`-ból épül, tehát ha a
+        # szűkített nyertes INF-je mégsem illik, a többi sor továbbra is sorra kerül.
+        own_specs = {i for i, h in enumerate(hwids[:4]) if 'SUBSYS_' in (h or '').upper()}
+        own_rows = ([c for c in scored if spec_by_guid.get(c[1], 99) in own_specs]
+                    if own_specs and not item.get('err_code') else [])
+        pool = own_rows or scored
+        if own_rows and len(own_rows) != len(scored):
+            logging.info(f"[CATALOG] {item['name']}: a gyártó ehhez a géptípushoz "
+                         f"({[h for h in hwids[:4] if 'SUBSYS_' in (h or '').upper()][:1]}) "
+                         f"{len(own_rows)} csomagot publikál - a nyertest ezek közül "
+                         f"választjuk, a további {len(scored) - len(own_rows)} általános "
+                         f"sor más gépgyártók változata (tartaléknak megmaradnak).")
+        # ===== ALKALMAZHATÓSÁG-ELLENŐRZÉS LETÖLTÉS ELŐTT (2026-09-03) =====
+        #
+        # EZ SZÜNTETI MEG A "felajánlja -> letölti -> elveti -> mégis felajánlja" KÖRT.
+        # A katalógus a törzs-HWID-re más gépgyártók változatait is visszaadja, és eddig
+        # CSAK a letöltött csomag INF-jéből derült ki, hogy nem ide való. A részletlap
+        # viszont (44-86 KB, ~2 mp) NÉVSZERINT felsorolja a támogatott hardver-
+        # azonosítókat - lásd `_catalog_supported_hwids`. Mérve ezen a gépen:
+        #
+        #   HP  6.0.1.8335  ->  16 azonosító, a gép ...&SUBSYS_103C8054-e BENNE VAN
+        #   GEN 6.0.9980.1  -> 149 azonosító, a gépé NINCS köztük
+        #
+        # Így a nem ide való csomag már a KERESÉSNÉL kiesik: nem kerül a listára, nem
+        # töltjük le, és a technikusnak nem kell azzal szembesülnie, hogy a program
+        # felajánl valamit, amit aztán maga vet el.
+        #
+        # HÁROM SZABÁLY, AMI NÉLKÜL EZ TÖBBET ÁRTANA, MINT HASZNÁL:
+        #  1. CSAK NEM ÜRES lista alapján szűrünk. `None` (nincs ilyen szekció a lapon,
+        #     vagy nem jött le) = NEM ELDÖNTHETŐ -> a jelölt marad. Ugyanaz az elv, mint
+        #     az `inf_package_applies` None-jánál: sosem vetünk el a nemtudás alapján.
+        #  2. Ha a szűrés MINDENT kivágna, a szűrés eredményét eldobjuk. Egy üres lista
+        #     azt jelentené, hogy "nincs hozzá driver" - amit csak bizonyítottan szabad
+        #     kimondani, és egy szerveroldali formátumváltozás nem tehet ilyen állítást.
+        #  3. Csak a néhány legjobb jelöltet ellenőrizzük (`CATALOG_HWID_PROBE_MAX`),
+        #     hogy egy 25 soros holtverseny ne jelentsen 25 kérést.
+        best_score = max(s for s, _g, _t, _d in pool)
+        cands = [c for c in pool if c[0] == best_score]
+        dev_ids = {str(h).lower() for h in (item.get('all_hwids') or []) if h}
+        if dev_ids and len(cands) <= CATALOG_HWID_PROBE_MAX:
+            illik, eldonthetetlen, kizart = [], [], []
+            for c in cands:
+                tamogatott = self._catalog_supported_hwids(c[1], ssl_ctx)
+                if tamogatott is None:
+                    eldonthetetlen.append(c)
+                elif dev_ids & set(tamogatott):
+                    illik.append(c)
+                else:
+                    kizart.append((c, len(tamogatott)))
+            szurt = illik + eldonthetetlen
+            if kizart and szurt:
+                for (c, n) in kizart:
+                    logging.info(f"[CATALOG] {item['name']}: '{c[2][:60]}' KIZÁRVA letöltés előtt - "
+                                 f"a részletlap {n} támogatott azonosítója közt nincs ott az eszközé "
+                                 f"(más gépgyártó változata).")
+                self.emit('task_progress', {'task': 'hw_scan', 'log':
+                          f'  ⏭️ {item["name"]}: {len(kizart)} katalógus-csomag kizárva letöltés '
+                          f'nélkül (a gyártó listája szerint más géptípushoz valók).'})
+                cands = szurt
+            elif kizart and not szurt:
+                logging.info(f"[CATALOG] {item['name']}: a részletlapok szerint egyik jelölt sem "
+                             f"támogatja ezt az eszközt ({len(kizart)} db) - a szűrést NEM "
+                             f"alkalmazzuk (egy üres jelölt-lista erősebb állítás lenne, mint "
+                             f"amit egy oldal-formátum alapján kimondhatunk).")
         # KORÁBBAN MÁR MEGBUKOTT CSOMAGOK KIHAGYÁSA: amit egy előző futásban ugyanerre az
         # eszközre letöltöttünk és az INF-vizsgálat elvetett, azt nem töltjük le újra
         # (egy videokártya-csomag 1,2 GB). A jelölést a tartós no-bind tár őrzi, GUID
@@ -1435,6 +1614,58 @@ try {
             # már régóta dátum-alapú - ez a kapu volt az utolsó verzió-alapú döntés a
             # telepítési úton.
             newer = is_newer_release(best_date, best_title, inst.get('date'), inst_ver_str)
+            if newer is False and own_rows and len(own_rows) != len(scored):
+                # NEM ADJUK FEL, AMÍG VAN MÉG KIPRÓBÁLATLAN SOR (2026-09-03, explicit user
+                # decision: *"nem akarom h feladja a program sehol semmilyen esetben se…
+                # persze akkor lehet csak ezt kiírni ha TÉNYLEG MINDENT megprobalt"*).
+                #
+                # A fenti SUBSYS-elsőbbség önmagában itt „feladássá" válna: ha a gyártó a
+                # gép saját kulcsán nem adott ki újabbat, a kapu `None`-t adna, és a
+                # program SOHA nem próbálná meg az általános kulcs sorait - pedig azok
+                # között lehet olyan univerzális csomag, ami mégis erre a gépre való.
+                # Pontosan az az eset, amit a felhasználó az ASRock-alaplapról idéz:
+                # *"az se volt igaz h nincs hozzá driver, aztán mégis lett"*.
+                #
+                # Ezért itt kinyitjuk a kört a TELJES `scored`-ra és újraválasztunk. Ez nem
+                # visz végtelen körbe: amit a program letölt és az INF-vizsgálat elvet, azt
+                # a tartós no-bind tár megjegyzi (`bad_guids`), tehát a következő futáson
+                # az a sor már ki van szűrve - így a kör magától fogy el, és a végén
+                # ŐSZINTÉN mondható, hogy mindent megpróbáltunk.
+                # MÉRET-ALAPÚ DÖNTÉS (2026-09-03, explicit user decision): egy KICSI
+                # csomagot érdemes kipróbálni akkor is, ha valószínűleg más gépgyártóé -
+                # csak így derül ki az igazság, és 11 MB nem tétel. Egy NAGY csomagnál
+                # (videokártya, 1,2 GB) viszont a próba fél órát vinne el egy olyan
+                # csomagra, amiről a gyártó saját kulcsa már megmondta, hogy nem ide való.
+                # A méret a találati sorból INGYEN megvan (Size oszlop), tehát a döntés
+                # letöltés nélkül meghozható.
+                alt_pool = [c for c in scored if c[1] not in bad_guids]
+                nagyok = [c for c in alt_pool
+                          if (self._catalog_row_size_mb(rows_by_guid.get(c[1], ('', '', ''))[1])
+                              or 0) > CATALOG_FOREIGN_TRY_MAX_MB]
+                if nagyok:
+                    logging.info(f"[CATALOG] {item['name']}: {len(nagyok)} idegen-gyártós jelölt "
+                                 f"kihagyva méret miatt (> {CATALOG_FOREIGN_TRY_MAX_MB} MB) - a gép "
+                                 f"saját kulcsán már a legfrissebb csomag van, egy ekkora letöltés "
+                                 f"nem éri meg a próbát.")
+                    alt_pool = [c for c in alt_pool if c not in nagyok]
+                if alt_pool:
+                    alt_best = max(s for s, _g, _t, _d in alt_pool)
+                    alt_cands = [c for c in alt_pool if c[0] == alt_best]
+                    alt_cands.sort(key=lambda c: ((c[3] or ''), _parse_driver_version(c[2]) or ()),
+                                   reverse=True)
+                    a_bs, a_id, a_title, a_date = alt_cands[0]
+                    if is_newer_release(a_date, a_title, inst.get('date'), inst_ver_str) is not False:
+                        logging.info(
+                            f"[CATALOG] {item['name']}: a gép saját kulcsán nincs újabb "
+                            f"('{best_title}' [{best_date or '?'}] <= telepített {inst_ver_str}), "
+                            f"de az általános kulcson MÉG VAN kipróbálatlan sor - nem adjuk fel, "
+                            f"azt ajánljuk: '{a_title}' [{a_date or '?'}]. Ha az INF-vizsgálat "
+                            f"elveti, a no-bind tár megjegyzi, és a kör magától fogy el.")
+                        cands = alt_cands
+                        best = alt_cands[0]
+                        _bs, best_id, best_title, best_date = best
+                        best_ver = _parse_driver_version(best_title)
+                        newer = True
             if newer is False:
                 logging.debug(f"[CATALOG] Kihagyva (nem újabb kiadás - telepített {inst_ver_str} "
                               f"[{inst.get('date') or '?'}] vs katalógus '{best_title}' [{best_date or '?'}]): {item['name']}")
@@ -2417,6 +2648,19 @@ try {
         fail = 0
         skipped = 0
         cancelled = False
+        # TÉTELES MÉRLEG: melyik eszközzel MI TÖRTÉNT (2026-09-03, terepi visszajelzés:
+        # *"7 db-ot talált, telepítés 7 db, utána kiírja h 3db sikeres?? mi lett a maradek
+        # 4-el? ... azert az ugyfelnek is irja mar ki h mi tortenik"*). A záró sor eddig
+        # három SZÁMOT adott (sikeres/sikertelen/kihagyott), a magyarázatok pedig
+        # szétszórva, a görgethető naplóban tűntek el - a technikus jogosan érezte úgy,
+        # hogy négy driver "a levegőben maradt". Innentől minden tétel bekerül ide a
+        # kimenetelével, és a kör végén csoportosítva, NÉVVEL jelenik meg.
+        outcome_detail = []          # [(kimenetel, eszköznév, részlet)]
+        outcome_lock = threading.Lock()
+
+        def _mark(kind, dev_name, extra=''):
+            with outcome_lock:
+                outcome_detail.append((kind, dev_name, extra))
         # Azok az eszközök, amikre a katalógus MINDEN jelöltje alkalmatlan volt. A záró
         # összegzés nevesíti őket: egy görgethető naplóban eltűnő "kihagyva" sor nem
         # visszakereshető információ, márpedig ez konkrét teendő (gyártói driver-oldal).
@@ -2493,6 +2737,7 @@ try {
                 if not url:
                     logging.warning(f"[CATALOG_INSTALL] Kihagyás - nincs URL: {name}")
                     self.emit('task_progress', {'task': task_id, 'log': f'  [KIHAGYÁS] {name} - nincs letöltési link'})
+                    _mark('nolink', name)
                     with counter_lock:
                         skipped += 1
                     return
@@ -2505,6 +2750,7 @@ try {
                 if file_ext == '.exe':
                     logging.warning(f"[CATALOG_INSTALL] Kihagyás - .exe telepítő ({name}): {url[:80]}")
                     self.emit('task_progress', {'task': task_id, 'log': f'  [KIHAGYÁS] {name} - a katalógus .exe telepítőt adott, ezt biztonsági okból nem futtatjuk automatikusan'})
+                    _mark('exe', name)
                     with counter_lock:
                         skipped += 1
                     return
@@ -2735,6 +2981,7 @@ try {
                             # vonnia, különben egy hálózat-kiesés a lánc végéig kizárja az
                             # eszközt. Lásd a `dl_failed` deklarációjánál a magyarázatot.
                             dl_failed.append(dict(drv))
+                        _mark('netfail', name, str(last_err)[:80])
                         return
 
                     # ALKALMAZHATÓSÁG-ELLENŐRZÉS a telepítés ELŐTT (lásd wu_core.inf_package_applies):
@@ -2785,6 +3032,7 @@ try {
                         # A záró összegzés nevesíti őket: egy eltűnő "kihagyva" sor a
                         # görgethető naplóban nem visszakereshető információ.
                         no_source.append(name)
+                        _mark('nosource', name)
                     return
                 if chosen[1] != (drv.get('wu_title') or ''):
                     # Ez a sor a bizonyíték, hogy a tartalék-logika dolgozott: enélkül a
@@ -2915,15 +3163,41 @@ try {
                             generic_installs.append(
                                 (drv, re.findall(r'Published Name\s*:\s*(oem\d+\.inf)', res.stdout or '', re.IGNORECASE)))
                     self.emit('task_progress', {'task': task_id, 'log': f'  ✅ {name} telepítve!'})
+                    _mark('ok', name, drv.get('wu_title') or '')
                 elif no_op:
                     with counter_lock:
                         skipped += 1
-                    reason = 'már a rendszerben van' if all_already else 'nincs új csomag'
-                    self.emit('task_progress', {'task': task_id, 'log': f'  ↷ {name} már naprakész ({reason}) - kihagyva.'})
+                    # KÉT, GYÖKERESEN KÜLÖNBÖZŐ ESET VOLT EGY SZÖVEG ALATT (2026-09-03,
+                    # terepi képernyőkép, HID billentyűzet):
+                    #
+                    #   ⓘ a csomag 3 INF-jéből 2 való erre a gépre - csak azt telepítjük
+                    #   ↻ a szűkített telepítés nem volt elég - a teljes csomag megy fel
+                    #   ↷ már naprakész (már a rendszerben van) - kihagyva      <- HAZUGSÁG
+                    #
+                    # A csomag ILLETT és FEL IS MENT (a pnputil szerint már ott van a
+                    # DriverStore-ban) - csak az ESZKÖZ nem vette át, tehát továbbra is a
+                    # Windows alapdriverén fut. Ez nem "naprakész": a driver a gépen van, a
+                    # kötés hiányzik, és arra KONKRÉT teendő van (újrakötés / újraindítás).
+                    # A "nincs új csomag" ág viszont valóban naprakészt jelent.
+                    if all_already and drv.get('generic_replace'):
+                        _mark('staged_nobind', name)
+                        self.emit('task_progress', {'task': task_id, 'log':
+                                  f'  ⚠️ {name}: a gyári csomag MÁR FENT VAN a gépen, de az eszköz '
+                                  f'még a Windows alapdriverén fut - a csomag telepítése tehát nem '
+                                  f'hiányzik, a KÖTÉS hiányzik.'})
+                        self.emit('task_progress', {'task': task_id, 'log':
+                                  f'     👉 Teendő: „🔄 Eszközök újrakötése a gyári driverre” gomb '
+                                  f'(a keresési mód alatt), vagy egy újraindítás - ettől veszi át '
+                                  f'a Windows a már fent lévő gyári drivert.'})
+                    else:
+                        reason = 'már a rendszerben van' if all_already else 'nincs új csomag'
+                        _mark('uptodate', name, reason)
+                        self.emit('task_progress', {'task': task_id, 'log': f'  ↷ {name} már naprakész ({reason}) - kihagyva.'})
                 else:
                     with counter_lock:
                         fail += 1
                     self.emit('task_progress', {'task': task_id, 'log': f'  ❌ {name} hiba: {res.stdout[:100]}'})
+                    _mark('fail', name, (res.stdout or '')[:80])
 
                 # Több-INF-es csomag fel nem használt INF-jeinek kivezetése (Razer-eset,
                 # lásd _cleanup_unused_staged_infs). Reboot-igényes telepítésnél MOST nem
@@ -3088,12 +3362,48 @@ try {
         # levegőben maradt". Nem ez a helyzet: a kihagyott tétel vagy már naprakész volt,
         # vagy a program bizonyította, hogy a csomag nem ehhez a géphez való - egyik sem
         # elvarratlan szál. Ezt ki kell mondani, különben a szám maga kelt hiányérzetet.
+        # TÉTELES ZÁRÓ MÉRLEG: MINDEN eszköz meg van nevezve a kimenetelével.
+        #
+        # Terepi visszajelzés (2026-09-03): *"7 db-ot talált, telepítés 7 db, utána kiírja
+        # h 3db sikeres?? mi lett a maradek 4-el?"*. A három szám (sikeres/sikertelen/
+        # kihagyott) önmagában megválaszolatlan kérdés, a magyarázatok pedig szétszórva,
+        # a görgethető naplóban tűntek el - a technikus jogosan érezte úgy, hogy négy
+        # driver "a levegőben maradt". Itt egy helyen, csoportosítva, NÉVVEL áll.
+        #
+        # A sorrend szándékos: elöl, ami történt (siker), utána ami rendben van
+        # (naprakész), és a végén, amivel TEENDŐ lehet - az utolsó sor marad meg a
+        # technikus szeme előtt.
+        _CIMKEK = [
+            ('ok',       '✅ Feltelepítve',        ''),
+            ('uptodate', '↷ Már naprakész volt',  'nem kellett telepíteni - ez jó hír, nem kimaradás'),
+            ('staged_nobind', '⚠️ A gyári csomag fent van, de az eszköz nem vette át',
+             'nem a telepítés hiányzik, hanem a KÖTÉS → „Eszközök újrakötése” gomb vagy újraindítás'),
+            ('netfail',  '↻ Le sem jött (hálózat)', 'a csomaggal nincs baj; a következő szkennelés újra felajánlja'),
+            ('nolink',   '⏭️ Nincs letöltési link', 'a katalógus nem adott letölthető fájlt'),
+            ('exe',      '⏭️ .exe telepítő',       'biztonsági okból nem futtatunk ismeretlen telepítőt automatikusan'),
+            ('nosource', '🚫 Nincs hozzá való csomag', 'minden katalógus-jelöltet végigpróbáltunk, mind más gépgyártó változata'),
+            ('fail',     '❌ Telepítési hiba',      ''),
+        ]
+        if outcome_detail:
+            self.emit('task_progress', {'task': task_id, 'log': '\n📋 MI TÖRTÉNT TÉTELESEN:'})
+            for kind, cimke, magyarazat in _CIMKEK:
+                tetelek = [(n, x) for k, n, x in outcome_detail if k == kind]
+                if not tetelek:
+                    continue
+                self.emit('task_progress', {'task': task_id,
+                                            'log': f'  {cimke} ({len(tetelek)} db)'
+                                                   + (f' — {magyarazat}' if magyarazat else '')})
+                for nev, extra in tetelek:
+                    self.emit('task_progress', {'task': task_id,
+                                                'log': f'     • {nev}' + (f'  [{extra}]' if extra else '')})
+            logging.info(f"[CATALOG_INSTALL] Tételes mérleg: "
+                         f"{[(k, n) for k, n, _x in outcome_detail]}")
         if skipped:
             self.emit('task_progress', {'task': task_id, 'log':
-                      f'ℹ️ A {skipped} kihagyott tétel NEM sikertelen telepítés: vagy időközben '
-                      f'naprakésznek bizonyult, vagy a csomag más gépgyártó változata (a program '
-                      f'letöltötte és ellenőrizte). Ezeket a következő szkennelés már nem is '
-                      f'ajánlja fel — feljegyeztük őket.'})
+                      f'ℹ️ A {skipped} kihagyott tétel NEM sikertelen telepítés — a fenti '
+                      f'bontásban látod, melyik miért maradt ki. Amit a program egyszer már '
+                      f'bizonyítottan nem tudott felrakni, azt a következő szkennelés a '
+                      f'„Nem telepíthető" fülön mutatja, nem előre bejelölve.'})
         if no_source:
             logging.warning(f"[CATALOG_INSTALL] Nincs való csomag a katalógusban: {no_source}")
             self.emit('task_progress', {'task': task_id, 'log':

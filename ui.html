@@ -3236,6 +3236,16 @@ function hwBadRowHtml(p) {
             + 'title="' + (p.code===22 ? 'Az eszköz engedélyezése (Enable-PnpDevice)' : 'Az eszköz újraindítása (letiltás + engedélyezés) - az Eszközkezelő \'eszköz újraindítása\' megfelelője') + '">'
             + (p.code===22 ? '▶️ Engedélyezés' : '🔄 Gyorsjavítás') + '</button>'
           : '')
+    /* CODE 24 = a készülék nincs a gépben, tehát egy kihúzott eszköz maradványa. A
+       teendő-szöveg a Szellemeszközök menübe küldött, ami külön nézet és külön futás -
+       onnan a technikus nem is látja, hogy pont EZ a sor tűnt-e el. A mini gomb ugyanazt
+       a `pnputil /remove-device`-t futtatja, de CSAK erre az egy eszközre (a menüpont
+       marad, ha valaki mindet akarja). */
+    +     (p.code === 24 && p.pnp_id
+          ? '<button class="btn btn-sm" id="hwghost-btn-'+i+'" onclick="removeGhostRow('+i+')" '
+            + 'title="Ennek az EGY eszköznek a maradványát törli az Eszközkezelőből (pnputil /remove-device) - ugyanaz, amit a Szellemeszközök menü csinál, csak erre a sorra. A menüpont továbbra is ott van, ha az összeset akarod.">'
+            + '👻 Szellem törlése</button>'
+          : '')
     +   '</span>'
     +   (p.remedy ? '<div class="hw-bad-remedy"><b>👉 Teendő:</b> ' + esc(p.remedy) + '</div>' : '')
     + '</span></div>';
@@ -3405,6 +3415,32 @@ function deselectAllHw() { hwSelectedIndices.clear(); renderHwTree(); updateHwBu
        jelentese tovabbra is KIIRJA - csak a kezi szken nezetebol kerult ki, ahol a
        talalati lista a lenyeg. */
 const HW_QUICKFIX_CODES = [10, 14, 21, 22, 31, 37, 43];
+
+/* EGY szellemeszköz törlése a hibás eszközök sorából (Code 24). Sikeres törlés után a
+   sor kikerül a listából - ez a visszajelzés, hogy tényleg eltűnt; enélkül a technikus
+   csak egy toastot látna, és a sor ottmaradna, ami pont az ellenkezőjét sugallná. */
+async function removeGhostRow(i) {
+  const p = hwProblems[i];
+  if (!p) return;
+  const btn = document.getElementById('hwghost-btn-' + i);
+  if (btn) { btn.disabled = true; btn.textContent = '⏳ Törlés...'; }
+  try {
+    const res = await api().remove_ghost_device(p.pnp_id, p.name);
+    if (res && res.ok) {
+      toast('✅ ' + p.name + ' maradványa törölve.'
+            + (res.reboot ? ' (Újraindítás után tűnik el teljesen.)' : ''), 'success');
+      hwProblems = hwProblems.filter((_, k) => k !== i);
+      renderHwTabs(); renderHwTree(); updateHwButtons();
+    } else {
+      toast('⚠️ ' + p.name + ' - a törlés nem sikerült'
+            + (res && res.error ? ': ' + res.error : '') + '. A Szellemeszközök menü többet tud.', 'warning');
+      if (btn) { btn.disabled = false; btn.textContent = '👻 Szellem törlése'; }
+    }
+  } catch (e) {
+    toast('Szellemeszköz-törlés hiba: ' + e, 'error');
+    if (btn) { btn.disabled = false; btn.textContent = '👻 Szellem törlése'; }
+  }
+}
 
 async function quickFixDevice(i) {
   const p = hwProblems[i];

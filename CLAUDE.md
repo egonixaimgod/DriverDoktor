@@ -322,6 +322,55 @@ When adding anything to the chain, ask first: *does this still work with nobody 
 
 **És amit TILT:** új „skip/ignore/blacklist" lista bevezetése egy telepítési probléma megoldásaként. Ha egy javításhoz ilyen kell, a javítás nem kész — a valódi okot kell megtalálni.
 
+#### A KATALÓGUS RÉSZLETLAPJA FELSOROLJA A TÁMOGATOTT HARDVER-AZONOSÍTÓKAT — letöltés előtt (2026-09-03, élőben mérve)
+
+**Ez szünteti meg a „felajánlja → letölti → elveti → mégis felajánlja" kört, ami napokig mérgezte a terepi élményt.** A `ScopedViewInline.aspx?updateid=<guid>` lapon van egy `<div id="driverhwIDs">` blokk, ami **névszerint felsorolja**, mely hardver-azonosítókat támogatja a csomag — SUBSYS-szinten. Mérve, HP EliteDesk 800 G2 / Realtek ALC221 (eszköz: `…&SUBSYS_103C8054`):
+
+| Csomag | Lap | Idő | Azonosítók | Az eszközé benne van? |
+|---|---|---|---|---|
+| HP `6.0.1.8335` [2017-12-26] | 44 KB | 1,9 mp | **16** | ✅ igen |
+| Generikus `6.0.9980.1` [2026-04-20] | 86 KB | 2,1 mp | **149** | ❌ nem (`103c8266`, `103c8265`, `103c8184`…) |
+
+Vagyis a *„más gépgyártó változata"* eset **letöltés, kicsomagolás és INF-vizsgálat nélkül** eldönthető — 2 másodperc és 86 KB helyett 11 MB (hang) vagy 1,2 GB (videokártya). `_catalog_supported_hwids` a parser, `_catalog_detail_page` a közös, GUID szerint gyorsítótárazott lekérés (a „Driver Model" holtverseny-döntő ugyanezt a lapot használja — két külön kérés pazarlás lenne).
+
+**HÁROM SZABÁLY, ami nélkül ez többet ártana, mint használ:**
+1. **Csak NEM ÜRES lista alapján szűrünk.** `None` (nincs ilyen szekció a lapon, vagy nem jött le) = **nem eldönthető** → a jelölt marad. Ugyanaz az elv, mint az `inf_package_applies` `None`-jánál: **sosem vetünk el a nemtudás alapján.**
+2. **Ha a szűrés MINDENT kivágna, a szűrés eredményét eldobjuk.** Egy üres jelölt-lista azt állítaná, hogy „nincs hozzá driver" — ezt csak bizonyítottan szabad kimondani, és egy szerveroldali formátumváltozás nem tehet ilyen állítást.
+3. **Csak a néhány legjobb jelöltet ellenőrizzük** (`CATALOG_HWID_PROBE_MAX` = 6), különben egy 25 soros holtverseny 25 kérés lenne. A holtverseny dátum szerint rendezett, tehát az első néhány a releváns.
+
+**A parse a NYERS HTML-ből megy, nem a tag-mentesített szövegből** — ez nem stílus: a lap szövegében a „More information" / „Support Url" a HWID-szekció ELŐTT szerepel, tehát egy szöveg-alapú `(.*?)(?:More information|…)` minta pont a listát vágja le (először pontosan ezt írtam, és 0 azonosítót adott). A `<div id="driverhwIDs">` blokk viszont egyértelmű.
+
+#### „NINCS HOZZÁ DRIVER" CSAK AKKOR MONDHATÓ, HA A PROGRAM TÉNYLEG MINDENT VÉGIGPRÓBÁLT
+
+**Explicit user decision, 2026-09-03:** *„nem akarom h feladja a program sehol semmilyen esetben se, nem megoldas az ha kiirod az ugyfelnek h nincs hozza driver vagy nem létezik. Persze akkor lehet csak ezt kiírni ha TÉNYLEG MINDENT megprobalt a program es sehonnan se tudott hozzá drivereket keríteni, de mondjuk az hogy atnezi a katalogus elso 3 sorat aztan kiírja a program h nincs hozza driver, ez nem elfogadhato mert ez nem igaz — ahogy az se volt igaz h az asrock lapomhoz nem volt driver, aztán mégis lett."*
+
+**A „nincs hozzá csomag" egy ÁLLÍTÁS a világról, nem egy kényelmi kimenet.** Csak akkor szabad kimondani, ha a program minden elérhető forrást és minden kipróbálatlan jelöltet végigvitt. Amíg van olyan sor, amit **még nem töltöttünk le és nem vizsgáltunk meg**, addig a helyes viselkedés a próbálkozás — akkor is, ha „valószínűleg úgysem jó".
+
+**A KÖR ATTÓL FOGY EL, HOGY PRÓBÁLUNK — nem attól, hogy feltételezünk.** Ez a különbség a két, kívülről hasonlónak látszó megoldás közt:
+
+| Rossz | Jó |
+|---|---|
+| „a saját kulcson nincs újabb ⇒ naprakész" | „a saját kulcson nincs újabb ⇒ **nézzük az általánost is**" |
+| a kör azért fogy el, mert **kihagyunk** | a kör azért fogy el, mert **kipróbáltuk és feljegyeztük** |
+| a végállapot **feltételezés** | a végállapot **bizonyíték** |
+
+**A gyakorlati minta, ami ezt megvalósítja** (`_catalog_find_driver`, 2026-09-03): a nyertes-választás a gép saját `SUBSYS_`-kulcsát részesíti előnyben (az az adott géphez való) — **de ha ott nincs újabb, NEM adjuk fel**, hanem kinyitjuk a kört a teljes sorhalmazra, a már bizonyítottan rossz sorok kivételével. Ez nem visz végtelen körbe, mert amit letöltünk és az INF-vizsgálat elvet, azt a tartós no-bind tár megjegyzi — **a kör tehát magától fogy el, két-három kör alatt**, és a végén őszintén kimondható, hogy mindent megpróbáltunk. Ez a mért forgatókönyv:
+
+```
+1. kör: saját kulcs -> nincs újabb; általános kulcs -> van kipróbálatlan sor
+        => felajánljuk, letöltjük, INF-vizsgálat elveti, feljegyezzük
+2. kör: a feljegyzett sorok kiesnek; nincs több kipróbálatlan
+        => MOST mondható ki: naprakész / nincs hozzá való csomag
+```
+
+**AZ ASROCK-TANULSÁG, amiért ez a szabály létezik.** A projekt korábban leírta, hogy *„az ASRock egyáltalán nem publikál a Windows Update-re"* — aztán egy újramérés kihozta, hogy az ASRock-specifikus kulcsra **41 csomag** van a katalógusban. A „nincs hozzá driver" **téves állítás volt**, és azért maradt fenn hónapokig, mert senki nem mérte újra. Ha a program ilyet mond, annak a naplóból ellenőrizhetőnek kell lennie: **hány kulcsot kérdeztünk le, hány sort kaptunk, hányat próbáltunk ki, és mi lett a sorsuk.**
+
+**Amit ez a kódtól követel:**
+- egy „nincs csomag" ág előtt **mindig** legyen ott a kérdés: *van még kipróbálatlan sor / kulcs / forrás?*;
+- a **letöltési** bukás (hálózat) nem számít próbálkozásnak — azt újra kell próbálni, nem feljegyezni;
+- a végső üzenet **nevesítse az eszközt és a teendőt** (gyártói oldal), és a napló tartalmazza a fenti négy számot, hogy egy „szerintem van hozzá driver" bejelentés eldönthető legyen;
+- ha egy mérés megcáfol egy ilyen állítást ebben a fájlban, a **régi szöveget javítani kell** (lásd a fájl elején: az elavult, magabiztos bejegyzés a legveszélyesebb).
+
 ### THE PRODUCT'S WHOLE POINT: re-driver from ZERO. Never "back up the old driver and put it back"
 
 **Explicit user decision, 2026-08-25, stated in the strongest terms after a session went the wrong way. This outranks any cleverness about "not losing" a driver. Read it before proposing anything that touches a missing driver.**
