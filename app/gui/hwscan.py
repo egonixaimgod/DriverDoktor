@@ -1343,6 +1343,40 @@ try {
                 logging.debug(f"[CATALOG] {item['name']}: {len(cands) - len(usable)} jelölt kihagyva "
                               f"(korábban letöltöttük, és nem erre az eszközre való volt).")
                 cands = usable
+            elif not usable:
+                # HA A LEGJOBB PONTSZÁMÚ JELÖLTEK MIND ISMERTEN ROSSZAK, NEM ADJUK FEL,
+                # HANEM LEJJEBB LÉPÜNK A PONTSZÁMBAN (2026-09-03, explicit user decision:
+                # *"arra hogy fel se települ arra nem az a megoldás hogy akkor berakom egy
+                # tiltolistaba hogy többet ne dobja be mert akkor a device nem fog kapni
+                # drivert sose... az a cél hogy minden kaphon drivert"*).
+                #
+                # A régi `if usable and ...` feltétel pont ezt a helyzetet hagyta ki: ha a
+                # szűrés ÜRESRE fogyott, a `cands` változatlan maradt, tehát a nyertes újra
+                # a bizonyítottan alkalmazhatatlan csomag lett - a program minden szken
+                # után ugyanazt ajánlotta, amiről már tudta, hogy nem megy. Terepen ez volt
+                # a Realtek-eset: az általános kulcsról jött, MÁS gépgyártós csomag nyert,
+                # az INF-vizsgálat elvetette, és a gép saját HP-kulcsán lévő 14 sort a
+                # program soha meg sem nézte.
+                #
+                # A helyes válasz nem a találat elrejtése (az eszköz akkor SOSEM kapna
+                # drivert), hanem a KÖVETKEZŐ valódi jelölt előhozása: a `scored` teljes
+                # halmazából minden nem-tiltott sor, a szokásos sorrendben (legspecifikusabb
+                # kulcs -> jobb OS-pontszám -> frissebb dátum). Ha így sem marad semmi,
+                # akkor tényleg nincs csomag, és ezt a záró jelentés ki is mondja.
+                fallback = [c for c in scored if c[1] not in bad_guids]
+                if fallback:
+                    fallback.sort(key=lambda c: (c[3] or ''), reverse=True)
+                    fallback.sort(key=lambda c: c[0], reverse=True)
+                    fallback.sort(key=lambda c: spec_by_guid.get(c[1], 99))
+                    logging.info(f"[CATALOG] {item['name']}: a legjobb pontszámú jelöltek MIND "
+                                 f"korábban megbukottak - lejjebb lépünk a pontszámban, hogy az "
+                                 f"eszköz mégis kapjon esélyt. Új jelöltek: {len(fallback)} db, "
+                                 f"első: '{fallback[0][2][:60]}' [{fallback[0][3] or '?'}]")
+                    cands = fallback
+                else:
+                    logging.info(f"[CATALOG] {item['name']}: MINDEN katalógus-sor korábban "
+                                 f"megbukott ezen az eszközön - nincs mit felajánlani.")
+                    return None
         # A legjobb pontszámúak közül a LEGFRISSEBB DÁTUMÚ sor nyer, és csak azonos
         # dátumnál dönt a verziószám. (A katalógus sor-sorrendje nem newest-first.)
         #
@@ -1507,6 +1541,45 @@ try {
                              f"is tartalékba kerülnek ({len(extra[:room])} db, a legspecifikusabb kulcs "
                              f"felől) - egy régi gyári driver jobb a generikusnál. Első tartalék: "
                              f"'{extra[0][2][:60]}' [{extra[0][3] or '?'}]")
+        else:
+            # GYÁRI DRIVEREN FUTÓ ESZKÖZ IS KAP TARTALÉKOT - A SAJÁT KULCSÁRÓL (2026-09-03).
+            #
+            # A hiányzó ág, ami miatt a technikus azt látta, hogy *"felajánlott egy realtek
+            # drivert, feltelepítettem, működik, utána kerestem, újra felajánlotta"*:
+            #
+            #   1. kör - az eszköz még a Windows `hdaudio.inf`-jén ült, tehát lefutott a
+            #      fenti (inbox) ág, ami a LEGSPECIFIKUSABB kulcs felől sorolta a
+            #      tartalékokat -> megtalálta a géphez való HP-csomagot -> felment, működik.
+            #   2. kör - az eszköz MOST MÁR gyári driveren fut, tehát `_is_inbox_driver`
+            #      hamis, és a tartalék-lista fel sem épült (`alts` csak az AZONOS DÁTUMÚ
+            #      holtverseny-jelöltekből állt). Maradt a dátum-elsőségű nyertes, ami az
+            #      ÁLTALÁNOS kulcsról jött és MÁS gépgyártó változata -> INF-vétó ->
+            #      "nincs való csomag" -> feljegyzés a no-bind tárba.
+            #   Közben a gép SAJÁT `&SUBSYS_`-kulcsán ott volt 14 sor, amiket a program
+            #   soha nem nézett meg. (Mérve: HP EliteDesk 800 G2, ALC0221, 2026-09-03.)
+            #
+            # A KÉT DOLGOT SZÉT KELL VÁLASZTANI, és eddig egybe volt gyúrva:
+            #   - a SPECIFIKUSSÁG SZERINTI SORREND univerzálisan helyes: egy sor, ami a
+            #     gép saját SUBSYS-kulcsáról jött, definíció szerint ehhez a géphez való;
+            #   - a RÉGEBBI kiadás elfogadása viszont TÉNYLEG csak inbox-eszköznél helyes,
+            #     különben visszalépés lenne.
+            # Ezért itt a `scored`-ból csak azokat vesszük tartaléknak, amik a kiadás-kapun
+            # is átmennek (`is_newer_release`), a sorrend viszont ugyanaz: legspecifikusabb
+            # kulcs -> jobb OS-pontszám -> frissebb dátum. Downgrade így sem történhet.
+            have = {best_id} | {a[0] for a in alts}
+            extra = [c for c in scored if c[1] not in have
+                     and is_newer_release(c[3], c[2], inst.get('date'), inst.get('version')) is not False]
+            extra.sort(key=lambda c: (c[3] or ''), reverse=True)
+            extra.sort(key=lambda c: c[0], reverse=True)
+            extra.sort(key=lambda c: spec_by_guid.get(c[1], 99))
+            room = max(0, CATALOG_MAX_CANDIDATES - 1 - len(alts))
+            if extra and room:
+                alts += [(c[1], c[2], c[3]) for c in extra[:room]]
+                logging.info(f"[CATALOG] {item['name']}: gyári driveren fut, tartalékok a "
+                             f"LEGSPECIFIKUSABB kulcs felől ({len(extra[:room])} db, csak "
+                             f"újabb kiadások) - e nélkül egy már felrakott gyári driver "
+                             f"mellett örökre a rossz gyártójú csomagot ajánlanánk. "
+                             f"Első tartalék: '{extra[0][2][:60]}' [{extra[0][3] or '?'}]")
 
         cab_url = self._catalog_download_url(best_id, ssl_ctx, item['name'])
         if not cab_url:
@@ -1775,6 +1848,10 @@ try {
                 success += s
                 fail += f
             if cancelled:
+                # A MEGSZAKÍTOTT FUTÁS NAPLÓJA IS FELMEGY: pont egy félbehagyott
+                # telepítésnél a legérdekesebb, meddig jutott a program.
+                self.upload_run_log('wu_install',
+                                    f'KÉZI telepítés MEGSZAKÍTVA - {success} sikeres, {fail} sikertelen')
                 self.emit('task_complete', {'task': 'wu_install', 'status': '❗ Megszakítva!', 'success': success, 'fail': fail})
                 return
             # ZÁRÓ DriverStore-TAKARÍTÁS: egy frissen telepített driver régi verziója
@@ -1795,6 +1872,15 @@ try {
                 msg += ' — ⚠️ Újraindítás szükséges!'
                 self.emit('task_progress', {'task': 'wu_install', 'log': '\n⚠️ Legalább egy driver csak ÚJRAINDÍTÁS után lép életbe!'})
                 self.emit('toast', {'message': '⚠️ A telepített driverek egy része csak újraindítás után él!', 'type': 'warning'})
+            # NAPLÓ-FELTÖLTÉS a kézi telepítés végén is (2026-09-03, explicit user
+            # decision) - eddig CSAK az 1 kattintásos fix töltött fel, tehát egy kézi
+            # telepítés után a napló a gépen maradt. SZÁNDÉKOSAN a `task_complete` ELŐTT,
+            # mint a láncnál: így a technikus a folyamat-ablakban látja a feltöltés
+            # sorait, nem egy már lezárt művelet után futna némán. A közös segédfüggvény
+            # mindent elnyel, tehát a telepítés eredményét nem befolyásolhatja.
+            self.upload_run_log('wu_install',
+                                f'KÉZI telepítés - {success} sikeres, {fail} sikertelen'
+                                + (' (újraindítás szükséges)' if reboot_needed else ''))
             self.emit('task_complete', {'task': 'wu_install', 'success': success, 'fail': fail, 'status': msg,
                                         'counter': msg, 'reboot_required': reboot_needed})
             # Chipset/USB-vezérlő driver után új eszközök bukkanhatnak elő (az AutoFix

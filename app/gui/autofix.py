@@ -2987,20 +2987,14 @@ class GuiAutofixMixin:
                     # napló a záró jelentést és a teljes időt IS tartalmazza. A hibája sosem
                     # akaszthatja meg a lezárást (a upload_logs mindent elnyel), és a napló a
                     # gépen is ott marad - ez csak másolat.
-                    try:
-                        self.emit('task_progress', {'task': 'autofix', 'log': '☁️ Napló feltöltése a szerviz Drive-jára...'})
-                        ok_up, where = logupload_core.upload_logs(
-                            self._run, benchmark_core.resolve_endpoint(),
-                            machine_name=platform.node(),
-                            build=common.BUILD_NUMBER,
-                            outcome=f"{chain_total} driver telepítve, {chain_time or 'ismeretlen idő'}")
-                        if ok_up:
-                            self.emit('task_progress', {'task': 'autofix', 'log': f'✅ Napló feltöltve{(" - " + where) if where else ""}.'})
-                        else:
-                            # Nem hiba a technikus szempontjából: a napló ott van a gépen is.
-                            self.emit('task_progress', {'task': 'autofix', 'log': f'ℹ️ A napló feltöltése nem sikerült ({where}) - a gépen itt találod: {_app_data_dir()}'})
-                    except Exception as e:
-                        logging.warning(f"[LOGUP] A napló-feltöltés hívása hibára futott (nem kritikus): {e}")
+                    # A KÖZÖS segédfüggvény (app/gui/logs.py: upload_run_log). 2026-09-03-ig
+                    # itt egy beágyazott másolat állt; amikor a kézi telepítés is megkapta a
+                    # feltöltést, ugyanez a nyolc sor HARMADSZOR készült volna el - ezért
+                    # kikerült egy helyre. Mindenki ugyanazt a `self`-et használja.
+                    self.upload_run_log(
+                        'autofix',
+                        f"1 KATTINTÁSOS FIX - {chain_total} driver telepítve, "
+                        f"{chain_time or 'ismeretlen idő'}")
                     self.emit('task_complete', {'task': 'autofix', 'status': 'Teljesen befejezve',
                                                 'chain_time': chain_time})
                     if not getattr(self, 'resume_mode', False):

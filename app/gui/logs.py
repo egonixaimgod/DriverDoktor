@@ -20,7 +20,9 @@ naplói közé keveredve előbb-utóbb rossz gép naplója menne fel.
 # === AUTO-IMPORTS ===
 import os
 import logging
+import platform
 
+from app import common
 from app import benchmark_core, logupload_core
 # === /AUTO-IMPORTS ===
 
@@ -28,6 +30,46 @@ from app import benchmark_core, logupload_core
 class GuiLogsMixin:
     """Naplók nézet: a Drive-ra feltöltött naplók listázása és visszatöltése.
     A DriverToolApi része (összerakás: app/gui/api.py)."""
+
+    def upload_run_log(self, task_id, outcome):
+        """A futás naplójának feltöltése a bolt Drive-jára. KÖZÖS belépési pont.
+
+        MIÉRT ITT (2026-09-03, explicit user decision: *"ne csak az autofix töltse fel a
+        logokat a felhőbe hanem a manualis scan + telepites is"*): eddig CSAK az 1
+        kattintásos fix töltött fel, tehát egy kézi telepítés után a napló a gépen
+        maradt - és mire kiderült, hogy valamit elemezni kellene, a gép már az ügyfélnél
+        volt. Pontosan az a helyzet, amiért a feltöltés egyáltalán létezik.
+
+        A függvény azért a Naplók-nézet mixinjében él, és nem külön-külön a hívóknál,
+        mert ez a HARMADIK hívási hely lett volna ugyanarra a nyolc sorra - és a
+        duplikált logika, aminek egy példánya lemarad, ennek a projektnek a legrégebbi
+        visszatérő hibája. Mindenki ugyanazt a `self`-et használja (lásd app/gui/api.py).
+
+        SOHA NEM DOB ÉS SOHA NEM AKASZTJA MEG A HÍVÓT: a feltöltés a művelet UTÁN fut, a
+        driverek addigra fent vannak, és a napló a gépen is ott marad - ez csak másolat.
+        Ezért a hiba `ℹ️`-vel megy ki, nem `❌`-szel: egy hálózati hiba miatt egy
+        egyébként tökéletes telepítés nem végződhet hibaüzenettel.
+
+        Visszatérés: True, ha felment (a hívónak jellemzően nem kell)."""
+        try:
+            self.emit('task_progress', {'task': task_id, 'log': '\n☁️ Napló feltöltése a szerviz Drive-jára...'})
+            ok_up, where = logupload_core.upload_logs(
+                self._run, benchmark_core.resolve_endpoint(),
+                machine_name=platform.node(),
+                build=common.BUILD_NUMBER,
+                outcome=outcome)
+            if ok_up:
+                self.emit('task_progress', {'task': task_id,
+                                            'log': f'✅ Napló feltöltve{(" - " + where) if where else ""}.'})
+            else:
+                # Nem hiba a technikus szempontjából: a napló ott van a gépen is.
+                self.emit('task_progress', {'task': task_id,
+                                            'log': f'ℹ️ A napló feltöltése nem sikerült ({where}) - '
+                                                   f'a gépen itt találod: {common._app_data_dir()}'})
+            return bool(ok_up)
+        except Exception as e:
+            logging.warning(f"[LOGUP] A napló-feltöltés hívása hibára futott (nem kritikus): {e}")
+            return False
 
     def get_log_download_dir(self):
         """A letöltési mappa útvonala - a nézet ezt írja ki (szinkron, olcsó hívás)."""
