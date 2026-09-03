@@ -3470,13 +3470,32 @@ async function quickFixDevice(i) {
 function showRescanOffer(data) {
   const el = document.getElementById('hw-rescan-offer');
   if (!el) return;
+  /* HA VOLT OLYAN CSOMAG, AMI FELMENT DE AZ ESZKÖZ NEM VETTE ÁT, akkor az új szkennelés
+     önmagában semmit nem old meg: a driver ott van a gépen, a KÖTÉS hiányzik - arra az
+     újrakötés-kör való (az 1 kattintásos fix ezt a lánc végén magától lefuttatja).
+     Ilyenkor AZ az elsődleges gomb, nem a szkennelés. */
+  const nobind = (data && data.rebind_devices) || [];
+  const kozos = '<button class="btn btn-sm" onclick="document.getElementById(\'hw-rescan-offer\').innerHTML=\'\'">Később</button>';
+  if (nobind.length) {
+    el.innerHTML = '<div style="border:1px solid rgba(255,180,80,.5);background:rgba(255,180,80,.10);'
+      + 'border-radius:10px;padding:11px 14px;margin:10px 0;display:flex;align-items:center;gap:12px;flex-wrap:wrap">'
+      + '<div style="flex:1;min-width:260px">'
+      + '<div style="font-weight:700;color:#ffd08a">⚠️ ' + nobind.length
+      + ' eszköznél a gyári csomag FENT VAN, de még a Windows alapdriverén fut</div>'
+      + '<div style="font-size:12px;color:var(--text3);margin-top:3px">'
+      + esc(nobind.slice(0, 4).join(', ')) + (nobind.length > 4 ? ' …' : '')
+      + ' — nem a telepítés hiányzik, hanem a kötés. Az újrakötés ezt rendbe teszi '
+      + '(a végén a gép újraindul).</div></div>'
+      + '<button class="btn btn-sm btn-primary" onclick="document.getElementById(\'hw-rescan-offer\').innerHTML=\'\';rebindDrivers()">🔄 Eszközök újrakötése</button>'
+      + kozos + '</div>';
+    return;
+  }
   el.innerHTML = '<div style="border:1px solid rgba(118,185,0,.45);background:rgba(118,185,0,.08);'
     + 'border-radius:10px;padding:10px 14px;margin:10px 0;display:flex;align-items:center;gap:12px;flex-wrap:wrap">'
     + '<span>🔁 ' + (data && data.installed ? data.installed + ' driver települt. ' : '')
     + 'Új eszközök bukkanhattak elő - érdemes újra szkennelni!</span>'
     + '<button class="btn btn-sm btn-success" onclick="document.getElementById(\'hw-rescan-offer\').innerHTML=\'\';startHwScan()">🔍 Új szkennelés</button>'
-    + '<button class="btn btn-sm" onclick="document.getElementById(\'hw-rescan-offer\').innerHTML=\'\'">Később</button>'
-    + '</div>';
+    + kozos + '</div>';
 }
 
 /* A VIDEOKÁRTYA-GYÁRTÓI KÁRTYÁK (NVIDIA/AMD/Intel) INNEN KIKERÜLTEK (2026-09-02,

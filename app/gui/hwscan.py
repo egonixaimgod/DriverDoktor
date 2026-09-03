@@ -2116,8 +2116,16 @@ try {
                                         'counter': msg, 'reboot_required': reboot_needed})
             # Chipset/USB-vezérlő driver után új eszközök bukkanhatnak elő (az AutoFix
             # ezért megy több körben) - siker esetén a felület felajánlja az új szkennelést.
-            if success > 0 and not self.target_os_path:
-                self.emit('offer_rescan', {'installed': success})
+            #
+            # ÚJRAKÖTÉS FELAJÁNLÁSA (2026-09-03): ha a telepítés során volt olyan csomag,
+            # ami FELMENT, de az eszköz nem vette át, akkor az új szkennelés önmagában
+            # semmit nem old meg - a driver ott van, a KÖTÉS hiányzik, és arra az
+            # újrakötés-kör való. Az 1 kattintásos fix ezt a lánc végén magától lefuttatja
+            # (`_autofix_closing_rebind`), a kézi úton viszont eddig a technikusnak kellett
+            # kitalálnia, hogy ez a dolga - pedig a program pontosan tudja, hogy kellene.
+            nobind = list(getattr(self, '_catalog_staged_nobind', None) or [])
+            if (success > 0 or nobind) and not self.target_os_path:
+                self.emit('offer_rescan', {'installed': success, 'rebind_devices': nobind})
 
         self._safe_thread('wu_install', worker)
 
@@ -2690,6 +2698,13 @@ try {
         # megpróbáltnak tekinteni.
         dl_failed = []
         self._catalog_dl_failed = dl_failed
+        # AMI FELMENT, DE AZ ESZKÖZ NEM VETTE ÁT (a csomag a DriverStore-ban van, az
+        # eszköz mégis a Windows alapdriverén fut). Erre KONKRÉT teendő van - az
+        # újrakötés-kör -, és a hívó ezt fel is ajánlja a telepítés végén. Az 1 kattintásos
+        # fix ezt a kört magától lefuttatja a lánc végén (`_autofix_closing_rebind`); a
+        # kézi úton eddig a technikusnak kellett rájönnie, hogy ez a dolga.
+        staged_nobind = []
+        self._catalog_staged_nobind = staged_nobind
         # Azok az elemek, amiknél a kötés-ellenőrzés IGAZOLTA, hogy az eszköz átvette a
         # drivert - ezek kulcsát a tartós no-bind emlékezetből törölni kell (ha egy
         # korábban nem-kötő csomag most mégis felment, a jelölése elavult).
@@ -3181,6 +3196,8 @@ try {
                     # A "nincs új csomag" ág viszont valóban naprakészt jelent.
                     if all_already and drv.get('generic_replace'):
                         _mark('staged_nobind', name)
+                        with counter_lock:
+                            staged_nobind.append(name)
                         self.emit('task_progress', {'task': task_id, 'log':
                                   f'  ⚠️ {name}: a gyári csomag MÁR FENT VAN a gépen, de az eszköz '
                                   f'még a Windows alapdriverén fut - a csomag telepítése tehát nem '
