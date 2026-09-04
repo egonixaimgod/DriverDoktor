@@ -3051,12 +3051,16 @@ function onHwScanResult(data) {
   // Select all available by default - KIVÉVE (a) a downgrade-jelölteket (a WU a
   // telepítettnél régebbi drivert ajánl), (b) a KOCKÁZATOS, tárolóvezérlő/lemez
   // találatokat (telepítésük tudatos emberi döntést kíván, lásd
-  // wu_core.RISKY_CLASS_WARNING), és (c) a korábbi futásban bizonyítottan NEM KÖTŐ
-  // csomagokat (prev_no_bind - más gépre szabott változat, újratelepíthető, de
-  // várhatóan most sem venné át az eszköz). Mindhárom látható a listán, csak nincs
-  // előre kipipálva.
+  // wu_core.RISKY_CLASS_WARNING), és (c) amit a `hwIsDeadOffer` nem ehhez a géphez
+  // valónak ítél (prev_no_bind + class_code_only).
+  //
+  // AZ (a) ÉS (b) A FŐ LISTÁBAN MARAD, csak pipa nélkül: ott a technikusnak VAN mit
+  // mérlegelnie (egy régebbi driver néha épp az, ami kell; egy tárolóvezérlő-csere
+  // tudatos döntés). A (c) viszont a saját, ÖSSZECSUKOTT csoportjába kerül - lásd
+  // renderDeadOffers -, mert ott nincs mit mérlegelni: a program már eldöntötte, hogy
+  // nem ehhez a géphez való, és a fő listában csak zaj lenne.
   hwSelectedIndices.clear();
-  hwPool.forEach((d, i) => { if (!d.downgrade && !d.risky && !d.prev_no_bind) hwSelectedIndices.add(i); });
+  hwPool.forEach((d, i) => { if (!d.downgrade && !d.risky && !hwIsDeadOffer(d)) hwSelectedIndices.add(i); });
 
   // Alapból a "Teendő" fül nyílik meg, de ha nincs teendő, a naprakész listát mutatjuk
   // - egy üres lista "nincs találat" hangulata félrevezető lenne egy hibátlan gépen.
@@ -3120,7 +3124,7 @@ const HW_TABS = [
   {key:'all',  cls:'',         label:'📋 Mind'},
 ];
 function hwTabCounts() {
-  const dead = hwPool.filter(d => d.prev_no_bind).length;
+  const dead = hwPool.filter(hwIsDeadOffer).length;
   return {
     todo: (hwPool.length - dead) + hwProblems.length,
     bad: hwProblems.length,
@@ -3175,7 +3179,7 @@ function renderHwTree() {
   if (showOffers && hwPool.length > 0) {
     const cats = {};
     hwPool.forEach((d, i) => {
-      if (d.prev_no_bind) return;   // saját füle van (lásd renderDeadOffers)
+      if (hwIsDeadOffer(d)) return;   // saját, összecsukott csoportja van (renderDeadOffers)
       const c = d.cat || '🔧 Egyéb'; if(!cats[c]) cats[c]=[]; cats[c].push({idx:i, ...d});
     });
     const sortedCats = [...HW_CAT_ORDER.filter(c=>cats[c]), ...Object.keys(cats).filter(c=>!HW_CAT_ORDER.includes(c))];
@@ -3195,7 +3199,7 @@ function renderHwTree() {
     });
   }
 
-  if (showDead) renderDeadOffers(container, hwPool.map((d,i)=>({idx:i, ...d})).filter(d=>d.prev_no_bind));
+  if (showDead) renderDeadOffers(container, hwPool.map((d,i)=>({idx:i, ...d})).filter(hwIsDeadOffer));
   if (showOk) renderHwInstalled(container);
 
   // Üres fül: mondjuk ki, MIÉRT üres - egy néma üres doboz hibának néz ki.
@@ -3265,9 +3269,19 @@ function hwRowHtml(it) {
           + (it.generic_replace ? ' <span style="color:#5fb2ff;font-size:11px;font-weight:700" title="Ezen az eszközön most a Windows beépített, generikus drivere fut. A chip gyártójának saját drivere elérhető a Microsoft Update Catalogban - jellemzően többet tud (hang-DSP, energiakezelés, offload). Ha a csere után az eszköz hibás lenne, a program automatikusan visszaáll a Windows driverére.">🏭 most Windows alapdriver → gyári elérhető</span>' : '')
           + (it.risky ? ' <span style="color:#ff5f6d;font-size:11px;font-weight:800" title="'+esc(it.risk_reason||'')+'">'+esc(it.risk_label||'⛔ KOCKÁZATOS - telepítése tudatos döntést kíván!')+'</span>' : '')
           + (it.prev_no_bind ? ' <span style="color:#b9a7e8;font-size:11px;font-weight:700" title="Egy korábbi futásban ez a csomag már feltelepült vagy kipróbáltuk, de az eszköz nem vette át'+(it.prev_no_bind_reason?' ('+esc(it.prev_no_bind_reason)+')':'')+' - jellemzően más gépgyártóra szabott változat. Bejelölhető és újrapróbálható, de várhatóan most sem ezt választaná a Windows. A jobb forrás a hardver gyártójának saját letöltőoldala (videokártyánál NVIDIA/AMD/Intel, alaplapi eszköznél az alaplapgyártó).">↷ korábban nem vette át az eszköz</span>' : '')
+          + (it.class_code_only ? ' <span style="color:#ffa94d;font-size:11px;font-weight:700" title="Ezt a csomagot a gyártó ÁLTALÁNOS, osztálykód-kulcsán találtuk ('+esc(it.class_code_key||'&amp;CC_...')+'), nem a gép saját azonosítóján - vagyis &quot;bármely gyártó ilyen fajta eszközéhez&quot; szól, nem konkrétan ehhez a géphez. Rákötni valószínűleg rá fog kötni (az INF-je illeszkedik), de nem biztos, hogy ehhez a géphez szánták: egy ilyen csomag rakott fel egyszer egy Alps tapipad-drivert egy asztali HP SMBus vezérlőjére, ami utána nem létező eszközöket gyártott és minden indításkor hibát dobott. Bejelölhető és feltelepíthető, ha tudod, hogy kell - az 1 kattintásos fix viszont kihagyja, mert ott nincs, aki mérlegeljen.">🎲 nem ehhez a géptípushoz (általános kulcs)</span>' : '')
           + '</span></span>'
           + '<span class="hwid">'+esc(it.hwid||'')+'</span></div>';
 }
+
+/* EGY HELYEN dől el, mi kerül a "nem ehhez a géphez való" csoportba (2026-09-04).
+   Hat helyen kellett a feltétel (szűrés, számláló ×2, fül-kihagyás, "Összes", alap-
+   kijelölés); egy hetedik ok felvételekor a projekt legrégebbi hibája jönne elő, hogy
+   egy példány lemarad. A két ok KONFIDENCIÁJA különbözik, és a sor-jelölés ki is mondja:
+     prev_no_bind    - BIZONYÍTOTT: letöltöttük, felraktuk, az eszköz nem vette át;
+     class_code_only - LETÖLTÉS ELŐTT eldöntve: a csomag a gyártó általános, "bármely
+                       ilyen chiphez" kulcsáról jött, nem a gép saját azonosítójáról. */
+function hwIsDeadOffer(d) { return !!(d && (d.prev_no_bind || d.class_code_only)); }
 
 /* A BIZONYÍTOTTAN NEM ILLESZKEDŐ AJÁNLATOK KÜLÖN, ÖSSZECSUKOTT CSOPORTBAN.
 
@@ -3284,19 +3298,29 @@ function renderDeadOffers(container, dead) {
   if (!dead || !dead.length) return;
   const div = document.createElement('div');
   div.className = 'hw-cat';
+  const bizonyitott = dead.filter(d => d.prev_no_bind).length;
+  const altalanos   = dead.filter(d => !d.prev_no_bind && d.class_code_only).length;
   div.innerHTML = '<div class="hw-cat-header" onclick="toggleHwCatExpand(this)" '
-    + 'title="A katalógusban van bejegyzés ezekre az eszközökre, de a csomagok INF-je egy '
-    + 'MÁSIK gépgyártó változatához tartozik - a program letöltötte és ellenőrizte őket, az '
-    + 'eszköz nem fogadta el. Kinyitva bepipálhatók és újrapróbálhatók, de a valódi megoldás '
-    + 'a gép/alaplap gyártójának driver-oldala.">'
+    + 'title="A katalógusban VAN bejegyzés ezekre az eszközökre, de a csomagok nem ehhez a '
+    + 'géptípushoz valók. Ezért nincsenek a fenti listában és az Összes gomb sem jelöli be '
+    + 'őket. Kinyitva bepipálhatók és megpróbálhatók, de a valódi megoldás a gép/alaplap '
+    + 'gyártójának driver-oldala.">'
     + '<span class="chevron">▸</span>'
-    + '<span style="color:#b9a7e8">🚫 Nem telepíthető: a csomag nem ehhez a géphez való ('
+    + '<span style="color:#b9a7e8">🚫 Nem ehhez a géphez való ('
     + dead.length + ' db)</span></div>'
     + '<div class="hw-cat-children" style="display:none">'
     + '<div style="padding:6px 10px 8px;font-size:11.5px;color:var(--text3)">'
-    + 'Ezekre a katalógusban VAN bejegyzés, de a csomagok INF-je más gépgyártó változatához '
-    + 'tartozik — a program letöltötte és ellenőrizte őket, az eszköz nem fogadta el. '
-    + 'A gyári driver ezekhez a gép/alaplap gyártójának oldalán van. Bepipálva újrapróbálhatók.'
+    /* A KÉT OK KONFIDENCIÁJA KÜLÖNBÖZŐ, ÉS EZT KI KELL MONDANI. Az egyiket bizonyítottuk
+       (letöltés + telepítés után az eszköz nem vette át), a másikat letöltés ELŐTT
+       döntöttük el a keresőkulcsból. Ha a kettőt egy mondatba mosnánk, vagy túlállítanánk
+       (a gyanút bizonyítéknak), vagy alulállítanánk (a bizonyítékot gyanúnak). */
+    + (bizonyitott ? '<b>' + bizonyitott + ' db bizonyítottan:</b> a program letöltötte és '
+        + 'felrakta, az eszköz nem vette át — a csomag INF-je más gépgyártó változatához tartozik.<br>' : '')
+    + (altalanos ? '<b>' + altalanos + ' db a keresőkulcs alapján:</b> a csomagot a gyártó '
+        + 'általános, „bármely ilyen chiphez” kulcsán találtuk, nem a gép saját azonosítóján. '
+        + 'Rákötni valószínűleg rákötne, de nem ehhez a géptípushoz készült — egy ilyen rakott '
+        + 'fel egyszer egy tapipad-drivert egy asztali gép SMBus vezérlőjére.<br>' : '')
+    + 'A gyári driver ezekhez a gép/alaplap gyártójának oldalán van. Bepipálva megpróbálhatók.'
     + '</div>' + dead.map(hwRowHtml).join('') + '</div>';
   container.appendChild(div);
 }
@@ -3398,7 +3422,7 @@ function toggleHwItem(idx) {
    Kézzel, a "Nem telepíthető" csoportot kinyitva továbbra is bejelölhetők - a döntést
    nem vesszük el, csak nem tesszük alapértelmezetté. */
 function selectAllHw() {
-  hwPool.forEach((d,i)=>{ if (!d.prev_no_bind) hwSelectedIndices.add(i); });
+  hwPool.forEach((d,i)=>{ if (!hwIsDeadOffer(d)) hwSelectedIndices.add(i); });
   renderHwTree(); updateHwButtons();
 }
 function deselectAllHw() { hwSelectedIndices.clear(); renderHwTree(); updateHwButtons(); }
@@ -3581,7 +3605,7 @@ function updateHwButtons() {
   // egy 90 soros listában a pipák nem számolhatók szemmel.
   const info = document.getElementById('hw-sel-info');
   if (info) {
-    const dead = hwPool.filter(d => d.prev_no_bind).length;
+    const dead = hwPool.filter(hwIsDeadOffer).length;
     const real = hwPool.length - dead;
     info.innerHTML = hasPool
       ? ('<b>' + hwSelectedIndices.size + ' / ' + real + '</b> driver kijelölve'

@@ -1843,6 +1843,56 @@ try {
                              f"mellett örökre a rossz gyártójú csomagot ajánlanánk. "
                              f"Első tartalék: '{extra[0][2][:60]}' [{extra[0][3] or '?'}]")
 
+        # ===== CSAK OSZTÁLYKÓD-KULCSRÓL JÖTT-E A NYERTES? (2026-09-04, terepen mérve) =====
+        #
+        # A `&CC_xxxx` (PCI osztálykód) kulcs azt jelenti: "bármely gyártó ilyen FAJTA
+        # eszközéhez való csomag". Ez a katalógusban az idegen gyártók OEM-bundle-jeinek
+        # mágnese - és ebből lett a fejlesztői gép egyik legcsúnyább esete:
+        #
+        #   eszköz: PCI\VEN_8086&DEV_A123&SUBSYS_8054103C  (HP EliteDesk SMBus vezérlő)
+        #   nyertes: 'AlpsAlpine - System - 10.4200.1616.141' [2019-03-04]
+        #   a kulcs, ami behozta: ...&CC_0C0500      <- osztálykód, NEM a gép SUBSYS-e
+        #
+        # MINDEN ellenőrzésünk igazat mondott rá: az INF tényleg deklarálja a
+        # `pci\ven_8086&dev_a123&cc_0c05`-öt (inf_package_applies -> True), a Windows
+        # rangsora is ezt választotta (hardver-azonosítós egyezés, míg az Intel saját
+        # csomagja csak kompatibilis azonosítón illeszkedik), és tényleg rá is kötött
+        # (kötés-ellenőrzés -> True). A csomag mégsem ide való: a driver felrakása után
+        # LEGYÁRTOTT egy nem létező ThinkPad UltraNav tapipadot (`HID\VID_044E&PID_1212`)
+        # négy szellem-gyerekkel, és minden rendszerindításkor hibaüzenetet dobott
+        # ("Set user settings to driver failed"). Mérve a Windows setupapi.dev.log-jából:
+        # a telepítés 13:19:11, a szellemeszköz születése 13:19:13.7 - a driver csinálta.
+        #
+        # MIÉRT NEM FOGTA MEG SEMMI: a tíz döntési pontunk mind azt kérdezi, hogy
+        # "ALKALMAZHATÓ-e ez a csomag erre az eszközre" - és a válasz becsületesen igen
+        # volt. Azt egyik sem kérdezi, hogy "ennek a GÉPNEK szánta-e a gyártó". Ezt az
+        # információt pontosan két hely hordozza: a WU szerver-oldali célzása (amit a
+        # katalógus használatával definíció szerint megkerülünk), és a katalógus
+        # részletlapjának SUBSYS-szintű azonosító-listája (`_catalog_supported_hwids`) -
+        # csakhogy az utóbbi üres is lehet, és olyankor szándékosan nem szűrünk.
+        #
+        # EZ A JELÖLÉS A MÁSODIK VÉDŐVONAL, ÉS SZÁNDÉKOSAN NEM TILTÁS. A tétel bekerül a
+        # listába, a technikus bejelölheti és feltelepítheti - csak nem lesz ELŐRE
+        # kipipálva, és az AutoFix (ahol senki nem ül a gép előtt) kihagyja. Ez nem
+        # eszköz-kizárás: az eszköz minden körben, minden forrásból keresésre kerül,
+        # lásd CLAUDE.md "MINDEN ESZKÖZ KAPJON DRIVERT".
+        #
+        # NEM VESZÍTÜNK VELE VALÓDI CSOMAGOT: ha a csomag tényleg ehhez a géphez való, a
+        # gép SAJÁT `&SUBSYS_`-kulcsa is behozza, és akkor a `spec_by_guid` ott adja a
+        # kisebb (specifikusabb) indexet - vagyis a jelölés fel sem kerül.
+        #
+        # KIVÉTEL: HIBAKÓDOS eszköz. Ott nincs működő driver, tehát bármi jobb a semminél -
+        # ugyanaz az elv, mint a downgrade-védelemnél és a SUBSYS-szűkítésnél fentebb.
+        best_spec = spec_by_guid.get(best_id, 99)
+        src_key = hwids[best_spec] if best_spec < len(hwids) else ''
+        class_code_only = ('&CC_' in (src_key or '').upper()) and not item.get('err_code')
+        if class_code_only:
+            logging.warning(
+                f"[CATALOG] {item['name']}: a nyertes csomag ('{best_title[:60]}') KIZÁRÓLAG "
+                f"osztálykód-kulcsról jött ({src_key}) - vagyis 'bármely gyártó ilyen fajta "
+                f"eszközéhez' szól, nem ehhez a géphez. A gép saját SUBSYS-kulcsa nem hozta be. "
+                f"Felajánljuk, de NEM jelöljük be előre, és az AutoFix kihagyja.")
+
         cab_url = self._catalog_download_url(best_id, ssl_ctx, item['name'])
         if not cab_url:
             return None
@@ -1891,6 +1941,11 @@ try {
             "risky": bool(item.get('risky')),
             "risk_label": item.get('risk_label') or '',
             "risk_reason": item.get('risk_reason') or '',
+            # CSAK OSZTÁLYKÓD-KULCSRÓL JÖTT (lásd a fenti blokkot): a felület nem jelöli
+            # be előre és kiírja az okot, az AutoFix pedig kihagyja. A kulcsot is
+            # visszaadjuk, mert a "miért nincs bepipálva?" kérdésre csak az válaszol.
+            "class_code_only": class_code_only,
+            "class_code_key": src_key if class_code_only else '',
         }
 
     def _catalog_search_collect(self, devices_to_check, installed_info=None):

@@ -378,6 +378,50 @@ A következmény végigkövethető a naplóban: a csomag felment („sikerült")
 
 **A TANULSÁG: ha egy azonosító ISMÉTLŐDŐ tagokból is állhat, a halmaz-alapú összehasonlítás némán hazudik.** Nem hibázik, nem dob, csak azonosnak lát két különböző dolgot — és a hiba a *telepítés* szintjén jelentkezik, ahol már senki nem a párosítót gyanúsítja.
 
+#### AZ OSZTÁLYKÓD-KULCSRÓL (`&CC_`) JÖTT CSOMAG NEM MEGY FEL FELÜGYELET NÉLKÜL (2026-09-04, terepen mérve)
+
+**Ez az az eset, ahol MINDEN ellenőrzésünk igazat mondott, és mégis rossz driver ment fel.** A fejlesztői gépen (HP EliteDesk 800 G2 SFF, **asztali gép**) egy Build 295–298 közti kiadás felrakta az `AlpsAlpine - System 10.4200.1616.141`-et az **Intel SMBus vezérlőre**. A Windows saját `setupapi.dev.log`-ja mondja ki mindkét felét:
+
+```
+13:19:11  cmd: pnputil /add-driver C:\DV_Temp\driverdoktor_wu\...\ApSmbDrv.inf /install
+13:19:12  Strong Name=oem12.inf:...:ApSMBus_Inst.NT:...:pci\ven_8086&dev_a123&cc_0c05
+13:19:13.7  HID\Vid_044E&Pid_1212&Col02          <- a driver LEGYÁRTOTT egy tapipadot
+```
+
+**Következmény:** a driver egy nem létező ThinkPad UltraNav tapipadot hozott létre **négy szellem-gyerekkel** (egér, billentyűzet, érintőpárna, MTConfig), plusz egy `Automatic` szolgáltatást, ami minden rendszerindításnál elindította az `Apoint.exe`-t → *„Set user settings to driver failed"*. Ráadásul a CLAUDE.md-ben korábban „terepi esetként" rögzített **COL-lánc bug is ennek a következménye volt**, nem független lelet.
+
+**MIÉRT NEM FOGTA MEG SEMMI — és ezt fontos pontosan érteni:**
+
+| jel | mit mondott | igaza volt? |
+|---|---|---|
+| HWID-egyezés | illeszkedik | ✅ az INF tényleg deklarálja a `cc_0c05`-öt |
+| `inf_package_applies` | alkalmazható | ✅ ugyanezért |
+| kötés-ellenőrzés | rákötött | ✅ tényleg rákötött |
+| Windows saját rangsora | ezt választom | ✅ **hardver**-azonosítós egyezés, míg az Intel csomagja csak **kompatibilis** azonosítón illeszkedik (mérve: `PCI\VEN_8086&DEV_A123` nincs az eszköz HWID-listájában) |
+
+**Egyik sem hazudott.** A tíz döntési pontunk mind azt kérdezi, hogy *„ALKALMAZHATÓ-e"* — és a válasz becsületesen igen volt. Azt egyik sem kérdezi, hogy *„ennek a GÉPNEK szánta-e a gyártó"*. Ez az információ pontosan két helyen él: a WU **szerver-oldali célzásában** (amit a katalógus használatával definíció szerint megkerülünk) és a **katalógus részletlapjának** SUBSYS-szintű listájában — csakhogy az utóbbi üres is lehet, és olyankor szándékosan nem szűrünk.
+
+**A HIBA FELOSZTÁSA — mindkét fél hibázott, és csak a sajátunkat tudjuk javítani:**
+- **AlpsAlpine:** (a) SUBSYS nélküli, `&CC_`-kulcsos INF — a Realtek pl. ugyanerre 16, illetve 332 SUBSYS-es azonosítót sorol, tehát szűkíteni lehetett volna; (b) súlyosabb: a driver **nem ellenőrizte, van-e ott hardver**, csak feltételezte és gyártott hozzá csomópontokat. A tág INF a WU-n belül ártalmatlan (ott a célzás fogja be) — a katalógusban nem.
+- **Mi:** egy **célzás nélküli archívumból** vettünk csomagot úgy, mintha hordozná a WU célzását.
+
+**A JAVÍTÁS (`class_code_only`, `_catalog_find_driver`):** a `spec_by_guid` már eddig is tudta, melyik kulcs hozta a sort; ha a nyertes **legspecifikusabb** forráskulcsa `&CC_`-t tartalmaz, a tétel megjelölést kap. Következmény: az **AutoFix kihagyja** (ott nincs, aki mérlegeljen — [elfogadási feltétel](#the-acceptance-criterion-for-the-one-click-fix-press-it-walk-away-come-back-to-a-finished-machine)), a **kézi szkenben pedig a „🚫 Nem ehhez a géphez való" ÖSSZECSUKOTT csoportba** kerül, nem a fő listába.
+
+**A FŐ LISTÁBÓL VALÓ KIVÉTEL AZONNALI TEREPI VISSZAJELZÉS VOLT** (ugyanaznap): *„ha nem ehhez a géphez való akkor mi a fasznak jeleníti meg a program? kibaszottul feleslegesen van ott… hogy örökké be lehessen pipálni és sose rakja fel?"*. Jogos, és **pontosan ugyanaz a panasz, amiből 2026-09-01-én a `renderDeadOffers` csoport született** — az első változatom (fő listában, pipa nélkül, jelöléssel) ezt a már meghozott döntést írta felül. A helyes válasz a meglévő mintát követi:
+
+| jelölés | hol | miért ott |
+|---|---|---|
+| `downgrade`, `risky` | **fő lista**, pipa nélkül | van mit MÉRLEGELNI (egy régebbi driver néha épp az, ami kell) |
+| `prev_no_bind`, `class_code_only` | **összecsukott csoport** | nincs mit mérlegelni — a program már eldöntötte |
+
+A feltétel EGY helyen él (`hwIsDeadOffer`, ui.html), mert hat helyen kellett (szűrés, két számláló, fül-kihagyás, „Összes", alap-kijelölés) — egy hetedik ok felvételekor a projekt legrégebbi hibája jönne elő, hogy egy példány lemarad. A csoport leírása **külön mondatban közli a két okot**, mert a konfidenciájuk különbözik (`prev_no_bind` = bizonyított; `class_code_only` = letöltés előtt, a kulcsból eldöntve) — egy mondatba mosva vagy a gyanút állítanánk bizonyítéknak, vagy fordítva.
+
+**Négy ok, amiért ez NEM sérti a [„minden eszköz kapjon drivert"](#minden-eszköz-kapjon-drivert--a-tiltólista-soha-nem-megoldás-explicit-user-decision-2026-09-03) szabályt:** (1) **csomagot** jelöl, nem **eszközt** — az eszköz minden körben, minden forrásból keresésre kerül; (2) **nem rejti el**: a csoport kinyitható, a sor bepipálható és feltelepíthető — a program soha nem hoz olyan döntést a technikus helyett, amit ne tudna felülbírálni; (3) **valódi csomagot nem veszít**, mert ha a csomag tényleg ehhez a géphez való, a gép saját `&SUBSYS_`-kulcsa is behozza, és akkor `spec_by_guid` ott adja a kisebb indexet — a jelölés fel sem kerül; (4) **hibakódos eszköznél nem lép életbe** (ott bármi jobb a semminél, ugyanaz a kivétel, mint a downgrade-védelemnél).
+
+**A szintetizált törzs-kulcs (`PCI\VEN_8086&DEV_A123`) NEM osztálykód**, és ez nem részletkérdés: az Intel saját csomagja pont onnan jön, tehát a jelölés nem érinti. Offline tesztelve mind a hat ágra (valódi eset, SUBSYS-ről is jön, HP-nyertes, hibakódos, törzs-kulcs, részletlap-elsőbbség) + a felület kijelölési logikájára.
+
+**MELLESLEG, ÉS TANULSÁGOS: az Intel saját INF-je szerint ennek az eszköznek NEM IS KELL DRIVER** — `%PCI\VEN_8086&DEV_A123Desc%=**Needs_NO_DRV**,PCI\VEN_8086&DEV_A123`, vagyis a csomag pusztán nevet ad neki az Eszközkezelőben. Az egész kör egy olyan eszközre keresett drivert, aminek a chipgyártója kimondja, hogy nem kell.
+
 #### „NINCS HOZZÁ DRIVER" CSAK AKKOR MONDHATÓ, HA A PROGRAM TÉNYLEG MINDENT VÉGIGPRÓBÁLT
 
 **Explicit user decision, 2026-09-03:** *„nem akarom h feladja a program sehol semmilyen esetben se, nem megoldas az ha kiirod az ugyfelnek h nincs hozza driver vagy nem létezik. Persze akkor lehet csak ezt kiírni ha TÉNYLEG MINDENT megprobalt a program es sehonnan se tudott hozzá drivereket keríteni, de mondjuk az hogy atnezi a katalogus elso 3 sorat aztan kiírja a program h nincs hozza driver, ez nem elfogadhato mert ez nem igaz — ahogy az se volt igaz h az asrock lapomhoz nem volt driver, aztán mégis lett."*
