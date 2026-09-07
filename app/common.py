@@ -842,6 +842,40 @@ _CALL_LOG_EXCLUDE = {
     # tényleges DÖNTÉS (mennyi sorból melyik nyert és miért) egyetlen összegző sorként
     # megy ki a _catalog_find_driver-ből, ami többet ér, mint a hívásonkénti nyers zaj.
     '_catalog_row_score', '_catalog_row_is_microsoft',
+
+    # ------------------------------------------------------------------------------
+    # ESZKÖZÖNKÉNT/CSOMAGONKÉNT hívott segédek (2026-09-07, terepi naplóból MÉRVE).
+    #
+    # Egy ASRock B450M lánc (Build 303, 24 perc 52 mp, 15 driver) 3,4 MB naplót írt, és
+    # ennek a 73%-a ezeknek a függvényeknek a [CALL] belépés/visszatérés párja volt:
+    #
+    #     _rebind_pkg_ids          797 KB / 4011 sor  <- MINDÖSSZE 20 egyedi INF-re!
+    #     _catalog_rows_cache      538 KB / 2236 sor
+    #     _catalog_find_driver     440 KB / 1002 sor  <- a teljes driver-táblát vitte argumentumként
+    #     _catalog_fetch_rows      260 KB / 1792 sor
+    #     _catalog_detail_page     255 KB / 902 sor
+    #     _catalog_supported_hwids 187 KB / 888 sor
+    #
+    # A kár nem elméleti: a napló A LÁNC KÖZBEN fordult át (21:17:15), a záró 2 perc
+    # egymaga 1,34 MB-ot írt - vagyis egy következő futás után ennek a láncnak a
+    # törlési fázisa már kiesne a rotációból, épp az a rész, amiből hibát keresünk.
+    # Ez pontosan a Rule 0 ellen-szabálya: maximális INFORMÁCIÓ, nem maximális sor.
+    #
+    # MINDEGYIKNÉL ELLENŐRIZVE, hogy a DÖNTÉS a saját naplósoraiban megmarad:
+    #   _rebind_pkg_ids, _staged_vendor_inf_for -> a kör kiírja a jelölteket, a névvel
+    #       felsorolt kihagyottakat és a kiválasztottakat ([REBIND] sorok);
+    #   _catalog_find_driver, _catalog_fetch_rows -> minden lekérdezés elé kimegy a
+    #       "[CATALOG] Keresés: <eszköz> (<hwid>)" sor, a végén a "Döntés:" összegzés
+    #       (Döntés-sor hiánya = nulla sor minden kulcsra - lásd CLAUDE.md 8. lépés);
+    #   _catalog_rows_cache -> betöltéskor egy INFO sor, találatkor "Gyorsítótárból:";
+    #   _catalog_detail_page, _catalog_supported_hwids -> a hívó NÉVSZERINT logolja
+    #       minden letöltés előtt kizárt csomagot ("KIZÁRVA letöltés előtt");
+    #   _autofix_stats_path -> állandó útvonal, nincs benne döntés.
+    # Ha ezek bármelyikéből eltűnik a saját naplósor, ide is vissza kell nyúlni.
+    '_rebind_pkg_ids', '_staged_vendor_inf_for',
+    '_catalog_find_driver', '_catalog_fetch_rows', '_catalog_rows_cache',
+    '_catalog_detail_page', '_catalog_supported_hwids',
+    '_autofix_stats_path',
 }
 
 

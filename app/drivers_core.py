@@ -360,6 +360,18 @@ def delete_driver_package(run, pub, target_os_path=None, timeout=None):
 # nyomtatósor, amit a Nyomtatásisor-kezelő (Spooler) szolgáltatás tart életben - amíg az
 # fut, a csomag nem törölhető, akárhányszor próbáljuk.
 #
+# A SZOLGÁLTATÁS LEÁLLÍTÁSA NEM MINDIG ELÉG - MÉRVE, NE TEKINTSD GARANCIÁNAK
+# (2026-09-07, ASRock B450M, Build 303). Ugyanaz a lánc a Spoolert bizonyítottan
+# leállította ("The Print Spooler service was stopped successfully."), a törlés mégis
+# ugyanezzel a 0xE000023D kóddal bukott a `prnms009.inf` / `prnms006.inf` csomagokon.
+# Az ok: a csomagot nem a szolgáltatás fájl-zárolása tartja, hanem a nyomtatósor
+# `SWD\PRINTENUM\{...}` ESZKÖZ-CSOMÓPONTJA, ami a szolgáltatás leállítása után is
+# bejegyezve marad a PnP-ben. Ez a kettő a Windows saját virtuális nyomtatója (Print to
+# PDF / XPS Document Writer), amit a Windows amúgy is visszatesz - a megmaradásuk tehát
+# ártalmatlan. A kör ezért megmarad (ahol tényleg a szolgáltatás az akadály, ott
+# megoldja), de a hívó KÜLÖN JELENTI ezt a kimenetelt, mert egy "nem sikerült" a valódi
+# ok nélkül pont az a fajta félrevezetés, amiből ez a fájl gyűjt.
+#
 # A megoldás ugyanaz a minta, amit a temp-takarítás már használ a szolgáltatás-zárolta
 # mappáknál: a szolgáltatást EGYSZER állítjuk le a köteg elején, nem csomagonként, és a
 # végén MINDENKÉPP visszaindítjuk.

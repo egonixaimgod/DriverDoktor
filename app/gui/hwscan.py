@@ -1224,8 +1224,13 @@ try {
         # ez négyszáznál is több sor. Terepen mérve (2026-08-06, Build 264) 448 ilyen sor
         # keletkezett, amiből 412 "-> 0 sor" volt, azaz 92% tartalmatlan zaj a forgó
         # logban (lásd CLAUDE.md: a maximális logolás maximális INFORMÁCIÓT jelent, nem
-        # maximális sorszámot). A nulla találat amúgy sem vész el: a [CALL]-réteg
-        # minden hívást rögzít a HWID-del együtt, a döntést pedig a Döntés-sor összegzi.
+        # maximális sorszámot). A nulla találat amúgy sem vész el: közvetlenül a hívás
+        # ELŐTT kimegy a "[CATALOG] Keresés: <eszköz> (<hwid>)" sor a _catalog_find_driver
+        # -ből, a végén pedig a "Döntés:" összegzés; Döntés-sor hiánya = nulla sor minden
+        # kulcsra (CLAUDE.md 8. lépés). FIGYELEM: ez a mondat 2026-09-07-ig a [CALL]-
+        # rétegre hivatkozott, de az azóta NEM csomagolja ezt a függvényt (mérve: 260 KB
+        # / 1792 sor egyetlen láncban, lásd common._CALL_LOG_EXCLUDE) - a bizonyíték
+        # tehát a Keresés-sor, ne töröld azt a _catalog_find_driver-ből.
         # Marad tehát: van találat (DEBUG), illetve a ritka és érdekes esetek (INFO):
         # ha ténylegesen lapoztunk, vagy ha a rendezés kiesett.
         if rows or pages > 1 or not sorted_ok:
@@ -2036,7 +2041,18 @@ try {
                         with lock:
                             found.append(hit)
                 except Exception as e:
-                    logging.debug(f"[CATALOG] Hiba: {dev.get('name')} - {e}")
+                    # TELJES VEREMKÉPPEL ÉS WARNING-GAL (2026-09-07). Két ok:
+                    #  1. Ez SZÁLBAN futó munka, és a projekt legdrágább hibája pont ez
+                    #     volt (2026-09-01, `NameError: title`): a kivétel elnyelődött, az
+                    #     eszköz se a sikeres, se a sikertelen listára nem került, csak
+                    #     ELTŰNT. Egy egysoros DEBUG üzenet ehhez kevés volt.
+                    #  2. A `_catalog_find_driver` kikerült a [CALL]-rétegből (log-zaj,
+                    #     lásd common._CALL_LOG_EXCLUDE), és eddig CSAK az adott veremképet
+                    #     - vagyis enélkül a csere információt VESZTENE, nem csak zajt.
+                    # Nem hamis riasztás: a hálózati hibákat a _catalog_fetch_rows már
+                    # elkapja, ide csak valódi rendellenesség jut el.
+                    logging.warning(f"[CATALOG] Kivétel az eszköz keresése közben, "
+                                    f"ez az eszköz kimaradt: {dev.get('name')} - {e}", exc_info=True)
                 try:
                     _report(dev.get('name') or '')
                 except Exception as e:
@@ -3623,11 +3639,12 @@ try {
         EZ A HÁLÓ NEM FEDI A TÁROLÓVEZÉRLŐT. Ott a hiba a KÖVETKEZŐ bootnál jelentkezik
         (INACCESSIBLE_BOOT_DEVICE), amikor ez az ellenőrzés már rég lefutott - visszaállni
         csak helyreállító médiáról lehet. A tároló ezért 2026-07-28-ig fixen tiltva volt
-        ezen a körön; azóta a fix indító dialógusának tároló-jelölőnégyzete engedheti be
-        (wu_core.is_generic_replace_candidate allow_storage), alapból KI, és a felület
-        piros figyelmeztetéssel, előre be nem jelölve hozza. Ha ide mégis érkezik
-        tároló-eszköz, azt a felhasználó tájékozottan engedte - de a "sikeres" verdikt
-        ilyenkor csak annyit jelent, hogy FUTÁS KÖZBEN nem lett hibás.
+        ezen a körön; 2026-07-28 és 2026-09-02 között egy alapból kikapcsolt
+        jelölőnégyzet engedhette be - 2026-09-02 ÓTA VISZONT ÚJRA FIXEN TILTVA, a
+        kapcsoló mindkét felületről eltűnt (a `allow_storage` paraméter megmaradt, de a
+        hívók fixen False-t adnak). Vagyis ide tároló-eszköz ma NEM érkezhet; ha egy
+        jövőbeli hívó mégis True-t adna, a "sikeres" verdikt csak annyit jelentene, hogy
+        FUTÁS KÖZBEN nem lett hibás - a bootot ez a háló nem tudja ellenőrizni.
 
         Döntési szabály eszközönként:
           - hibakód 0            -> siker, marad a gyári driver;

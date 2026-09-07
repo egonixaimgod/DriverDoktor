@@ -384,6 +384,64 @@ def _slmgr_ok(res):
     return rc == 0
 
 
+# AZ SLMGR HIBAKÓDJAI, emberi nyelven.
+#
+# MIÉRT KELL (terepi visszajelzés, 2026-09-07, Dell laptop): a gépre azt írta a Windows,
+# hogy 22 nap múlva lejár; a nézet kiírta, hogy VAN gyári kulcs a BIOS-ban; az aktiválás
+# viszont elbukott, és a technikus ennyit látott a képernyőn:
+#
+#     Error: 0xC004F050 On a computer running Microsoft Windows non-core edition,
+#     run 'slui.exe 0x2a 0xC004F050' to display the error text.
+#
+# Ez a nyers, angol slmgr-kimenet: se azt nem mondja meg, MI a baj, se azt, hogy mi a
+# teendő - a technikus szó szerinti visszajelzése az volt, hogy "valami sumák error
+# szöveget írt ki". A kódot tehát le KELL fordítani.
+#
+# A TÁBLA A MICROSOFT DOKUMENTÁLT KÓDJAIBÓL ÁLL, NEM MÉRÉSBŐL. Ezt fontos külön
+# kimondani (lásd a CLAUDE.md-t a mért kontra következtetett adatról): a fenti terepi
+# esetből NEM maradt naplónk, tehát azt, hogy ott PONTOSAN melyik kód jött, nem tudjuk.
+# A 0xC004F050 a legvalószínűbb (a gyári BIOS-kulcs jellemzően Home, a gépen viszont Pro
+# van), de ez hipotézis. Ismeretlen kódnál ezért nem találunk ki jelentést: a kód megy
+# ki nyersen, az kereshető - egy kitalált magyarázat rosszabb lenne a hallgatásnál.
+SLMGR_ERRORS = {
+    0xC004F050: 'a kulcs érvénytelen ehhez a Windows-kiadáshoz (jellemzően MÁS KIADÁS kulcsa: pl. Home kulcs Pro rendszeren)',
+    0xC004E016: 'a kulcs nem ehhez a kiadáshoz való',
+    0xC004F035: 'Volume (KMS/MAK) kulcsot nem fogad el a gép, mert hiányzik hozzá a gyári OEM BIOS-jelölő',
+    0xC004C008: 'a kulcsot már túl sokszor aktiválták (elérte a Microsoft aktiválási korlátját)',
+    0xC004C003: 'a kulcsot az aktiválási kiszolgáló blokkolta',
+    0xC004C060: 'a kulcsot a Microsoft aktiválási szolgáltatása blokkolta',
+    0xC004B100: 'az aktiválási kiszolgáló nem aktiválta ezt a gépet',
+    0xC004F074: 'nem sikerült elérni a KMS-kiszolgálót',
+    0xC004F038: 'a KMS-kiszolgáló nem ad ki licencet (túl kevés gép jelentkezett be rá)',
+    0xC004F00F: 'a kulcs a hardverhez van kötve, és a hardver megváltozott',
+    0xC004F009: 'a türelmi idő lejárt - újraaktiválás kell',
+    0xC004F014: 'nincs telepítve termékkulcs ehhez a kiadáshoz',
+    0x8007232B: 'a KMS-kiszolgáló neve nem oldható fel (DNS-hiba)',
+    0x8007007B: 'a megadott KMS-kiszolgáló neve hibás formátumú',
+    0x80072EE7: 'nem sikerült elérni az aktiválási kiszolgálót (hálózati hiba)',
+    0x80072EFD: 'nem sikerült elérni az aktiválási kiszolgálót (hálózati hiba)',
+}
+
+
+def slmgr_error_text(text):
+    """Az slmgr kimenetéből a hibakód -> ('0xC004F050', magyar magyarázat vagy '').
+
+    Kód nélküli kimenetnél ('', ''). Tiszta függvény, offline tesztelhető.
+
+    KÉT RÉSZLET, AMI NÉLKÜL NÉMÁN ROSSZUL MŰKÖDNE:
+      - PONTOSAN 8 hexa jegyre illesztünk. A slmgr ugyanazt a kódot kétszer írja ki, és
+        közte ott a `slui.exe 0x2a` - egy laza `0x[0-9a-f]+` minta a `0x2a`-t is
+        kódnak venné, ha az állna elöl.
+      - A keresés SZÁM szerint megy, nem szöveg szerint. A projekt egyszer már beleesett
+        abba, hogy egy `.upper()` a `0x` előtagot is `0X`-re alakította, és a tábla
+        SOSEM talált (2026-09-07, `wu_search_error_text`)."""
+    m = re.search(r'0x[0-9A-Fa-f]{8}\b', str(text or ''))
+    if not m:
+        return '', ''
+    code = int(m.group(0), 16) & 0xFFFFFFFF
+    return f'0x{code:08X}', SLMGR_ERRORS.get(code, '')
+
+
 def _slmgr_text(res):
     """Az slmgr kimenete a technikusnak. Lokalizált, ezért CSAK megjelenítjük - soha nem
     hozunk belőle döntést (lásd a modul fejlécét)."""

@@ -627,6 +627,20 @@ class GuiAutofixMixin:
             #  3. NEM szűrünk osztályra: amit a technikus törölni akart, azt törölni
             #     akarjuk (CLAUDE.md: a törlésbe soha ne kerüljön új szűrő). A Spoolert
             #     csak akkor állítjuk le, ha tényleg van mit vele nyerni.
+            # A 2. kör sem mindenható, és a MÉRT határa is ide tartozik (2026-09-07,
+            # ASRock B450M, Build 303): a Spooler LEÁLLT ("The Print Spooler service was
+            # stopped successfully."), a törlés mégis ugyanazzal a 0xE000023D kóddal
+            # bukott a `prnms009.inf` / `prnms006.inf` csomagokon. Az ok az, hogy ezeket
+            # nem a SZOLGÁLTATÁS tartja, hanem a `SWD\PRINTENUM\{...}` nyomtatósor-ESZKÖZ,
+            # ami a szolgáltatás leállítása után is bejegyezve marad a PnP-ben. Ez a két
+            # csomag a Windows saját virtuális nyomtatója (Print to PDF / XPS Document
+            # Writer) - a Windows úgyis visszateszi őket, tehát a megmaradásuk ártalmatlan.
+            # Ezért a kör MARAD (ahol tényleg fájl-zárolás az akadály, ott segít), de a
+            # bukást nevén nevezzük a technikusnak, nem "jellemzően valami tartja"-ként.
+            # NEM megoldás a nyomtatósor-eszköz eltávolítása: az az ügyfél nyomtatóját
+            # venné ki a gépből, amit a technikus nem kért - lásd a nyomtató-védelem
+            # indoklását a CLAUDE.md-ben.
+            still_in_use = []
             if in_use:
                 names = [f"{d.get('published')} ({d.get('original', '')})" for d in in_use]
                 logging.warning(f"[AUTOFIX-DELETE] {len(in_use)} csomagot használ egy telepített eszköz - "
@@ -650,8 +664,18 @@ class GuiAutofixMixin:
                                          f"[{drv.get('class', '?')}]")
                         else:
                             failed.append(f"{nm} ({drv.get('original', '')})")
-                            logging.warning(f"[AUTOFIX-DELETE] A 2. körben sem sikerült: {nm} "
-                                            f"({drv.get('original', '')}), returncode={res2.returncode}")
+                            if drivers_core.delete_blocked_in_use(res2):
+                                # Leállt Spooler MELLETT is "eszköz használja" -> nem a
+                                # szolgáltatás volt az akadály, hanem egy eszköz-csomópont.
+                                still_in_use.append(f"{nm} ({drv.get('original', '')})")
+                                logging.warning(
+                                    f"[AUTOFIX-DELETE] A 2. körben sem sikerült: {nm} "
+                                    f"({drv.get('original', '')}), returncode={res2.returncode} - "
+                                    f"a leállított {drivers_core.PRINT_SPOOLER_SERVICE} mellett is egy "
+                                    f"ESZKÖZ-csomópont (nyomtatósor) tartja, nem a szolgáltatás.")
+                            else:
+                                logging.warning(f"[AUTOFIX-DELETE] A 2. körben sem sikerült: {nm} "
+                                                f"({drv.get('original', '')}), returncode={res2.returncode}")
                 finally:
                     # MINDENKÉPP vissza: ez a gép nyomtatási képessége.
                     if spooler_stopped:
@@ -672,6 +696,15 @@ class GuiAutofixMixin:
                 self.emit('task_progress', {'task': task_id, 'log': f'\nℹ️ {len(failed)} db csomagot nem lehetett eltávolítani (jellemzően használatban lévő eszköz tartja):'})
                 for f in failed:
                     self.emit('task_progress', {'task': task_id, 'log': f'   • {f}'})
+                if still_in_use:
+                    # A KONKRÉT okot mondjuk meg, ne a "jellemzően valami tartja"-t: ezeknél
+                    # a nyomtatósor ESZKÖZ-csomópontja tartja a csomagot, ami a Spooler
+                    # leállítása után is bejegyezve marad (mérve, lásd fentebb).
+                    self.emit('task_progress', {'task': task_id, 'log':
+                              f'   Ebből {len(still_in_use)} db-ot a nyomtatósor eszköz-csomópontja tart, '
+                              f'nem a Spooler szolgáltatás - ezért a leállítása sem segített rajtuk. '
+                              f'A Windows saját virtuális nyomtatóinál (Print to PDF, XPS Document Writer) '
+                              f'ez normális, és nincs is vele teendő: a Windows úgyis visszateszi őket.'})
                 self.emit('task_progress', {'task': task_id, 'log': 'Ez általában nem gond: ezek a driverek maradnak, a folyamat megy tovább.\n'})
             if deferred:
                 # Végigértünk, de maradt beragadt csomag - az újraindítás utáni láb söpri be.
@@ -754,9 +787,18 @@ class GuiAutofixMixin:
                 devices_to_check,
                 allow_storage=getattr(self, '_autofix_allow_storage', False),
                 allow_firmware=getattr(self, '_autofix_allow_firmware', False))
+            # A SZÖVEG NEM HIVATKOZHAT JELÖLŐNÉGYZETRE (2026-09-07, terepi naplóból):
+            # 2026-09-02 óta ez a program RÖGZÍTETT szabálya, nincs hozzá kapcsoló sehol,
+            # tehát nincs mit "nem engedélyezni". A régi mondat egy meg nem hozott döntést
+            # magyarázott, és egy nem létező felületre küldte a technikust. Ez a szöveg
+            # HARMADIK példánya volt: a záró jelentésnél (_emit_driver_health) és a kézi
+            # szken `hw-risk-note` dobozánál ugyanez már javítva lett, ez a kettő (WU-kör
+            # + katalógus-zárókör) kimaradt - egy ASRock B450M láncban 18-szor ment ki a
+            # képernyőre, a 324 folyamatsor 5,5%-a. Röviden fogalmaz, mert LÁBANKÉNT
+            # ismétlődik; a teljes indoklás a záró jelentésben van, egyszer.
             for _label, _items in risky_skipped.items():
                 if _items:
-                    self.emit('task_progress', {'task': task_id, 'log': f'🛡️ {len(_items)} {_label}-eszköz kihagyva (a fix indításakor nem engedélyezted).'})
+                    self.emit('task_progress', {'task': task_id, 'log': f'🛡️ {len(_items)} {_label}-eszköz kihagyva - ezeket a program szándékosan soha nem driverezi (egy rossz csere itt visszafordíthatatlan).'})
 
             self.emit('task_progress', {'task': task_id, 'log': f'✅ {len(devices_to_check)} hardverelem azonosítva. Egyeztetés...'})
             # A _search_wu_api HÁROM külön kimenetelt ad, és ezeket NEM szabad összemosni:
@@ -1057,9 +1099,10 @@ class GuiAutofixMixin:
                     allow_storage=getattr(self, '_autofix_allow_storage', False),
                     allow_firmware=getattr(self, '_autofix_allow_firmware', False),
                     log_tag='AUTOFIX-CAT', context='a katalógus-zárókörből')
+                # Nem jelölőnégyzetre hivatkozik - lásd a WU-kör azonos szabályát fentebb.
                 for _label, _items in cat_risky_skipped.items():
                     if _items:
-                        self.emit('task_progress', {'task': task_id, 'log': f'🛡️ {len(_items)} {_label}-eszköz kihagyva a katalógus-keresésből is (a fix indításakor nem engedélyezted).'})
+                        self.emit('task_progress', {'task': task_id, 'log': f'🛡️ {len(_items)} {_label}-eszköz kihagyva a katalógus-keresésből is (ugyanez a rögzített szabály).'})
                 problem_devs = [d for d in devices_now if d.get('err_code')]
                 # A hibás eszközök mellé a GENERIKUS (Windows-beépített) driveren futók is
                 # bekerülnek a zárókörbe: a WU ezekre semmit nem ajánl (szerinte rendben

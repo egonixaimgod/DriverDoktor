@@ -17,7 +17,7 @@ import threading
 import time
 import logging
 
-BUILD_NUMBER = 303
+BUILD_NUMBER = 304
 
 from app import common
 common.BUILD_NUMBER = BUILD_NUMBER

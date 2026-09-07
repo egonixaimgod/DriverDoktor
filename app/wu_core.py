@@ -981,8 +981,10 @@ def is_generic_replace_candidate(dev, inst, allow_storage=False, allow_firmware=
       (1) a jelenlegi driver beépített (inbox) - erre a _is_inbox_driver válaszol.
           Ez nem szűrés, hanem a kör DEFINÍCIÓJA: ha az eszköz már gyári driveren fut,
           nem "generikus csere", hanem frissítés kérdése (azt a 4. kör intézi);
-      (2) az osztálya nincs a felhasználó által KI NEM engedett kockázati körben
-          (tároló / firmware - ugyanaz a két jelölőnégyzet, mint mindenhol máshol);
+      (2) az osztálya nincs a kockázati körben (tároló / firmware). FIGYELEM: ez
+          2026-09-02 óta a program RÖGZÍTETT szabálya, NEM felhasználói döntés - a két
+          jelölőnégyzet mindkét felületről eltűnt, az allow_* paraméterek megmaradtak,
+          de a hívók fixen False-t adnak (lásd CLAUDE.md "Tároló és firmware");
     TÖBB FELTÉTEL NINCS (2026-07-28, explicit user decision: "menjen ki minden driver,
     mindenre keressen, maximum nem talál"). Ez a kör korábban HÁROM további szűrőt
     használt, és mind a három kikerült:
@@ -1231,8 +1233,10 @@ def deep_catalog_candidates(devices, installed_info, include_risky=False, includ
     kiegészítés pedig csak a hibakódos és az inbox-driveres eszközöket nézte. Ezért itt
     NINCS osztály-whitelist és nincs inbox-feltétel.
 
-    EGYETLEN szűrő maradt: a felhasználó által ki nem engedett kockázati osztályok
-    (DEEP_CATALOG_BLOCKED_CLASSES = tároló + firmware, mindkettő külön jelölőnégyzeten).
+    EGYETLEN szűrő maradt: a kockázati osztályok (DEEP_CATALOG_BLOCKED_CLASSES = tároló
+    + firmware). 2026-09-02 óta ez rögzített programszabály, nem felhasználói döntés:
+    a két jelölőnégyzet eltűnt, az include_risky/include_firmware paraméter megmaradt,
+    de a hívók fixen False-t adnak (lásd CLAUDE.md "Tároló és firmware").
 
     2026-07-28 (explicit user decision): a másik kettő - a gyártó-kódos HWID követelménye
     és a busz-enumerátor INF-ek tiltása - KIKERÜLT, ugyanazon a napon, mint a 3. körből.
