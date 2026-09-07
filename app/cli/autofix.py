@@ -203,7 +203,9 @@ manuálisan kell majd újraszkennelni (Driverek kezelése > Hardver újraszkenne
         # folyamatot, ha 30 percig egyetlen sor sem érkezik (beragadt WU szolgáltatás) -
         # a régi közvetlen stdout-olvasás ilyenkor örökre blokkolt.
         try:
-            for line in _iter_process_lines(process, self._run, abort_check=_abort_check):
+            for line in _iter_process_lines(process, self._run, abort_check=_abort_check,
+                                            # Lásd a GUI párját: a hosszabbítás ne legyen néma.
+                                            on_notice=print):
                 if line.startswith("FOUND:"):
                     print(f"  📦 {line[6:].strip()}")
                 elif line.startswith("TOTAL:"):

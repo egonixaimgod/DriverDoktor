@@ -652,12 +652,20 @@ def _menu_winact(api):
     if office:
         for p in office:
             ui.kv(p.get('name', '')[:40], p.get('status_text') or '-')
+            # Sikernél csend, hibánál magyarázat - ugyanaz a szabály, mint a GUI-ban
+            # (2026-09-07): egy aktivált terméknél nincs mit indokolni.
+            if p.get('status_color') != 'ok' and (p.get('reason_text') or p.get('reason_hex')):
+                ui.dim(f"      Ok: {p.get('reason_text') or '—'} {p.get('reason_hex') or ''}".rstrip())
     else:
         ui.dim('Nem található licencelt Office (a Microsoft 365 fiókhoz kötött, itt nem látszik).')
 
+    # A "mit fog csinálni a gomb" terv CSAK AKADÁLY esetén jelenik meg (2026-09-07,
+    # explicit user decision - a GUI-ban a teljes kártya törölve). Ha nem indulhat, az
+    # okot ki KELL írni: a menüpont maga csak annyit mond, hogy "jelenleg nem lehetséges".
     plan = data.get('plan') or {}
-    ui.write('')
-    (ui.info if plan.get('ready') else ui.err)(plan.get('text') or '')
+    if not plan.get('ready'):
+        ui.write('')
+        ui.err(plan.get('text') or '')
     c = ui.menu([
         ('1', 'Windows aktiválása', 'A fenti terv szerint' if plan.get('ready') else 'jelenleg nem lehetséges'),
         ('2', 'Beállított KMS-kiszolgáló törlése', None),

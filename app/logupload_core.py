@@ -29,6 +29,7 @@ egy ~800 KB-os csomag megy 8 MB helyett. A base64 a JSON-ba ágyazás miatt kell
 """
 import io
 import os
+import re
 import gzip
 import json
 import base64
@@ -183,12 +184,115 @@ def machine_label(run_fn):
 
 
 def folder_base(machine_name='', label=''):
-    """A Drive-mappa nevének GÉP-fele; a dátumot a szkript fűzi hozzá (egy óra, egy
-    időzóna - lásd az appscript.txt magyarázatát). Gépnév ELÖL, hogy a Drive név szerinti
-    rendezésében egy gép futásai egymás mellé kerüljenek."""
+    """A futás-mappa nevének GÉP-fele: "<gépnév> - <géptípus>".
+
+    A DÁTUMOT ÉS A BUILD SZÁMOT NEM ITT FŰZZÜK HOZZÁ, hanem az Apps Script (lásd
+    `folder_sort_name` és az appscript.txt `getRunFolder_`-je): egy óra, egy időzóna,
+    és a `build` mezőt a payload amúgy is viszi - így a MÁR KIADOTT exe-k naplói is
+    azonnal a jó nevű mappába kerülnek, frissítés nélkül."""
     name = (machine_name or platform.node() or 'ismeretlen').strip()
     label = (label or '').strip()
     return f"{name} - {label}" if label and label.lower() != name.lower() else name
+
+
+# ===========================================================================
+# A FUTÁS-MAPPA NEVE: DÁTUM ELÖL, UTÁNA A BUILD (2026-09-07, explicit user decision)
+# ===========================================================================
+# MIÉRT: a mappák a Windows Intézőben és a Drive-on is NÉV szerint rendeződnek, a
+# letöltés viszont MINDEGYIKNEK ugyanazt a módosítás-dátumot adja (a letöltés napját),
+# tehát dátum szerint rendezni sem lehet őket. A régi név a dátumot a VÉGÉRE tette
+# ("16065 - HP EliteDesk 800 G2 SFF - 2026-09-03 14-54"), így az ABC-rend a gépnév
+# szerint rendezett, és egy futás időrendi helyét sehogy nem lehetett megállapítani.
+#
+# A `YYYY-MM-DD HH-MM` alak elöl EGYBEN oldja meg: minden mezője fix szélességű és
+# balról nullázott, ezért a LEXIKOGRAFIKUS rend AZONOS az időrenddel - a sima név
+# szerinti rendezés időrendbe teszi őket (a felhasználó a valódi mappákon lemérte).
+#
+# A MEZŐK SORRENDJE NEM ÖNKÉNYES: elöl a FIX szélességűek (dátum, build), hátul a
+# változó hosszúak (gépnév, típus). Így a build szám oszlopként, egymás alatt olvasható,
+# és nem az vágódik le, ha egy hosszú típusnév nem fér ki a listanézetben:
+#
+#     2026-09-03 14-54 - build294 - 16065 - HP EliteDesk 800 G2 SFF
+#     2026-09-03 16-50 - build295 - HP-Pavilion-X360 - HP Pavilion x360 Convertible...
+#
+# AMIT EZÉRT FELADTUNK (a régi indoklás, hogy ne "javítsa vissza" senki): a gépnév-elöl
+# alaknál EGY gép összes futása egymás alatt sorakozott. Ez a felhasználó kifejezett
+# döntésével esett el - egy gép futásait a Drive/Intéző keresőmezőjével is meg lehet
+# találni, az időrendet viszont semmi nem pótolta.
+
+# "2026-09-03 14-54" (a másodperc opcionális - egy jövőbeli pontosabb bélyeg is illeszkedjen).
+_FOLDER_TS = r'\d{4}-\d{2}-\d{2} \d{2}-\d{2}(?:-\d{2})?'
+# A RÉGI alak: az időbélyeg a név VÉGÉN áll, ' - ' elválasztóval.
+_FOLDER_TS_TAIL_RE = re.compile(r'^(?P<base>.+?)\s+-\s+(?P<ts>' + _FOLDER_TS + r')$')
+# Az ÚJ alak: a névvel KEZDŐDIK.
+_FOLDER_TS_HEAD_RE = re.compile(r'^(?P<ts>' + _FOLDER_TS + r')(?=\s|$)')
+# A build-jelölés bárhol a névben ("build294", "Build 294").
+_FOLDER_BUILD_RE = re.compile(r'\bbuild\s*(?P<num>\d+)\b', re.IGNORECASE)
+# A napló FÁJLJÁNAK neve hordozza a buildet: "2026-09-03_14-54-12_16065_build294.log".
+_FILE_BUILD_RE = re.compile(r'[_\-]build\s*(\d+)', re.IGNORECASE)
+
+
+def folder_sort_name(folder, build=''):
+    """Egy futás-mappa nevének átrendezése a "dátum - build - gép" alakra.
+
+    IDEMPOTENS - a saját kimenetére alkalmazva UGYANAZT adja. Ez nem elegancia, hanem
+    követelmény: ugyanezt a szabályt az Apps Script is alkalmazza (ott jön létre a
+    mappa), a letöltés pedig itt is átfut rajta, hogy a RÉGI néven fent lévő mappák is
+    jó néven kerüljenek a gépre. Ha nem lenne idempotens, a kétszer átfutó név
+    összetörne - és pontosan ez a hiba ölte meg egyszer már a tartós no-bind tárat
+    (lásd CLAUDE.md, `_device_stem`).
+
+    SOSEM TALÁL KI DÁTUMOT: ha a névben nincs időbélyeg (pl. a Drive-gyökérben maradt
+    régi, almappa nélküli napló), a nevet változatlanul adja vissza. Egy kitalált dátum
+    rosszabb, mint a hiánya.
+
+    Tiszta függvény, offline tesztelhető."""
+    name = (folder or '').strip()
+    if not name:
+        return name
+    m = _FOLDER_TS_HEAD_RE.match(name)
+    if m:
+        # Már átrendezett név - de a buildet még hiányolhatja (pl. egy korábbi migráció
+        # után), ezért végigmegy a normál összerakón. Az eredmény változatlan, ha minden
+        # a helyén van: ez adja az idempotenciát.
+        ts, rest = m.group('ts'), name[m.end():]
+    else:
+        m = _FOLDER_TS_TAIL_RE.match(name)
+        if not m:
+            return name
+        ts, rest = m.group('ts'), m.group('base')
+    # A build-jelölést KIVESSZÜK, bárhol állt, és egységesen a dátum mögé tesszük -
+    # így egy régi, "... - build294" végű név sem duplázódik.
+    #
+    # A NÉVBEN LÉVŐ BUILD AZ ERŐSEBB, a paraméterből jövő csak kitölteni tud. Fordítva
+    # (`build or b.group(...)`) a függvény ELRONTANÁ a nevet: a hívó a mappában talált
+    # naplófájl nevéből olvassa ki a buildet, és ha oda valamiért egy másik futás naplója
+    # is bekerül, az felülírná a mappa saját, hiteles build számát. Ez egyben az
+    # idempotencia feltétele is: `f(f(x, a), b) == f(x, a)` bármilyen `b`-re.
+    b = _FOLDER_BUILD_RE.search(rest)
+    if b:
+        build = b.group('num')
+        rest = rest[:b.start()] + rest[b.end():]
+    rest = _tidy_separators(rest)
+    parts = [ts]
+    num = str(build or '').strip()
+    if num:
+        parts.append('build' + num)
+    if rest:
+        parts.append(rest)
+    return ' - '.join(parts)
+
+
+def _tidy_separators(s):
+    """A kivágások után maradt ' - - ' / széli ' - ' elválasztók eltakarítása.
+
+    Szándékosan CSAK a szeparátor-alakú kötőjeleket (szóközzel körülvett, vagy a név
+    szélén álló) bántja: a `B450M-HDV R4.0` és a `HP Pavilion x360 14-dh1xxx`
+    típusnevekben a kötőjel a névhez tartozik, azt nem szabad megfogni."""
+    s = re.sub(r'\s+-\s+-\s+', ' - ', s or '')
+    s = re.sub(r'^\s*-\s*', '', s)
+    s = re.sub(r'\s*-\s*$', '', s)
+    return s.strip()
 
 
 def build_payload(blob, info, machine_name='', build='', outcome='', extra=None, folder=''):
@@ -346,10 +450,18 @@ def local_path_for(row, dest_dir=None):
     """Egy távoli napló helye ezen a gépen: <cél>\\<futás mappája>\\<fájlnév>.log
 
     KICSOMAGOLVA mentjük: a `.gz`-t az elemzéshez úgyis ki kell bontani, és egy olyan
-    fájl, amit előbb kézzel ki kell tömöríteni, a gyakorlatban nem lesz elolvasva."""
+    fájl, amit előbb kézzel ki kell tömöríteni, a gyakorlatban nem lesz elolvasva.
+
+    A MAPPANÉV ITT IS ÁTFUT A `folder_sort_name`-en, nem csak a Drive-on: a már fent
+    lévő RÉGI mappák neve nem változik meg attól, hogy a szkriptet frissítjük, és a
+    technikus letöltés után épp az időrendet nem kapná meg. Mivel a függvény idempotens,
+    egy Drive-on már átnevezett mappa ugyanezt a nevet adja - tehát a `skip_existing`
+    sem tölt le semmit kétszer."""
     base = dest_dir or download_dir()
-    folder = _safe_name(row.get('folder') or '')
     name = _safe_name(row.get('name') or 'naplo.log.gz')
+    # A build a FÁJL nevében mindig ott van, a mappáéban egy régi feltöltésnél még nem.
+    fb = _FILE_BUILD_RE.search(name)
+    folder = _safe_name(folder_sort_name(row.get('folder') or '', fb.group(1) if fb else ''))
     if name.endswith('.gz'):
         name = name[:-3]
     if not name.endswith('.log'):
@@ -361,6 +473,69 @@ def _safe_name(name):
     """Windows-on tiltott karakterek cseréje (a mappanév a Drive-ról jön)."""
     out = ''.join('-' if c in '<>:"/\\|?*' or ord(c) < 32 else c for c in str(name or ''))
     return out.strip().rstrip('.')[:120]
+
+
+def migrate_download_dir(dest_dir=None):
+    """A MÁR LETÖLTÖTT futás-mappák átnevezése a "dátum - build - gép" alakra.
+
+    MIÉRT KELL EGYÁLTALÁN: a névforma 2026-09-07-én változott, és a technikus gépén
+    addigra ott áll egy csomó régi nevű mappa. Azok kézi átnevezése pont az a munka,
+    ami sosem történik meg - a lista pedig félig időrendben, félig ABC-ben állna, ami
+    rosszabb, mint bármelyik tisztán.
+
+    A LETÖLTÉS ELŐTT FUT, nem valami külön gombról: így a `skip_existing` a már
+    átnevezett mappákat látja, és egy meglévő naplót nem tölt le újra.
+
+    Visszatérés: (átnevezve, változatlan, hibák). SOSEM dob: egy sikertelen átnevezés
+    kevesebb baj, mint egy emiatt elmaradt letöltés."""
+    base = dest_dir or download_dir()
+    renamed, kept, errors = 0, 0, []
+    try:
+        if not os.path.isdir(base):
+            return 0, 0, []
+        for entry in sorted(os.listdir(base)):
+            src = os.path.join(base, entry)
+            if not os.path.isdir(src):
+                continue
+            new = _safe_name(folder_sort_name(entry, _build_from_log_files(src)))
+            if not new or new == entry:
+                kept += 1
+                continue
+            dst = os.path.join(base, new)
+            if os.path.exists(dst):
+                # Nem írunk felül és nem olvasztunk össze: egy azonos nevű mappa itt
+                # csak úgy állhat elő, ha valami félrement - azt a technikus nézze meg.
+                errors.append(f"{entry}: a cél már létezik ({new})")
+                logging.warning(f"[LOGDL] Átnevezés kihagyva, a cél már létezik: {new}")
+                continue
+            try:
+                os.rename(src, dst)
+                renamed += 1
+                logging.info(f"[LOGDL] Mappa átnevezve: '{entry}' -> '{new}'")
+            except OSError as e:
+                errors.append(f"{entry}: {e}")
+                logging.warning(f"[LOGDL] A mappa átnevezése nem sikerült ('{entry}'): {e}")
+    except Exception as e:
+        logging.warning(f"[LOGDL] A letöltött naplók átnevezése hibára futott (nem kritikus): {e}")
+        errors.append(str(e))
+    if renamed:
+        logging.info(f"[LOGDL] {renamed} futás-mappa átnevezve az új (dátum elöl) alakra.")
+    return renamed, kept, errors
+
+
+def _build_from_log_files(dirpath):
+    """A build szám a mappában lévő naplófájl nevéből ("..._16065_build294.log").
+
+    A RÉGI mappanevekben nincs build - a fájlnévben viszont MINDIG ott volt, tehát a
+    régi letöltések is megkapják, nem csak az ezután érkezők."""
+    try:
+        for fn in sorted(os.listdir(dirpath)):
+            m = _FILE_BUILD_RE.search(fn)
+            if m:
+                return m.group(1)
+    except OSError as e:
+        logging.debug(f"[LOGDL] A mappa nem olvasható a build számhoz ({dirpath}): {e}")
+    return ''
 
 
 def download_logs(run, url, password, rows, dest_dir=None, http=None,

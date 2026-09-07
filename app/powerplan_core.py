@@ -61,6 +61,33 @@ _GUID_RE = re.compile(r'([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-'
                       r'[0-9a-fA-F]{4}-[0-9a-fA-F]{12})')
 
 
+# A `powercfg` NATÍV exe, tehát a KONZOL (OEM) kódlapján ír - magyar Windowson cp852 -,
+# a `_run` viszont utf-8-cal dekódol. A séma NEVE ettől a memóriában romlik el, és
+# terepen pontosan így került a záró jelentésbe: `⚡ Energiaséma: "KiegyensŁlyozott"`
+# (2026-09-04, két különböző gépen, mindkettőnél magyar sémanévvel - az angol nevűnél
+# nincs baj, ezért nem tűnt fel korábban). A `ps_force_utf8` itt nem segít: az csak a
+# PowerShell `-Command` hívásokat kényszeríti UTF-8-ra, a natív exe-ket szándékosan nem.
+#
+# A Python `'oem'` kodekje pontosan a konzol aktuális OEM kódlapját használja, tehát
+# gépfüggetlen (mérve: a nyers bájt `Teljes\xa1tm\x82nycentrikus` -> 'Teljesítménycentrikus').
+# CSAK a szöveget visszaadó hívásoknál kell; a GUID ASCII, azt semmi nem rontja el.
+POWERCFG_ENCODING = 'oem'
+
+
+def _run_powercfg_text(run_fn, cmd):
+    """Egy `powercfg` hívás, aminek a SZÖVEGES kimenete is számít (nem csak a kódja).
+
+    Az OEM-dekódolás hibája sosem akaszthatja meg a műveletet: ha a `run_fn` nem fogadja
+    az `encoding` paramétert (más hívó, teszt-csonk) vagy a kodek nem elérhető, visszaesünk
+    a sima hívásra - olyankor a név mojibake marad, de a GUID és a művelet változatlanul jó."""
+    try:
+        return run_fn(cmd, encoding=POWERCFG_ENCODING)
+    except (TypeError, LookupError, ValueError) as e:
+        logging.debug(f"[POWER] Az OEM-dekódolás nem elérhető ({e}) - sima hívás, "
+                      f"a séma NEVE ékezetes betűknél romolhat.")
+        return run_fn(cmd)
+
+
 def parse_active_scheme(stdout):
     """A `powercfg /getactivescheme` kimenetéből a GUID + a zárójeles séma-név.
 
@@ -84,7 +111,7 @@ def parse_active_scheme(stdout):
 def read_active_scheme(run_fn):
     """Az aktív energiaséma (guid, név). Hiba esetén (None, '')."""
     try:
-        res = run_fn(['powercfg', '/getactivescheme'])
+        res = _run_powercfg_text(run_fn, ['powercfg', '/getactivescheme'])
         if res.returncode != 0:
             logging.warning(f"[POWER] Az aktív séma lekérdezése sikertelen "
                             f"(returncode={res.returncode}): {(res.stderr or '')[:200]}")
@@ -111,7 +138,9 @@ def ensure_high_performance_scheme(run_fn):
 
     logging.info(f"[POWER] A Nagy teljesítményű séma nincs a gépen "
                  f"(returncode={res.returncode}) - létrehozás a beépített sablonból.")
-    dup = run_fn(['powercfg', '/duplicatescheme', HIGH_PERFORMANCE_GUID])
+    # Szöveges kimenetet parse-olunk belőle (GUID), ezért ez is az OEM-dekódolt úton megy -
+    # a GUID ugyan ASCII, de egy helyen egy szabály: ami szöveget ad vissza, az így fut.
+    dup = _run_powercfg_text(run_fn, ['powercfg', '/duplicatescheme', HIGH_PERFORMANCE_GUID])
     if dup.returncode != 0:
         logging.warning(f"[POWER] A séma létrehozása sem sikerült "
                         f"(returncode={dup.returncode}): {(dup.stdout or '')[:200]}")

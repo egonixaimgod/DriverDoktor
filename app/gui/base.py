@@ -407,8 +407,13 @@ class GuiBaseMixin:
         logging.info("[API] select_file: mégse")
         return None
 
-    def _check_internet(self, require_dns=False):
+    def _check_internet(self, require_dns=False, quiet=False):
         """Megbízható TCP port alapú internet ellenőrzés.
+
+        `quiet=True`: a sikertelen próbák NEM naplózódnak soronként. A `_wait_for_internet`
+        ciklusa hívja így, a legelső próba kivételével - lásd ott az indoklást (a napló
+        egy 45 mp-es várakozásra ~50 azonos DEBUG sort kapott, ami a Rule 0 saját
+        ellen-szabályába ütközik: maximális INFORMÁCIÓ kell, nem maximális sor).
 
         A NÉVFELOLDÁS AZ ELSŐ PRÓBA, ÉS EZ NEM SORRENDI ÍZLÉS - EZ MAGA A LÉNYEG
         (2026-09-01, terepen mérve, Dell Latitude 5580, Build 288). A régi sorrend a
@@ -445,7 +450,8 @@ class GuiBaseMixin:
                 with socket.create_connection((host, port), timeout=3.0):
                     return True
             except Exception as e:
-                logging.debug(f"[NET] Névfeloldásos internet-ellenőrzés sikertelen ({host}:{port}): {e}")
+                if not quiet:
+                    logging.debug(f"[NET] Névfeloldásos internet-ellenőrzés sikertelen ({host}:{port}): {e}")
         if require_dns:
             return False
         # 2) Nyers IP-próba: DNS nélkül is elárulja, hogy van-e egyáltalán kapcsolat.
@@ -456,7 +462,8 @@ class GuiBaseMixin:
                                 "következő letöltések és a WU-keresés emiatt elhasalhatnak.")
                 return True
         except Exception as e:
-            logging.debug(f"[NET] Internet-ellenőrzés sikertelen (8.8.8.8:53): {e}")
+            if not quiet:
+                logging.debug(f"[NET] Internet-ellenőrzés sikertelen (8.8.8.8:53): {e}")
         return False
 
     def _wait_for_internet(self, timeout, task_id=None, reason=''):
@@ -493,7 +500,12 @@ class GuiBaseMixin:
             if getattr(self, '_cancel_flag', False):
                 logging.info("[NET] A hálózat-várakozást megszakították.")
                 return False
-            if self._check_internet(require_dns=True):
+            # CSAK AZ ELSŐ PRÓBA NAPLÓZ SORONKÉNT: abból kiderül, MI a hiba (getaddrinfo,
+            # timeout, unreachable), a további ~20-25 azonos sor viszont már csak zaj -
+            # terepen egyetlen 45 mp-es várakozás ~50 sort írt, kétszer egymás után. A
+            # végeredményt a ciklus végi összefoglaló sorok mondják ki (siker/kudarc,
+            # eltelt idő, próbák száma), ami pontosan az az egy sor, amit olvasni kell.
+            if self._check_internet(require_dns=True, quiet=bool(attempt)):
                 if attempt:
                     waited = int(timeout - max(0, deadline - time.monotonic()))
                     logging.info(f"[NET] Internet {waited} mp várakozás után elérhető ({attempt + 1}. próba).")

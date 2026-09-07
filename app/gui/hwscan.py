@@ -18,6 +18,7 @@ from app.common import _ps_quote, _app_data_dir
 from app import dupdrivers_core
 from app.wu_core import WU_PNP_QUERY_PS
 from app.wu_core import WuProcessAborted
+from app.wu_core import wu_search_error_text
 from app.wu_core import _build_wu_install_ps
 from app.wu_core import _filter_wu_scan_devices
 from app.wu_core import _is_inbox_driver
@@ -871,13 +872,42 @@ try {
     }
     if ($updates.Count -eq 0) { Write-Output "[]" }
     else { $updates | ConvertTo-Json -Depth 2 -Compress }
-} catch { Write-Error $_.Exception.Message }
+} catch {
+    # A HIBAKÓD A LÉNYEG, ÉS A `Write-Error` ELTAKARTA (2026-09-07, terepi naplóból).
+    # A Write-Error a hibás parancs KONTEXTUSÁT is kiírja - a napló stderr-jébe így a
+    # TELJES szkript bekerült (~30 sor zaj), a végén egyetlen érdemi mondattal:
+    # "A kivétel HRESULT-értéke: 0x80240438". A program pedig csak annyit mondott a
+    # technikusnak, hogy "időtúllépés vagy WUA hiba" - miközben a pontos ok ott volt.
+    # A [Console]::Error.WriteLine nem fűz hozzá kontextust, a kódot pedig strukturáltan,
+    # gépi úton is olvashatóan adjuk vissza.
+    # A `-f 'X8'` a NEGATÍV int32-t is helyesen, kettes komplemensben formázza
+    # (-2145123272 -> 80240438), tehát nincs szükség maszkolásra. Élőben mérve: a
+    # kézenfekvőnek tűnő `[uint32]($h -band 0xFFFFFFFF)` ELSZÁLL, mert a PowerShell a
+    # `0xFFFFFFFF` literált int32-ként -1-nek veszi, így a maszk nem csinál semmit, és
+    # az uint32-konverzió a negatív értéken kivételt dob - ami épp azt a kontextus-zajt
+    # gyártaná vissza, ami miatt ez a blokk átíródott.
+    $h = 0
+    try { $h = $_.Exception.HResult } catch {}
+    $hex = ('0x{0:X8}' -f $h)
+    [Console]::Error.WriteLine("WUERROR|$hex|" + $_.Exception.Message)
+}
 """
             res = self._run(["powershell", "-NoProfile", "-Command", ps_cmd],
                             timeout=WU_SEARCH_TIMEOUT, encoding='utf-8')
             out = res.stdout.strip()
             if not out and res.stderr:
-                logging.warning(f"[WU_API] Stderr: {res.stderr[:200]}")
+                # A HIBAKÓDOT KIMONDJUK - eddig egy 200 karakterre vágott, kontextussal
+                # teli stderr-részlet ment a naplóba, amiben a lényeg (a HRESULT) épp
+                # nem fért bele. A `self._wu_search_error` a hívó ágaknak szól, hogy a
+                # KÉPERNYŐN is a konkrét ok jelenjen meg, ne csak "WUA hiba".
+                code, hint = wu_search_error_text(res.stderr)
+                self._wu_search_error = (code, hint)
+                if code:
+                    logging.error(f"[WU_API] A WU-keresés hibakóddal állt le: {code}"
+                                  f"{(' - ' + hint) if hint else ''}")
+                else:
+                    logging.warning(f"[WU_API] A WU-keresés hiba nélküli kód nélkül bukott el. "
+                                    f"Stderr: {res.stderr[:400]}")
                 return None
             if out:
                 data = json.loads(out)
@@ -2288,7 +2318,10 @@ try {
         # 0,5 mp-enként (nem csak új sor érkezésekor - régen a Mégse halott volt, ha a
         # scripten belüli WU-keresés beragadt), plusz watchdog: 30 perc néma folyamatot leöl.
         try:
-            for line in _iter_process_lines(process, self._run, cancel_check=self._check_cancel):
+            for line in _iter_process_lines(
+                    process, self._run, cancel_check=self._check_cancel,
+                    # Lásd az AutoFix párját: a watchdog-hosszabbítás látszódjon a felületen.
+                    on_notice=lambda msg: self.emit('task_progress', {'task': 'wu_install', 'log': msg})):
                 if line.startswith("INIT:") or line.startswith("SEARCH:"):
                     self.emit('task_progress', {'task': 'wu_install', 'status': line.split(":", 1)[1].strip(), 'log': line})
                 elif line.startswith("FOUND:"):
@@ -2928,6 +2961,12 @@ try {
                 # végtelen körbe - lásd a ciklusban a részletes indoklást.
                 CATALOG_DL_NET_WAIT = 180
                 CATALOG_DL_NET_REFUNDS = 2
+                # INSTABIL (de nem halott) kapcsolatnál ennyit várunk két kísérlet közt.
+                # A régi 3 mp arra volt méretezve, hogy "hátha most sikerül"; egy több száz
+                # MB-os letöltés viszont épp egy driver-csere utáni, még rendeződő hálózaton
+                # szakad meg, és ott 3 másodperc semmit nem old meg (mérve: 5 kísérlet 52 mp
+                # alatt bukott el egy 236 MB-os csomagnál).
+                CATALOG_DL_UNSTABLE_WAIT = 20
                 chosen = None        # (guid, cím, dátum, url) - amit végül telepítünk
                 # UGYANAZT A CSOMAGOT NEM TÖLTJÜK LE KÉTSZER (lásd lent).
                 tried_urls = set()
@@ -3065,22 +3104,58 @@ try {
                             # már nem dönt el semmit; egy tartós viszont továbbra is
                             # korlátos, mert a `_wait_for_internet` maga is időkorlátos, és
                             # a hálózat nélküli kísérletek ugyanúgy elfogynak.
+                            # A CSONKA LETÖLTÉS IS HÁLÓZATI HIBA - és pont ez hiányzott
+                            # (2026-09-07, a 2026-09-04-i Lenovo naplóból). A jóváírás
+                            # mechanizmusa működött, csak a legyakoribb tünetet nem ismerte
+                            # fel: a mintalistában szereplő 'getaddrinfo'/'connection'
+                            # egyike sem szerepel a saját "csonka letöltés: X/Y byte jött le"
+                            # üzenetünkben, ezért a fél letöltés minden alkalommal ELÉGETETT
+                            # egy próbálkozást. A napló ezt mutatta egy 236 MB-os csomagnál:
+                            #   10:06:05  1/3 csonka (180 MB)   <- nincs jóváírás
+                            #   10:06:09  2/3 getaddrinfo       <- jóváírás, budget 4
+                            #   10:06:28  3/4 csonka (44 MB)    <- nincs jóváírás
+                            #   10:06:31  4/4 getaddrinfo       <- jóváírás, budget 5
+                            #   10:06:57  5/5 csonka (132 MB)   -> VÉGLEG sikertelen
+                            # Mind az öt kísérlet 52 MÁSODPERC alatt égett el, miközben a
+                            # kapcsolat épp a driver-csere után állt helyre. Egy félbeszakadt
+                            # nagy fájl ugyanúgy "a hálózat esett szét" tünet, mint a DNS-hiba.
                             net_err = any(s in str(e).lower() for s in (
                                 'getaddrinfo', '11001', 'urlopen error', 'timed out',
-                                'connection', 'unreachable', 'ssl'))
-                            if (net_err and refunds < CATALOG_DL_NET_REFUNDS
-                                    and not self._check_internet(require_dns=True)):
-                                self.emit('task_progress', {'task': task_id, 'log':
-                                          f'  🌐 {name}: megszakadt a hálózat - várunk, amíg visszajön '
-                                          f'(ez a próbálkozás nem vész el)...'})
-                                if self._wait_for_internet(CATALOG_DL_NET_WAIT, task_id=task_id,
-                                                           reason='a driver letöltéséhez'):
-                                    # Volt kiesés, most visszajött: ez a kör nem számít bele.
+                                'connection', 'unreachable', 'ssl', 'csonka letöltés',
+                                'incompleteread', 'remote end closed'))
+                            if net_err and refunds < CATALOG_DL_NET_REFUNDS:
+                                # KÉT KÜLÖN ESET, ÉS MINDKETTŐ JÓVÁÍRÁST ÉRDEMEL:
+                                # (a) a hálózat TELJESEN halott (DNS sem megy) - megvárjuk;
+                                # (b) a kapcsolat "él", de a nagy fájl mégis megszakadt
+                                #     (instabil vonal, félbontott TCP, szerveroldali reset).
+                                # A régi kód csak az (a) ágat ismerte, mert a jóváírás
+                                # feltétele `not self._check_internet(...)` volt - egy csonka
+                                # letöltésnél viszont az ellenőrzés jellemzően SIKERÜL, tehát
+                                # a leggyakoribb eset épp kimaradt belőle.
+                                if not self._check_internet(require_dns=True):
+                                    self.emit('task_progress', {'task': task_id, 'log':
+                                              f'  🌐 {name}: megszakadt a hálózat - várunk, amíg visszajön '
+                                              f'(ez a próbálkozás nem vész el)...'})
+                                    if self._wait_for_internet(CATALOG_DL_NET_WAIT, task_id=task_id,
+                                                               reason='a driver letöltéséhez'):
+                                        refunds += 1
+                                        attempt_budget += 1
+                                        logging.info(f"[CATALOG_INSTALL] {name}: a hálózat visszajött, a "
+                                                     f"{attempt}. próbálkozás nem számít bele "
+                                                     f"({refunds}/{CATALOG_DL_NET_REFUNDS} jóváírás).")
+                                        continue
+                                else:
                                     refunds += 1
                                     attempt_budget += 1
-                                    logging.info(f"[CATALOG_INSTALL] {name}: a hálózat visszajött, a "
-                                                 f"{attempt}. próbálkozás nem számít bele "
+                                    logging.info(f"[CATALOG_INSTALL] {name}: a kapcsolat él, de a letöltés "
+                                                 f"megszakadt (instabil vonal) - {CATALOG_DL_UNSTABLE_WAIT} mp "
+                                                 f"szünet, a {attempt}. próbálkozás nem számít bele "
                                                  f"({refunds}/{CATALOG_DL_NET_REFUNDS} jóváírás).")
+                                    self.emit('task_progress', {'task': task_id, 'log':
+                                              f'  🌐 {name}: a letöltés megszakadt, pedig van kapcsolat - '
+                                              f'{CATALOG_DL_UNSTABLE_WAIT} mp szünet, majd újra '
+                                              f'(ez a próbálkozás nem vész el)...'})
+                                    time.sleep(CATALOG_DL_UNSTABLE_WAIT)
                                     continue
                             if attempt < attempt_budget:
                                 self.emit('task_progress', {'task': task_id, 'log': f'  ↻ {name} letöltése megszakadt ({e}) - újrapróbálás ({attempt + 1}/{attempt_budget})...'})

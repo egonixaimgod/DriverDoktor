@@ -107,6 +107,17 @@ class GuiLogsMixin:
                 url = benchmark_core.resolve_endpoint()
                 dest = logupload_core.download_dir()
 
+                # A korábban letöltött mappák átnevezése az új (dátum elöl) alakra. A
+                # letöltés ELŐTT kell futnia, különben a `skip_existing` a régi néven
+                # keresné a meglévőket, és mindent újra lehúzna.
+                mig, _, mig_err = logupload_core.migrate_download_dir(dest)
+                if mig:
+                    self.emit('task_progress', {'task': task,
+                                                'log': f'🔤 {mig} korábbi napló-mappa átnevezve az '
+                                                       f'új, dátummal kezdődő névre.'})
+                for e in mig_err[:5]:
+                    self.emit('task_progress', {'task': task, 'log': f'   ⚠️ {e}'})
+
                 self.emit('task_progress', {'task': task, 'log': '1/3 - Kapcsolódás a szerviz Drive-jához...'})
                 rows, err = logupload_core.list_remote_logs(self._run, url, password)
                 if err:

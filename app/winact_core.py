@@ -39,22 +39,56 @@ WINDOWS_APP_ID = '55c92734-d682-4d71-983e-d6ec3f16059f'
 # ki, ami egy működő terméket hibásnak mutatott, és pont az ellenkezőjét érte el, mint
 # amiért ez a nézet létezik: a technikus nem tudta, mit higgyen.
 #
-# A 3 -> színek jelentése ezért:
-#   'ok'      = MOST MŰKÖDIK, nincs teendő
-#   'warning' = MOST MŰKÖDIK, de véges ideig (türelmi idő / újraaktiválás kell)
-#   'error'   = NEM működik rendesen, valódi teendő van
+# AZ ÁLLAPOT KÉTÁLLAPOTÚ A KÉPERNYŐN: AKTIVÁLVA VAGY NINCS (2026-09-07, explicit user
+# decision). A felhasználó szavai: *"annyit írjon ki h aktiválva van vagy nincs és kész…
+# most sárgán írja h aktivaljam ujra miközben be van aktiválva ez nem megtévesztő?
+# feleslegesen írja sárgával ha működik írja ki zölden h aktiválva és kész"*.
 #
-# Az 5-ös (Notification) állapot ezért 'warning' és nem 'error': a szoftver fut, csak
-# az aktiválás nem végleges. A 3-as (lejárt türelmi idő) viszont marad hiba: ott a
-# csökkentett működés már beállt.
+# EZ A 2026-08-31-i és 09-03-i FINOMHANGOLÁS RÉSZLEGES VISSZAVONÁSA, és az indoklás
+# fontos, hogy ne kerüljön vissza. Az akkori probléma valós volt (a nézet PIROSSAL,
+# "aktiválás szükséges"-sel írt ki egy működő Office-t, miközben a Word "Aktivált
+# termék"-et mutatott), de a megoldás - egy HARMADIK, sárga állapot "újraaktiválás
+# ajánlott" felirattal - ugyanabba a hibába esett a másik irányból: egy aktivált,
+# hibátlanul működő gépen sárga figyelmeztetést és teendőt mutatott. A technikus
+# szempontjából a kérdés kétállapotú, és a képernyőnek is annak kell lennie.
+#
+# A HATÁR: MŰKÖDIK-E MOST A TERMÉK, aktivált licenccel?
+#   'ok'    (zöld)  = 1 (Licensed) és 5 (Notification). Az 5-ös nem azt jelenti, hogy
+#                     nincs licenc: a termék licencelt és FUT, aktiváltnak is mutatja
+#                     magát (mérve, 2026-08-31: Office24ProPlus2024VL_MAK_AE1, ok
+#                     0xC004F009) - csak az aktiválás nem végleges. Zöld.
+#   'error' (piros) = minden más. A 2/6 (türelmi idő) itt szándékosan piros: ott a gép
+#                     tényleg NINCS aktiválva, csak még működik - és pont ez az az eset,
+#                     amit a technikusnak rendeznie kell, mielőtt kiadja a gépet.
+#
+# A 'warning' szint megszűnt. A RÉSZLETES OK NEM VÉSZ EL: a `LicenseStatusReason` továbbra
+# is kimegy (`reason_hex`/`reason_text`), a felület viszont CSAK a nem aktivált eseteknél
+# írja ki - sikernél csend, hibánál magyarázat.
 LICENSE_STATUS = {
     0: ('Nincs aktiválva', 'error'),
     1: ('Aktiválva', 'ok'),
-    2: ('Türelmi időben – működik, de aktiválni kell', 'warning'),
-    3: ('Lejárt türelmi idő – aktiválás szükséges', 'error'),
-    4: ('Nem eredetinek jelölt', 'error'),
-    5: ('Licencelt és működik – újraaktiválás ajánlott', 'warning'),
-    6: ('Meghosszabbított türelmi idő – működik', 'warning'),
+    2: ('Nincs aktiválva (türelmi időben működik)', 'error'),
+    3: ('Nincs aktiválva (lejárt türelmi idő)', 'error'),
+    4: ('Nincs aktiválva (nem eredetinek jelölt)', 'error'),
+    5: ('Aktiválva', 'ok'),
+    6: ('Nincs aktiválva (meghosszabbított türelmi idő)', 'error'),
+}
+
+# A MŰVELET-VERDIKTHEZ tartozó RÉSZLETES állapotszöveg - NEM a jelvényhez.
+#
+# MIÉRT KELL KÜLÖN: a jelvény kétállapotú lett (fent), az aktiválás sikerét viszont
+# továbbra is a szigorú `code == 1` dönti el - az 5-ös állapot az `slmgr /ato` UTÁN
+# valódi félsiker (a licenc működik, de az aktiválás nem véglegesült). E nélkül a
+# kettő ellentmondana egymásnak a képernyőn: "❌ NEM sikerült - a Windows állapota:
+# Aktiválva". A jelvény marad egyszerű, a művelet üzenete marad pontos.
+LICENSE_STATUS_DETAIL = {
+    0: 'nincs licenc (0)',
+    1: 'aktiválva (1)',
+    2: 'türelmi idő (2) – még nincs aktiválva',
+    3: 'lejárt türelmi idő (3)',
+    4: 'nem eredetinek jelölt (4)',
+    5: 'értesítési mód (5) – a licenc működik, de az aktiválás nem véglegesült',
+    6: 'meghosszabbított türelmi idő (6) – még nincs aktiválva',
 }
 
 # Azok az állapotok, amikben a termék MOST HASZNÁLHATÓ. A nézet ezt írja ki egy külön,
@@ -231,6 +265,8 @@ def collect_windows_activation(run):
         'status_code': code,
         'status_text': text,
         'status_color': color,
+        # Csak a művelet-verdikthez (aktiválás után), sosem a jelvényhez.
+        'status_detail': LICENSE_STATUS_DETAIL.get(code, f'ismeretlen ({code})'),
         'edition': name or desc,
         'os_caption': str(info.get('OsCaption') or ''),
         'os_build': str(info.get('OsBuild') or ''),
@@ -245,8 +281,12 @@ def collect_windows_activation(run):
         'gvlk': gvlk,
         'gvlk_name': gvlk_name,
     }
-    logging.info(f"[WINACT] Windows: '{out['edition']}' | állapot={code} ({text}) | "
-                 f"csatorna='{channel}' | részkulcs={out['partial_key'] or '-'} | "
+    # A RÉSZLETES állapot a naplóba megy, mert a KÉPERNYŐRŐL 2026-09-07-én levettük: ott
+    # már csak "Aktiválva / Nincs aktiválva" látszik (explicit user decision). Egy terepi
+    # jelentésnél viszont pont a kód és az ok a kérdés, ezért itt a helye (Rule 0).
+    logging.info(f"[WINACT] Windows: '{out['edition']}' | állapot={code} "
+                 f"({out['status_detail']}) | csatorna='{channel}' | "
+                 f"részkulcs={out['partial_key'] or '-'} | "
                  f"OEM-kulcs a BIOS-ban: {'IGEN' if out['oem_key'] else 'nincs'} | "
                  f"KMS-host='{out['kms_host'] or '-'}'")
     return out
@@ -412,17 +452,22 @@ def collect_office_activation(run):
             'description': str(row.get('Description') or ''),
             'partial_key': str(row.get('PartialProductKey') or ''),
             'status_code': code, 'status_text': text, 'status_color': color,
+            'status_detail': LICENSE_STATUS_DETAIL.get(code, f'ismeretlen ({code})'),
             'activated': code == 1,
-            # AZ OK - e nélkül az 5-os allapot megmagyarazhatatlan a technikusnak,
-            # kulonosen ugy, hogy az Office kozben aktivaltnak mutatja magat.
+            # AZ OK - a felulet CSAK a nem aktivalt termekeknel irja ki (2026-09-07),
+            # ott viszont ez mondja meg a teendot (pl. 0xC004F00F = a kulcs a hardverhez
+            # van kotve, es a hardver megvaltozott).
             'reason_hex': reason_hex, 'reason_text': reason_text,
-            # A licencelt-de-ujraaktivalando allapotok: a termek MUKODIK.
-            'licensed_but_stale': code in (3, 5, 6),
-            # MUKODIK-E MOST? A felulet ez alapjan dont a jelvenyrol es arrol, kell-e
-            # egyaltalan figyelmeztetni. Egy "licencelt es mukodik" mondat mellett egy
-            # piros jelveny onmagaval kerul ellentmondasba (2026-09-03).
+            # MUKODIK-E MOST? A jelveny 2026-09-07 ota NEM ebbol dont (az ketallapotu
+            # lett), de a kettő nem ugyanaz: a 2/6 (turelmi ido) "nincs aktivalva, de
+            # meg mukodik" - ez a mezo orzi a kulonbseget a naplo es a CLI szamara.
             'working': code in WORKING_STATUSES,
         })
+    # A RÉSZLETES állapot a naplóba: a képernyőn már csak "Aktiválva / Nincs aktiválva"
+    # látszik, egy terepi jelentésnél viszont a kód és az ok a kérdés (Rule 0).
     logging.info(f"[WINACT] Office/egyéb licencelt termék: {len(out['products'])} db "
-                 f"({', '.join(p['name'][:40] for p in out['products']) or 'nincs'})")
+                 + ('; '.join(f"{p['name'][:40]} -> {p['status_detail']}"
+                              + (f", ok={p['reason_hex']} {p['reason_text']}".rstrip()
+                                 if p['reason_hex'] else '')
+                              for p in out['products']) or 'nincs'))
     return out

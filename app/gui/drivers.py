@@ -61,27 +61,39 @@ class GuiDriversMixin:
         def worker():
             self.emit('drivers_loading')
             start = time.monotonic()
+            # A DISM felismert hibái ide gyűlnek. MIÉRT KELL (2026-09-07, terepi naplóból):
+            # egy foglalt DISM ("another DISM operation") üres listát ad, amit a felület
+            # eddig ugyanúgy `0 driver`-ként mutatott, mint a "tényleg nincs csomag" esetet.
+            # A kettő gyökeresen mást jelent a technikusnak, ezért a hibát ki kell mondani.
+            problems = []
             try:
                 if self.target_os_path:
                     logging.info(f"[DRIVERS] Offline mód: {self.target_os_path}")
-                    drivers = self._get_offline_drivers(all_drivers)
+                    drivers = self._get_offline_drivers(all_drivers, problems)
                 elif all_drivers:
                     logging.info("[DRIVERS] Összes driver lekérdezés (élő rendszer)")
                     drivers = self._get_all_drivers()
                 else:
                     logging.info("[DRIVERS] Third-party driverek lekérdezés")
-                    drivers = self._get_third_party_drivers()
+                    drivers = self._get_third_party_drivers(problems)
                 elapsed = time.monotonic() - start
                 logging.info(f"[DRIVERS] Betöltve: {len(drivers)} driver ({elapsed:.1f}s)")
-                self.emit('drivers_loaded', {'drivers': drivers, 'elapsed': round(elapsed, 1)})
+                payload = {'drivers': drivers, 'elapsed': round(elapsed, 1)}
+                if problems and not drivers:
+                    payload['error'] = (f"A driver-lista lekérdezése nem sikerült: {problems[0]}. "
+                                        f"Ez NEM azt jelenti, hogy nincs driver a gépen - "
+                                        f"próbáld újra a Frissítés gombbal.")
+                self.emit('drivers_loaded', payload)
             except Exception as e:
                 logging.error(f"[DRIVERS] Betöltési hiba: {e}")
                 logging.error(traceback.format_exc())
                 self.emit('drivers_loaded', {'drivers': [], 'elapsed': 0, 'error': str(e)})
         threading.Thread(target=worker, daemon=True, name="drivers-load").start()
 
-    def _get_third_party_drivers(self):
+    def _get_third_party_drivers(self, problems=None):
         """A third-party csomagok listája - RÖVID ÉLETŰ GYORSÍTÓTÁRRAL.
+
+        `problems`: opcionális lista a DISM felismert hibájához (lásd drivers_core).
 
         MIÉRT (terepi mérés, 2026-08-31, ThinkPad T14 Gen 1): egy AutoFix lánc **19-szer**
         futtatta a `dism /Get-Drivers`-t, hívásonként átlag **90 másodpercig** - összesen
@@ -105,7 +117,7 @@ class GuiDriversMixin:
                           f"{now - cached[0]:.0f} mp-e olvasva) - dism megspórolva.")
             return cached[1]
         logging.debug("[DRIVERS] dism /English /Online /Get-Drivers futtatása...")
-        drivers = drivers_core.get_third_party_drivers(self._run)
+        drivers = drivers_core.get_third_party_drivers(self._run, problems)
         # A lekérdezés ALATT is történhetett módosítás (a lánc több szálon dolgozik):
         # olyankor nem tesszük el, inkább a következő hívó kérdezze le újra.
         if getattr(self, '_dv_cache_dirty_at', 0) <= now:
@@ -128,9 +140,10 @@ class GuiDriversMixin:
         logging.debug(f"[DRIVERS] _get_all_drivers: {len(drivers)} valid driver")
         return drivers
 
-    def _get_offline_drivers(self, all_drivers=False):
+    def _get_offline_drivers(self, all_drivers=False, problems=None):
         logging.debug(f"[DRIVERS] _get_offline_drivers(all_drivers={all_drivers})")
-        drivers = drivers_core.get_offline_drivers(self._run, self.target_os_path, all_drivers)
+        drivers = drivers_core.get_offline_drivers(self._run, self.target_os_path,
+                                                   all_drivers, problems)
         logging.debug(f"[DRIVERS] _get_offline_drivers: {len(drivers)} valid driver")
         return drivers
 

@@ -216,8 +216,9 @@ td input[type="checkbox"]{accent-color:var(--accent);width:16px;height:16px;curs
 .winact-none{margin-bottom:18px;padding:14px 18px;border-radius:12px;
   background:rgba(160,160,180,0.10);border:1px solid var(--glass-border);
   font-size:13px;color:var(--text2);line-height:1.6}
-.winact-plan-ok{padding:14px 18px;border-radius:12px;background:rgba(90,140,255,0.10);
-  border:1px solid rgba(120,160,255,0.35);font-size:14px;color:var(--text);line-height:1.65}
+/* A `.winact-plan-ok` (kék "ez fog történni" doboz) TÖRÖLVE 2026-09-07-tel együtt a
+   "Mit fog csinálni a gomb" kártyával - sikeres esetben nincs mit kiírni. A `-bad`
+   marad: az akadály okát a letiltott gomb mellett ki KELL írni. */
 .winact-plan-bad{padding:14px 18px;border-radius:12px;background:rgba(255,90,90,0.12);
   border:1px solid rgba(255,120,120,0.4);font-size:14px;color:#ffbdbd;line-height:1.65}
 .winact-grid{display:grid;grid-template-columns:auto 1fr;gap:8px 16px;font-size:13px;align-items:baseline}
@@ -1607,11 +1608,13 @@ td input[type="checkbox"]{accent-color:var(--accent);width:16px;height:16px;curs
         <div class="panel glass">
           <div class="panel-title"><span class="emoji">💻</span> Windows állapota</div>
           <div id="winact-windows">Állapot lekérdezése...</div>
-        </div>
-
-        <div class="panel glass">
-          <div class="panel-title"><span class="emoji">🔧</span> Mit fog csinálni a gomb</div>
-          <div id="winact-plan">Állapot lekérdezése...</div>
+          <!-- A "Mit fog csinálni a gomb" kártya TÖRÖLVE (2026-09-07, explicit user
+               decision: "kurva felesleges az egész"). A benne lévő HÁROM GOMB viszont
+               külön eszköz, nem a magyarázat része, ezért ide költözött - a kártyával
+               együtt kidobva funkciót veszítettünk volna. A `winact-plan` doboz csak
+               AKADÁLY esetén jelenik meg (lásd renderWinAct): ha a gomb le van tiltva,
+               az okot ki KELL írni, különben a technikus nem tudja, mi a teendő. -->
+          <div id="winact-plan"></div>
           <div class="winact-btnrow" style="margin-top:14px">
             <button class="btn btn-sm" onclick="clearKmsServer()">🧹 KMS-kiszolgáló törlése</button>
             <button class="btn btn-sm" onclick="api().open_activation_tool('settings')">⚙️ Windows aktiválás-beállítások</button>
@@ -3847,11 +3850,15 @@ function renderActivationStatus(data) {
     + rows.map(r => '<dt>' + r[0] + '</dt><dd>' + r[1] + '</dd>').join('')
     + '</dl>';
 
-  // MIT FOG CSINÁLNI A GOMB - a kattintás ELŐTT látszódjon.
+  // A "mit fog csinálni a gomb" magyarázat CSAK AKKOR jelenik meg, ha a gomb NEM
+  // indulhat (2026-09-07, explicit user decision: a kártya felesleges volt). A tiltás
+  // okát viszont ki KELL írni: a gomb ilyenkor le van tiltva, és e nélkül a technikus
+  // nem tudná, mi a teendő (jellemzően: nincs gyári kulcs ÉS nincs beállítva KMS_HOST -
+  // a szöveg megmondja, melyik fájl melyik sorába kell beírni a címet).
   const plan = data.plan || {};
   const planEl = document.getElementById('winact-plan');
-  planEl.innerHTML = '<div class="' + (plan.ready ? 'winact-plan-ok' : 'winact-plan-bad') + '">'
-    + (plan.ready ? '▶️ ' : '⛔ ') + esc(plan.text || '') + '</div>';
+  planEl.innerHTML = plan.ready ? ''
+    : '<div class="winact-plan-bad" style="margin-top:14px">⛔ ' + esc(plan.text || '') + '</div>';
   document.getElementById('btn-winact').disabled = !plan.ready;
 
   const o = data.office || {};
@@ -3859,36 +3866,25 @@ function renderActivationStatus(data) {
     offEl.innerHTML = '<div style="opacity:.7">Nem található licencelt Office ezen a gépen. '
       + '(A Microsoft 365 / Store-os Office fiókhoz kötött, az itt nem jelenik meg.)</div>';
   } else {
-    // AZ OKOT IS KIÍRJUK, és megmondjuk, ha a termék ettől még MŰKÖDIK.
-    // Terepi visszajelzés (2026-08-31): a nézet "aktiválás szükséges"-t írt, miközben a
-    // Word "Aktivált termék"-et - a technikus a programot hitte hibásnak. A gépen mérve
-    // az állapot valós volt (MAK-kulcs, státusz 5, ok 0xC004F009 = lejárt türelmi idő),
-    // csak épp megmagyarázhatatlan: az 5-ös állapot LICENCELT terméket jelent, ami fut
-    // és aktiváltnak mutatja magát, amíg be nem áll a csökkentett működés.
+    /* AKTIVÁLVA VAGY NINCS - EGY JELVÉNY, SEMMI TÖBB (2026-09-07, explicit user decision:
+       *"annyit írjon ki h aktiválva van vagy nincs és kész… feleslegesen írja sárgával ha
+       működik"*). A korábbi sárga "újraaktiválás ajánlott" + a "MOST MŰKÖDIK" magyarázó
+       sorok törölve: az állapot maga kétállapotú lett (winact_core: LICENSE_STATUS), így
+       egy működő terméknél nincs mit magyarázni.
+
+       AZ OK VISZONT NEM VÉSZ EL, csak a HELYÉRE kerül: a `reason_hex`/`reason_text`
+       továbbra is jön a Pythonból, és NEM AKTIVÁLT terméknél ki is írjuk - ott az mondja
+       meg a teendőt (pl. `0xC004F00F` = a kulcs a hardverhez van kötve, a hardver
+       megváltozott). Sikernél csend, hibánál magyarázat. A napló mindkét esetben a
+       teljes állapotot rögzíti (Rule 0). */
     offEl.innerHTML = o.products.map(p =>
       '<div style="margin-bottom:10px"><b>' + esc(p.name || p.description) + '</b><br>'
       + '<span class="winact-badge ' + esc(p.status_color) + '">' + esc(p.status_text) + '</span>'
       + (p.partial_key ? ' <span class="winact-key">…' + esc(p.partial_key) + '</span>' : '')
-      + ((p.reason_text || p.reason_hex)
+      + ((p.status_color !== 'ok' && (p.reason_text || p.reason_hex))
           ? '<div style="font-size:12px;color:var(--text3);margin-top:4px">Ok: '
             + esc(p.reason_text || '—') + (p.reason_hex ? ' <span class="winact-key">'
             + esc(p.reason_hex) + '</span>' : '') + '</div>'
-          : '')
-      /* A "MOST MŰKÖDIK" TÉNYT ELŐRE ÉS ZÖLDDEL (2026-09-03, explicit user decision:
-         *"ha aktiválva van és működik akkor legyen az zöld ne piros… most épp aktív,
-         ez a lényeg"*). A jelvény színe már a `working` állapotot tükrözi (winact_core:
-         LICENSE_STATUS), itt pedig a magyarázat is a lényeggel kezd: működik. A
-         "később figyelmeztetni fog" utána jön, halványan - az a jövő, nem a jelen. */
-      + (p.working && p.licensed_but_stale
-          ? '<div style="font-size:12px;margin-top:4px">'
-            + '<span style="color:#8effc4;font-weight:700">✅ A termék licencelt és MOST MŰKÖDIK</span>'
-            + '<span style="color:var(--text3)"> — az Office aktiváltnak is mutatja magát '
-            + '(Word → Fiók). Újraaktiválás nélkül viszont egy idő után figyelmeztetni fog, '
-            + 'majd csökkentett működésre vált — ezért érdemes rendezni, de nem sürgős.</span></div>'
-          : '')
-      + (!p.working && p.licensed_but_stale
-          ? '<div style="font-size:12px;color:var(--text3);margin-top:4px">ℹ️ A licenc érvényes, '
-            + 'de a türelmi idő lejárt — az Office csökkentett működésre válthat. Aktiválás szükséges.</div>'
           : '')
       + '</div>').join('')
       + (o.ospp ? '<div class="winact-note">Kézi beavatkozáshoz: <span class="winact-key">' + esc(o.ospp) + '</span></div>' : '');

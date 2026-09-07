@@ -15,6 +15,7 @@ alatt különben némán üres listát ad. A driver-verzió a valódi kimenetben
 # === AUTO-IMPORTS ===
 import os
 import re
+import time
 import shutil
 import json
 import glob
@@ -90,10 +91,58 @@ def parse_dism_driver_list(stdout):
     # eredményként jelent meg a felületen, mindenféle nyom nélkül (CLAUDE.md-ben
     # dokumentált hibaosztály). Ez a sor teszi a logból azonnal felismerhetővé.
     if not drivers and (stdout or '').strip():
-        logging.warning(f"[DRIVERS] DISM-parzolás NULLA csomagot adott {len((stdout or '').splitlines())} sornyi "
-                        f"kimenetből - /English hiányzik vagy változott a formátum? Első 300 kar.: "
-                        f"{(stdout or '')[:300]!r}")
+        # A DISM SAJÁT HIBÁJÁT NEM SZABAD PARZOLÁSI HIBÁNAK LÁTNI (2026-09-07, terepi
+        # naplóból). A régi szöveg egyetlen okot kínált ("/English hiányzik vagy változott
+        # a formátum?"), és pontosan akkor is azt írta ki, amikor a DISM világosan
+        # megmondta a valódi okot: `The specified image is currently being serviced by
+        # another DISM operation`. A technikus egy üres driver-listát látott, hamis
+        # magyarázattal - ez a fájl egyik legrégebbi hibaosztálya (rossz ok = rossz nyom).
+        why = dism_failure_reason(stdout)
+        logging.warning(f"[DRIVERS] DISM-parzolás NULLA csomagot adott "
+                        f"{len((stdout or '').splitlines())} sornyi kimenetből - "
+                        f"{why or 'ismeretlen ok (/English hiányzik vagy változott a formátum?)'}. "
+                        f"Első 300 kar.: {(stdout or '')[:300]!r}")
     return drivers
+
+
+# A DISM ISMERT HIBÁI, emberi nyelven. Kulcs: a kimenet ANGOL töredéke (a hívásaink mind
+# `/English`-sel mennek); érték: (rövid ok, átmeneti-e). Az "átmeneti" azt jelenti, hogy
+# egy újrapróbálásnak van értelme - lásd get_offline_drivers/get_third_party_drivers.
+DISM_ERROR_HINTS = (
+    ('currently being serviced by another dism operation',
+     'egy MÁSIK DISM művelet dolgozik ugyanezen a lemezképen - meg kell várni', True),
+    ('another dism operation', 'egy másik DISM művelet fut - meg kell várni', True),
+    ('error: 740', 'a DISM nem rendszergazdaként futott (Error: 740)', False),
+    ('elevated permissions', 'a DISM nem rendszergazdaként futott', False),
+    ('error: 87', 'érvénytelen DISM-paraméter (Error: 87) - futó Windowsra mutató '
+                  '/Image útvonal? Arra a /Online való', False),
+    ('points to a running windows installation',
+     'az /Image a FUTÓ Windowsra mutat - arra a /Online való', False),
+    ('does not appear to be a valid windows directory',
+     'a megadott útvonal nem érvényes Windows-mappa', False),
+    ('error: 2', 'a DISM nem találja a megadott útvonalat (Error: 2)', False),
+    ('error: 50', 'a művelet ezen a lemezképen nem támogatott (Error: 50)', False),
+)
+
+
+def dism_failure_reason(stdout, stderr=''):
+    """A DISM kimenetéből a HIBA OKA emberi nyelven, vagy '' ha nem ismerjük fel.
+
+    Tiszta függvény, offline tesztelhető. Csak MAGYARÁZ - nem dönt semmiről."""
+    text = f"{stdout or ''}\n{stderr or ''}".lower()
+    for needle, why, _transient in DISM_ERROR_HINTS:
+        if needle in text:
+            return why
+    return ''
+
+
+def dism_is_busy(stdout, stderr=''):
+    """Igaz, ha a DISM azért nem adott listát, mert ÁTMENETILEG foglalt.
+
+    Ez az egyetlen olyan hiba a fentiek közül, amit egy rövid várakozás megold - a többi
+    (jogosultság, rossz útvonal) újrapróbálástól sem lesz jobb."""
+    text = f"{stdout or ''}\n{stderr or ''}".lower()
+    return any(n in text for n, _w, transient in DISM_ERROR_HINTS if transient)
 
 
 def _file_repository_path(target_os_path=None):
@@ -138,11 +187,49 @@ def filter_phantom_packages(drivers, target_os_path=None):
     return valid_drivers
 
 
-def get_third_party_drivers(run):
+# Hányszor próbáljuk újra a driver-listát, ha a DISM ÉPP FOGLALT, és mennyit várunk közte.
+# Terepen (2026-09-04, Lenovo) a lista kétszer üresen jött vissza, mert egy másik DISM
+# művelet dolgozott ugyanazon a lemezképen - a felület "0 driver"-t mutatott. Egy másik
+# DISM tipikusan másodpercek alatt végez (gyakran a SAJÁT másik szálunk az), ezért egy
+# rövid, korlátos várakozás megoldja; ha mégsem, a hívó továbbra is üres listát kap, de
+# a napló ekkor már a VALÓDI okot nevezi meg.
+DISM_BUSY_RETRIES = 3
+DISM_BUSY_WAIT_S = 4
+
+
+def _run_dism_list(run, cmd):
+    """Egy `dism ... /Get-Drivers` hívás, a FOGLALTSÁG rövid kivárásával.
+
+    Csak akkor próbálkozik újra, ha a DISM maga mondja, hogy foglalt (`dism_is_busy`) -
+    egy jogosultsági vagy útvonal-hibán az újrapróbálás csak időt pazarolna."""
+    res = run(cmd)
+    for attempt in range(1, DISM_BUSY_RETRIES + 1):
+        if not dism_is_busy(res.stdout, getattr(res, 'stderr', '')):
+            return res
+        logging.warning(f"[DRIVERS] A DISM foglalt (másik művelet dolgozik a lemezképen) - "
+                        f"{attempt}/{DISM_BUSY_RETRIES}. újrapróbálás {DISM_BUSY_WAIT_S} mp múlva.")
+        time.sleep(DISM_BUSY_WAIT_S)
+        res = run(cmd)
+    if dism_is_busy(res.stdout, getattr(res, 'stderr', '')):
+        logging.warning("[DRIVERS] A DISM a várakozás után is foglalt - a lista üres marad. "
+                        "Ez NEM azt jelenti, hogy nincs driver a gépen.")
+    return res
+
+
+def get_third_party_drivers(run, problems=None):
     """Third-party driverek listája (online). /English: kényszerített angol DISM
-    kimenet, függetlenül a Windows nyelvi beállításától."""
-    res = run(['dism', '/English', '/Online', '/Get-Drivers'])
-    return parse_dism_driver_list(res.stdout)
+    kimenet, függetlenül a Windows nyelvi beállításától.
+
+    `problems`: opcionális lista. Ha a DISM hibázott, a felismert OK bekerül ide - így a
+    hívó meg tudja különböztetni a "tényleg nincs driver" és a "nem sikerült lekérdezni"
+    esetet, ami eddig mindkettő egyformán `0 driver`-ként jelent meg a felületen."""
+    res = _run_dism_list(run, ['dism', '/English', '/Online', '/Get-Drivers'])
+    drivers = parse_dism_driver_list(res.stdout)
+    if problems is not None and not drivers:
+        why = dism_failure_reason(res.stdout, getattr(res, 'stderr', ''))
+        if why:
+            problems.append(why)
+    return drivers
 
 
 def get_all_drivers(run):
@@ -163,13 +250,19 @@ def get_all_drivers(run):
     return filter_phantom_packages(parsed_drivers)
 
 
-def get_offline_drivers(run, target_os_path, all_drivers=False):
-    """Offline cél-OS drivereinek listája (dism /Image:...)."""
+def get_offline_drivers(run, target_os_path, all_drivers=False, problems=None):
+    """Offline cél-OS drivereinek listája (dism /Image:...).
+
+    `problems`: lásd get_third_party_drivers - a DISM felismert hibája ide kerül."""
     cmd = ['dism', '/English', f'/Image:{target_os_path}', '/Get-Drivers']
     if all_drivers:
         cmd.append('/all')
-    res = run(cmd)
+    res = _run_dism_list(run, cmd)
     drivers = parse_dism_driver_list(res.stdout)
+    if problems is not None and not drivers:
+        why = dism_failure_reason(res.stdout, getattr(res, 'stderr', ''))
+        if why:
+            problems.append(why)
     return filter_phantom_packages(drivers, target_os_path)
 
 
@@ -249,6 +342,69 @@ def delete_driver_package(run, pub, target_os_path=None, timeout=None):
         return run(['dism', f'/Image:{target_os_path}', '/Remove-Driver', f'/Driver:{pub}'], timeout=timeout)
     # ok_codes 3010: siker, de reboot kell a lezáráshoz - a delete_succeeded sikeresnek veszi.
     return run(['pnputil', '/delete-driver', pub, '/uninstall', '/force'], ok_codes=(0, 3010), timeout=timeout)
+
+
+# ============================================================================
+# "A CSOMAGOT HASZNÁLJA EGY TELEPÍTETT ESZKÖZ" - a nyomtató-csomagok esete (2026-09-07)
+# ============================================================================
+# Terepi napló (Lenovo, 2026-09-04): a technikus KIKAPCSOLTA a nyomtató-védelmet, tehát
+# kifejezetten törölni akarta a nyomtató-csomagokat, a pnputil mégis mind a négyet
+# elutasította. A kimenet két sora együtt mondja meg, mi történt:
+#
+#   Driver package uninstalled.
+#   Failed to delete driver package: Legalább egy olyan eszköz van telepítve jelenleg,
+#   amely a megadott INF fájlt használja.        (returncode 3758096957 = 0xE000023D)
+#
+# Vagyis a `/uninstall` LEFUTOTT (a driver lekerült az eszközről), csak a CSOMAG maradt,
+# mert egy telepített eszköz még hivatkozik rá. Nyomtató-INF-eknél ez az eszköz a
+# nyomtatósor, amit a Nyomtatásisor-kezelő (Spooler) szolgáltatás tart életben - amíg az
+# fut, a csomag nem törölhető, akárhányszor próbáljuk.
+#
+# A megoldás ugyanaz a minta, amit a temp-takarítás már használ a szolgáltatás-zárolta
+# mappáknál: a szolgáltatást EGYSZER állítjuk le a köteg elején, nem csomagonként, és a
+# végén MINDENKÉPP visszaindítjuk.
+DELETE_IN_USE_RETURNCODE = 0xE000023D          # 3758096957
+
+# A kimenet szövege ugyanezt mondja, lokalizáltan. Ékezet nélküli töredékek, mert a
+# pnputil ANSI-ban ír és terepen mojibake-ként érkezik (lásd DELETE_FAILURE_MARKERS).
+DELETE_IN_USE_MARKERS = (
+    'inf f',                    # "a megadott INF fájlt használja" / "INF file"
+    'currently installed',
+    'is in use', 'in use by',
+)
+
+
+def delete_blocked_in_use(res):
+    """Igaz, ha a törlés azért bukott, mert egy TELEPÍTETT eszköz még használja a csomagot.
+
+    Ez nem ugyanaz, mint a `delete_stalled` (beragadt eszközverem, timeout): ott várni
+    kell, itt a használót kell megszüntetni. Tiszta függvény, offline tesztelhető."""
+    if res is None or delete_succeeded(res):
+        return False
+    if getattr(res, 'returncode', None) == DELETE_IN_USE_RETURNCODE:
+        return True
+    text = f"{getattr(res, 'stdout', '') or ''}\n{getattr(res, 'stderr', '') or ''}".lower()
+    return 'failed to delete driver package' in text and any(m in text for m in DELETE_IN_USE_MARKERS)
+
+
+# A nyomtatósort életben tartó szolgáltatás. A `/force` sem segít rajta: nem jogosultsági
+# kérdés, hanem az, hogy a szolgáltatás valóban használja az INF-et.
+PRINT_SPOOLER_SERVICE = 'Spooler'
+
+
+def set_service_state(run, service, start):
+    """Egy szolgáltatás indítása/leállítása. Visszatérés: sikerült-e.
+
+    A `net stop` 2-es kódja ("már áll") és a `net start` 2182-e ("már fut") NEM hiba -
+    ezért mennek `ok_codes`-ban, különben minden futás hamis WARNING-ot írna."""
+    verb = 'start' if start else 'stop'
+    codes = (0, 2182) if start else (0, 2, 2184)
+    res = run(['net', verb, service], ok_codes=codes, timeout=90)
+    ok = res.returncode in codes
+    logging.log(logging.INFO if ok else logging.WARNING,
+                f"[DRIVERS] A(z) {service} szolgáltatás {'indítása' if start else 'leállítása'}: "
+                f"{'OK' if ok else 'SIKERTELEN'} (returncode={res.returncode})")
+    return ok
 
 
 def force_delete_driver_files(run, pub, target_os_path=None):

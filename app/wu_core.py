@@ -28,6 +28,106 @@ AUTOFIX_PRINTER_SKIP_CLASSES = {'Printer', 'PrintQueue', 'Image'}
 WU_MAX_CONSECUTIVE_FAILURES = 3
 
 
+# ============================================================================
+# A "BERAGADT-E VAGY CSAK LASSÚ?" KÉRDÉS ELDÖNTÉSE (2026-09-07)
+# ============================================================================
+# A watchdog eddig pusztán a némaságból ítélt, és terepen (Dell Latitude 5520, Build 301)
+# ezzel kilőtte az Intel Display driver ÉPP FUTÓ telepítését 1800 mp után - a kör 22. és
+# 23. csomagja kimaradt, miközben a következő körben ugyanaz a csomag 68 mp alatt felment.
+# A némaság ugyanis nem hiba jele: a WU-script a csomagok KÖZÖTT ír sort, a telepítés
+# alatt semmit.
+#
+# A független tanú a Windows SAJÁT driver-telepítési naplója. Minden bind-lépésnél ír bele
+# (ezt a CLAUDE.md már használja utólagos bizonyítékként), tehát ha a mérete vagy az
+# mtime-ja változik, a PnP-alrendszer DOLGOZIK. Csak fájl-stat, nincs subprocess, nincs
+# külön jogosultság - a watchdog-ciklusban is olcsó.
+SETUPAPI_DEV_LOG = os.path.join(os.environ.get('WinDir', r'C:\Windows'), 'INF', 'setupapi.dev.log')
+
+# Ilyen sűrűn nézzük a jelet, MIUTÁN a némaság elérte az inactivity_timeout-ot (előtte
+# nincs értelme). A watchdog-ciklus 0,5 mp-enként pörög - fájl-statot nem csinálunk
+# annyiszor.
+PROGRESS_PROBE_INTERVAL = 60
+
+# Ennyi néma másodperc után akkor is ölünk, ha a napló változik. Egy driver-telepítés
+# reálisan sem tart tovább ennél; ez a védőháló arra, hogy egy "örökké haladó" folyamat
+# ne tartsa fel a láncot a végtelenségig (az elfogadási feltétel 20-60 perc/gép).
+WU_HANG_HARD_TIMEOUT = 5400   # 90 perc
+
+
+# ============================================================================
+# A WU-KERESÉS HIBAKÓDJA - kimondva, nem elnyelve (2026-09-07)
+# ============================================================================
+# Terepen (Dell Latitude 5520) a WU-keresés 11,8 mp alatt elbukott, és a program ennyit
+# mondott: "időtúllépés vagy WUA hiba". A stderr-ben viszont ott állt a pontos ok:
+# `A kivétel HRESULT-értéke: 0x80240438`. Egy hexa kód önmagában is kereshető, tehát
+# MINDIG ki kell írni - ez a legfontosabb része ennek a javításnak.
+#
+# A TÁBLA SZÁNDÉKOSAN RÖVID, és csak azt tartalmazza, amit a gépen MEG IS MÉRTÜNK
+# (certutil -error): a WinHTTP-tartomány (0x80072xxx) feloldható, a WU-specifikus
+# 0x8024xxxx kódokat viszont sem a certutil, sem a .NET nem oldja fel ezen a gépen.
+# Ezekre ezért NEM találunk ki jelentést - a kód + az általános teendő megy ki, mert egy
+# magabiztosan hangzó, de kitalált magyarázat rosszabb, mint a hiánya (a projekt egyik
+# alapszabálya: a mért adatot írjuk le, ne a következtetést).
+WU_SEARCH_ERROR_HINTS = {
+    '0x80072EE2': 'a WU-kiszolgáló nem válaszolt időben (hálózat vagy proxy)',
+    '0x80072EFD': 'nem sikerült csatlakozni a WU-kiszolgálóhoz',
+    '0x80072F8F': 'a rendszeróra/tanúsítvány hibás - ellenőrizd a dátumot és az időzónát',
+}
+
+# A `0x8024....` a Windows Update ügynökének SAJÁT hibatartománya. Amit ilyenkor
+# biztosan tudunk (és a naplóból is látszik): a hiba nem a hálózaté, hanem a WU
+# ügynöké/konfigurációjáé - a katalógus-ág ugyanabban a futásban működött.
+WU_AGENT_ERROR_PREFIX = '0X8024'
+
+
+def wu_search_error_text(stderr):
+    """A WU-keresés stderr-jéből (hexa kód, emberi magyarázat). Tiszta függvény.
+
+    A szkript `WUERROR|0x…|üzenet` alakban adja vissza a hibát; ha az nincs meg (régebbi
+    kliens vagy váratlan kimenet), a nyers szövegből is kihalásszuk az első 0x… kódot."""
+    text = (stderr or '').strip()
+    if not text:
+        return '', ''
+    code, msg = '', ''
+    for line in text.splitlines():
+        if line.startswith('WUERROR|'):
+            parts = line.split('|', 2)
+            code = (parts[1] if len(parts) > 1 else '').strip()
+            msg = (parts[2] if len(parts) > 2 else '').strip()
+            break
+    if not code:
+        m = re.search(r'0x[0-9A-Fa-f]{8}', text)
+        code = m.group(0) if m else ''
+    if not code:
+        return '', ''
+    # A NORMALIZÁLÁS NEM SZŐRSZÁLHASOGATÁS: a sima `.upper()` a `0x` előtagot is `0X`-re
+    # alakítja, amivel a tábla kulcsai (`0x80072EE2`) SOSEM találnának - az offline teszt
+    # pontosan ezt kapta el, mielőtt kiment volna.
+    upper = ('0x' + code[2:].upper()) if code[:2].lower() == '0x' else code.upper()
+    hint = WU_SEARCH_ERROR_HINTS.get(upper, '')
+    if not hint and upper.upper().startswith(WU_AGENT_ERROR_PREFIX):
+        hint = ('a Windows Update ügynöke utasította el a keresést (nem hálózati hiba) - '
+                'sérült WU-összetevők vagy csoportházirend/WSUS-beállítás')
+    # A NORMALIZÁLT alakot adjuk vissza: a kód a naplóba és a képernyőre is kimegy, és egy
+    # kereshető hibakód akkor ér valamit, ha mindig ugyanúgy néz ki.
+    return upper, (hint or msg)
+
+
+def setupapi_progress_signature():
+    """A Windows driver-telepítési naplójának (méret, mtime) párja - vagy None.
+
+    Összehasonlítható "ujjlenyomat": ha két mérés között változik, a driver-telepítés
+    halad. None, ha a fájl nem olvasható - olyankor a watchdog a régi, pusztán némaság
+    alapú viselkedésre esik vissza (sosem lesz rosszabb a korábbinál)."""
+    try:
+        st = os.stat(SETUPAPI_DEV_LOG)
+        return (st.st_size, st.st_mtime)
+    except OSError as e:
+        logging.debug(f"[WU-WATCHDOG] A setupapi.dev.log nem olvasható ({e}) - "
+                      f"a haladás-ellenőrzés kimarad.")
+        return None
+
+
 class WuProcessAborted(Exception):
     """A WU telepítő PowerShell folyamat idő előtt leállítva. reason='cancel' (felhasználói
     megszakítás), 'hang' (a watchdog ölte meg, mert túl sokáig nem jött kimenet),
@@ -39,9 +139,26 @@ class WuProcessAborted(Exception):
         self.reason = reason
 
 
-def _iter_process_lines(process, run_fn, cancel_check=None, inactivity_timeout=1800, abort_check=None):
+def _iter_process_lines(process, run_fn, cancel_check=None, inactivity_timeout=1800,
+                        abort_check=None, progress_probe=setupapi_progress_signature,
+                        hard_timeout=WU_HANG_HARD_TIMEOUT, on_notice=None):
     """A telepítő PowerShell stdout-jának CANCEL-KÉPES, WATCHDOG-OS olvasása - mindhárom
     fogyasztó (GUI manuális, GUI AutoFix, CLI AutoFix) ezen keresztül olvassa a sorokat.
+
+    progress_probe: callback, ami egy összehasonlítható "haladás-ujjlenyomatot" ad vissza
+    (vagy None-t, ha nem tudja megállapítani). Ha a némaság eléri az inactivity_timeout-ot,
+    a watchdog CSAK akkor öl, ha ez az ujjlenyomat sem változik - egy lassan, de dolgozó
+    telepítőt nem szabad kilőni (lásd a ciklusban a magyarázatot). Az ALAPÉRTELMEZÉS
+    szándékosan maga a `setupapi_progress_signature`, nem None: így mind a három fogyasztó
+    (GUI manuális, GUI AutoFix, CLI AutoFix) automatikusan megkapja, és nem fordulhat elő,
+    hogy egy hívási hely lemarad róla - ez a projekt legrégebbi visszatérő hibája.
+    Kikapcsolni `progress_probe=None`-nal lehet (a teszt ezt használja).
+
+    hard_timeout: ennyi néma másodperc után akkor is ölünk, ha a jel változik - így egy
+    örökké "haladó", de sosem végző folyamat sem tartja fel a láncot a végtelenségig.
+
+    on_notice: opcionális callback a felhasználónak szóló üzenethez (a hívó emit-je) -
+    a hosszabbítás ne néma legyen, a technikus lássa, hogy a program vár, nem fagyott le.
 
     A régi, közvetlen `for line in process.stdout` minta két terepi hibát hordozott:
     (1) a megszakítás-ellenőrzés csak új sor érkezésekor futott le, így ha a scripten
@@ -99,6 +216,8 @@ def _iter_process_lines(process, run_fn, cancel_check=None, inactivity_timeout=1
     # határidő/eltelt-idő mérés is; time.time() már csak ott maradt, ahol tényleg abszolút
     # időbélyeg kell (egyedi fájlnév, cache-buster URL, fájl mtime-hoz hasonlítás).
     last_output = time.monotonic()
+    last_sig = progress_probe() if progress_probe else None
+    next_probe = 0.0
     while True:
         if cancel_check and cancel_check():
             _kill('cancel')
@@ -106,11 +225,46 @@ def _iter_process_lines(process, run_fn, cancel_check=None, inactivity_timeout=1
         try:
             item = q.get(timeout=0.5)
         except queue.Empty:
-            if time.monotonic() - last_output > inactivity_timeout:
-                logging.error(f"[WU-WATCHDOG] {inactivity_timeout}s óta nincs kimenet - a WU folyamat beragadt.")
-                _kill('hang')
-                raise WuProcessAborted('hang')
-            continue
+            silent = time.monotonic() - last_output
+            if silent <= inactivity_timeout:
+                continue
+            # A NÉMASÁG ÖNMAGÁBAN NEM BIZONYÍTÉK (2026-09-07, terepi naplóból). A WU-script
+            # a csomagok KÖZÖTT ír sort, telepítés közben nem - egy nagy GPU-driver ezért
+            # simán tud fél órán át "néma" lenni, miközben dolgozik. Terepen (Dell Latitude
+            # 5520) a watchdog pontosan így lőtte ki az Intel Display driver telepítését
+            # 1800 mp után, és a kör 22. és 23. csomagja kimaradt - miközben a KÖVETKEZŐ
+            # körben ugyanaz a csomag 68 MÁSODPERC alatt felment.
+            #
+            # Ezért a kilövés előtt megnézzük, halad-e a munka: a Windows SAJÁT
+            # driver-telepítési naplója (setupapi.dev.log) minden bind-lépésnél nő, tehát
+            # a mérete/mtime-ja független tanú. Ha változik, adunk még egy kört. Ugyanaz a
+            # "stillness clock" elv, ami a stressz-automatizálásban már bevált: amíg a
+            # képernyő/napló változik, a program dolgozik - csak a VALÓDI mozdulatlanság
+            # számít hangnak.
+            now = time.monotonic()
+            if now < next_probe:
+                continue
+            next_probe = now + PROGRESS_PROBE_INTERVAL
+            sig = progress_probe() if progress_probe else None
+            if sig is not None and sig != last_sig and silent < hard_timeout:
+                last_sig = sig
+                logging.warning(
+                    f"[WU-WATCHDOG] {silent:.0f}s óta nincs kimenet, DE a Windows "
+                    f"driver-naplója közben változott - a telepítés HALAD, nem lövünk ki "
+                    f"semmit (türelmi keret: {hard_timeout}s).")
+                if on_notice:
+                    try:
+                        on_notice(f'⏳ A telepítés régóta fut ({silent / 60:.0f} perce), de HALAD '
+                                  f'(a Windows driver-naplója változik) - várunk rá tovább...')
+                    except Exception as e:
+                        logging.debug(f"[WU-WATCHDOG] on_notice hiba: {e}")
+                continue
+            why = ('a türelmi keret is lejárt' if silent >= hard_timeout
+                   else 'a Windows driver-naplója sem változik')
+            logging.error(f"[WU-WATCHDOG] {silent:.0f}s óta nincs kimenet és {why} - "
+                          f"a WU folyamat beragadt.")
+            _kill('hang')
+            raise WuProcessAborted('hang')
         if item is None:
             break
         last_output = time.monotonic()

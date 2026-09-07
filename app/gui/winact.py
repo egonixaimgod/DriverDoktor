@@ -145,7 +145,10 @@ class GuiWinActMixin:
                     # Nem hallgatjuk el: egy "lefutott, de nem aktivált" állapot a
                     # legrosszabb, amit a technikus utólag fedez fel az ügyfélnél.
                     self.emit('task_progress', {'task': task, 'log':
-                              f"\n❌ NEM sikerült - a Windows állapota: {after.get('status_text')}\n"
+                              # A RÉSZLETES állapot, nem a jelvényé: az 5-ös kódnál a
+                              # jelvény már "Aktiválva", és ez a sor ellentmondana neki.
+                              f"\n❌ NEM sikerült - a rendszer licenc-állapota: "
+                              f"{after.get('status_detail') or after.get('status_text')}\n"
                               + self._winact_hint(after, use_kms)})
                     self.emit('task_complete', {'task': task, 'status': '❌ Az aktiválás nem sikerült'})
             except Exception as e:

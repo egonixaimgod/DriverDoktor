@@ -524,6 +524,7 @@ class GuiAutofixMixin:
             stalled_streak = 0
             failed = []     # nem törölhető csomagok (pl. használatban lévő INF) - jelentjük
             deferred = []   # beragadt csomagok - az újraindítás utáni lábon próbáljuk újra
+            in_use = []     # "egy telepített eszköz használja" - a fázis végén, szolgáltatás-leállítással
             for i, drv in enumerate(drivers):
                 if self._cancel_flag:
                     # MEGSZAKÍTÁS A TÖRLÉSI FÁZISBAN: ez a lánc legkényesebb pontja. A gép
@@ -589,6 +590,17 @@ class GuiAutofixMixin:
                 # csomagok maradtak vissza - pont az a néma hamis siker, amit a Build 218
                 # óta kerülünk. Nem hiba, csak jelentendő tény: a lánc megy tovább.
                 if not drivers_core.delete_succeeded(res):
+                    # "EGY TELEPÍTETT ESZKÖZ MÉG HASZNÁLJA" - ez nem végleges bukás, hanem
+                    # egy megszüntethető akadály. Nyomtató-csomagoknál a használó a
+                    # nyomtatósor, amit a Spooler tart életben; a fázis VÉGÉN egyszer
+                    # leállítjuk és újrapróbáljuk ezeket (lásd lentebb). Csomagonként
+                    # leállítani a szolgáltatást pazarlás és fölösleges kockázat lenne.
+                    if drivers_core.delete_blocked_in_use(res):
+                        in_use.append(drv)
+                        logging.warning(f"[AUTOFIX-DELETE] HASZNÁLATBAN: {name} ({drv.get('original', '')}) - "
+                                        f"{drv.get('provider', '?')} [{drv.get('class', '?')}], "
+                                        f"returncode={res.returncode} - a fázis végén újrapróbáljuk.")
+                        continue
                     failed.append(f"{name} ({drv.get('original', '')})")
                     logging.warning(f"[AUTOFIX-DELETE] SIKERTELEN törlés: {name} ({drv.get('original', '')}) - "
                                     f"{drv.get('provider', '?')} [{drv.get('class', '?')}], returncode={res.returncode}")
@@ -597,6 +609,62 @@ class GuiAutofixMixin:
                     # Törlés = destruktív művelet, a nevének látszania kell a logban (CLAUDE.md).
                     logging.info(f"[AUTOFIX-DELETE] Törölve ({deleted_ok}/{total}): {name} ({drv.get('original', '')}) - "
                                  f"{drv.get('provider', '?')} [{drv.get('class', '?')}]")
+
+            # ================================================================
+            # MÁSODIK KÖR: amit "egy telepített eszköz használ" (2026-09-07)
+            # ================================================================
+            # Terepen (Lenovo, 2026-09-04) négy nyomtató-csomag bukott el így, PEDIG a
+            # technikus kifejezetten kikapcsolta a nyomtató-védelmet, tehát törölni akarta
+            # őket. A pnputil `/uninstall` része lefutott, csak a csomag maradt bent, mert
+            # a nyomtatósort a Spooler szolgáltatás tartja életben.
+            #
+            # HÁROM SZABÁLY, ami nélkül ez többet ártana, mint használ:
+            #  1. A szolgáltatást EGYSZER állítjuk le az egész kötegre, nem csomagonként.
+            #  2. A visszaindítás `finally`-ben van, tehát egy kivétel, egy megszakítás
+            #     vagy egy törlési hiba után is megtörténik - egy Spooler nélkül
+            #     visszaadott gép nem tud nyomtatni, az pedig sokkal rosszabb, mint egy
+            #     megmaradt driver-csomag.
+            #  3. NEM szűrünk osztályra: amit a technikus törölni akart, azt törölni
+            #     akarjuk (CLAUDE.md: a törlésbe soha ne kerüljön új szűrő). A Spoolert
+            #     csak akkor állítjuk le, ha tényleg van mit vele nyerni.
+            if in_use:
+                names = [f"{d.get('published')} ({d.get('original', '')})" for d in in_use]
+                logging.warning(f"[AUTOFIX-DELETE] {len(in_use)} csomagot használ egy telepített eszköz - "
+                                f"a(z) {drivers_core.PRINT_SPOOLER_SERVICE} leállításával újrapróbáljuk: {names}")
+                self.emit('task_progress', {'task': task_id, 'log':
+                          f'\n🖨️ {len(in_use)} csomagot még használ egy telepített eszköz - '
+                          f'a nyomtatósor átmeneti leállításával újrapróbáljuk...'})
+                spooler_stopped = drivers_core.set_service_state(
+                    self._run, drivers_core.PRINT_SPOOLER_SERVICE, start=False)
+                try:
+                    for drv in in_use:
+                        if self._cancel_flag:
+                            break
+                        nm = drv.get('published', '')
+                        res2 = drivers_core.delete_driver_package(self._run, nm,
+                                                                  timeout=DELETE_DRIVER_TIMEOUT)
+                        if drivers_core.delete_succeeded(res2):
+                            deleted_ok += 1
+                            logging.info(f"[AUTOFIX-DELETE] Törölve (2. kör): {nm} "
+                                         f"({drv.get('original', '')}) - {drv.get('provider', '?')} "
+                                         f"[{drv.get('class', '?')}]")
+                        else:
+                            failed.append(f"{nm} ({drv.get('original', '')})")
+                            logging.warning(f"[AUTOFIX-DELETE] A 2. körben sem sikerült: {nm} "
+                                            f"({drv.get('original', '')}), returncode={res2.returncode}")
+                finally:
+                    # MINDENKÉPP vissza: ez a gép nyomtatási képessége.
+                    if spooler_stopped:
+                        if not drivers_core.set_service_state(
+                                self._run, drivers_core.PRINT_SPOOLER_SERVICE, start=True):
+                            # Ezt látnia KELL a technikusnak - nem hallgatható el.
+                            self.emit('task_progress', {'task': task_id, 'log':
+                                      '⚠️ A nyomtatósor (Spooler) szolgáltatást nem sikerült '
+                                      'visszaindítani! Indítsd el kézzel: services.msc → '
+                                      'Nyomtatásisor-kezelő → Indítás (vagy: net start Spooler).'})
+                        else:
+                            self.emit('task_progress', {'task': task_id, 'log':
+                                      '✅ A nyomtatósor visszaindítva.'})
 
             logging.info(f"[AUTOFIX-DELETE] Törlési fázis vége: {deleted_ok} sikeres, {len(failed)} sikertelen, "
                          f"{len(deferred)} halasztott (összesen {total} csomag).")
@@ -703,9 +771,19 @@ class GuiAutofixMixin:
             wu_search_failed = wu_search_raw is None
             wu_results = wu_search_raw or []
             if wu_search_failed:
+                # A KONKRÉT HIBAKÓD A KÉPERNYŐRE IS KIMEGY (2026-09-07): eddig minden
+                # WU-bukás ugyanazt az "időtúllépés vagy WUA hiba" mondatot kapta, pedig
+                # a kettő teljesen más teendőt jelent, és a kód a stderr-ben ott volt.
+                code, hint = getattr(self, '_wu_search_error', ('', '')) or ('', '')
                 logging.warning(f"[AUTOFIX-WU] A WU keresés elbukott a(z) {loop_idx}. körben "
-                                "(időtúllépés vagy WUA hiba) - a kör a katalógus-zárókörrel folytatódik.")
-                self.emit('task_progress', {'task': task_id, 'log': '\n⚠️ A Windows Update nem válaszolt (időtúllépés vagy hibás WU-ügynök).'})
+                                f"({code or 'nincs hibakód'}{(' - ' + hint) if hint else ''}) - "
+                                f"a kör a katalógus-zárókörrel folytatódik.")
+                if code:
+                    self.emit('task_progress', {'task': task_id, 'log':
+                              f'\n⚠️ A Windows Update elutasította a keresést - hibakód: {code}'
+                              + (f'\n   ({hint})' if hint else '')})
+                else:
+                    self.emit('task_progress', {'task': task_id, 'log': '\n⚠️ A Windows Update nem válaszolt (időtúllépés vagy hibás WU-ügynök).'})
                 self.emit('task_progress', {'task': task_id, 'log': 'A WU-ból most NEM tudunk drivert telepíteni - áttérés a Microsoft Update Catalog keresésre.'})
             else:
                 logging.info(f"[AUTOFIX-WU] A(z) {loop_idx}. kör WU keresése lefutott: {len(wu_results)} nyers találat.")
@@ -796,9 +874,13 @@ class GuiAutofixMixin:
             # közvetlen stdout-olvasás beragadt WU-keresésnél örökre blokkolt.
             aborted_reason = None
             try:
-                for line in _iter_process_lines(process, self._run,
-                                                cancel_check=lambda: getattr(self, '_cancel_flag', False),
-                                                abort_check=_abort_check):
+                for line in _iter_process_lines(
+                        process, self._run,
+                        cancel_check=lambda: getattr(self, '_cancel_flag', False),
+                        abort_check=_abort_check,
+                        # A watchdog-hosszabbítás ne legyen néma: egy 30+ perces, de HALADÓ
+                        # telepítésnél a technikus lássa, hogy a program vár, nem fagyott le.
+                        on_notice=lambda msg: self.emit('task_progress', {'task': task_id, 'log': msg})):
                     # A közös script kimeneti protokollja (INIT/SEARCH/FOUND/SKIP/TOTAL/DLONE/
                     # INSTONE/OK/OKRB/FAIL/EMPTY/DONE/ERROR) - lásd _build_wu_install_ps docstring.
                     if line.startswith("TOTAL:"):
@@ -1488,6 +1570,7 @@ class GuiAutofixMixin:
                 path = driverstore_package_inf(orig) if orig else None
                 if not path:
                     regressed += 1
+                    self._note_lost_vendor_driver(dev_name, before, 'a gyári csomag már nincs a gépen')
                     self.emit('task_progress', {'task': task_id, 'log': f'   ⚠️ {dev_name}: a gyári driver ({orig or "?"}) nincs a DriverStore-ban - nem tudjuk visszakötni.'})
                     logging.warning(f"[REGRESSZIO] {dev_name}: a(z) {orig} csomag nincs stage-elve, nincs mit újrakötni.")
                     continue
@@ -1509,6 +1592,7 @@ class GuiAutofixMixin:
                     logging.warning(f"[REGRESSZIO] SIKER: {dev_name} -> {after.get('inf')} ({after.get('provider')})")
                 else:
                     regressed += 1
+                    self._note_lost_vendor_driver(dev_name, before, 'a gyári driver nem indul el ezen a gépen')
                     # EZT KI KELL MONDANI. Pont az a néma hiba, ami miatt a technikus egy
                     # látszólag hibátlan gépet vesz át, aztán az ügyfélnél derül ki.
                     self.emit('task_progress', {'task': task_id, 'log': f'   ❌ {dev_name}: a gyári driver nem indul el ezen a gépen - a Windows alapdriverén marad.'})
@@ -1522,6 +1606,34 @@ class GuiAutofixMixin:
         logging.info(f"[REGRESSZIO] Eredmény: {fixed} azonnal javítva, {pending} újraindításra vár, "
                      f"{regressed} megmaradt.")
         return fixed, regressed, pending
+
+    def _note_lost_vendor_driver(self, dev_name, before, why):
+        """Egy ELVESZETT gyári driver feljegyzése a ZÁRÓ JELENTÉSHEZ (2026-09-07).
+
+        MIÉRT KELL (terepi napló, ASRock B450M-HDV, 2026-09-04): a lánc törölte az
+        `oem6.inf`-et (AMD 24.10.0.1) a HD Audio Controllerről, a visszakötés nem
+        sikerült (a csomag már nem volt a gépen), és a program ezt menet közben ki is
+        írta - a záró `🏭 ... Windows-alapdriveren maradt` lista viszont CSAK a monitort
+        tartalmazta. Márpedig a technikus a végén azt a listát olvassa el, és az volt a
+        teendő-lista. Egy elveszett gyári driver pedig nem ugyanaz a kategória, mint egy
+        eszköz, amihez sosem létezett csomag: itt a gép VESZTETT valamit a fix során.
+
+        Azért nem elég a `_health_report_worth_listing`-re bízni, mert az pont ezt a
+        készüléket szűrné ki (nincs hozzá stage-elt csomag - lásd a 2026-09-03-i
+        szűkítést), vagyis a legfontosabb sor esne ki. Ezért a regressziók MINDIG,
+        szűrő nélkül bekerülnek, külön szekcióban."""
+        try:
+            if not hasattr(self, '_health_lost_vendor'):
+                self._health_lost_vendor = []
+            self._health_lost_vendor.append({
+                'name': dev_name,
+                'inf': (before or {}).get('inf') or '?',
+                'provider': (before or {}).get('provider') or '?',
+                'version': (before or {}).get('version') or '?',
+                'why': why,
+            })
+        except Exception as e:
+            logging.debug(f"[REGRESSZIO] Az elveszett driver feljegyzése nem sikerült: {e}")
 
     def _autofix_closing_rebind(self):
         """A lánc ZÁRÓ ÚJRAKÖTŐ KÖRE. Visszatérés: újraindulunk-e miatta.
@@ -1854,7 +1966,30 @@ class GuiAutofixMixin:
                     worth.append((dev, inst))
                 else:
                     by_design += 1
-            if not worth and not by_design and not skipped_by_user:
+            # ELVESZETT GYÁRI DRIVEREK - MINDIG, a szűrőktől függetlenül (2026-09-07).
+            # Ez a szekció áll elöl, mert ez az EGYETLEN, ahol a gép a fix miatt lett
+            # rosszabb: volt gyári drivere, és most nincs. Külön mondat kell rá, mert a
+            # "sosem volt hozzá csomag" eset (lentebb) egészen mást jelent a technikusnak.
+            lost = getattr(self, '_health_lost_vendor', None) or []
+            if lost:
+                logging.warning(f"[HEALTH] {len(lost)} eszköz ELVESZTETTE a gyári driverét a lánc során: "
+                                f"{[l['name'] for l in lost]}")
+                self.emit('task_progress', {'task': task_id, 'log':
+                          f'\n❗ {len(lost)} eszköz a fix ELŐTT gyári driveren futott, most viszont a Windows alapdriverén van:'})
+                for l in lost:
+                    self.emit('task_progress', {'task': task_id, 'log':
+                              f"   • {l['name']} - előtte: {l['provider']} {l['version']} "
+                              f"({l['inf']}) - {l['why']}"})
+                self.emit('task_progress', {'task': task_id, 'log':
+                          '👉 A gép ezekkel MŰKÖDIK, de gyengébben (pl. hangkártyánál hiányzó effektek, '
+                          'tapipadnál szaggatás). A gyári drivert a gép- vagy alaplapgyártó '
+                          'letöltőoldaláról érdemes kézzel pótolni.'})
+                # Egy eszköz csak EGY listában szerepeljen: amit itt már kimondtunk, azt a
+                # lenti "nincs hozzá gyári csomag" felsorolás ne ismételje meg más üzenettel.
+                lost_names = {(l['name'] or '').strip().lower() for l in lost}
+                worth = [(d, i) for d, i in worth
+                         if (d.get('name') or '').strip().lower() not in lost_names]
+            if not worth and not by_design and not skipped_by_user and not lost:
                 self.emit('task_progress', {'task': task_id, 'log': '✅ Nincs olyan eszköz, ami Windows-alapdriveren maradt.'})
                 return
             if worth:
@@ -1867,10 +2002,17 @@ class GuiAutofixMixin:
             if skipped_by_user:
                 names = ', '.join(f"{d['name']}" for d, _i in skipped_by_user[:4])
                 more = f" (és további {len(skipped_by_user) - 4})" if len(skipped_by_user) > 4 else ''
-                logging.info(f"[AUTOFIX] A jelölőnégyzetek miatt ki sem keresett, alapdriveres eszközök: "
+                # A SZÖVEG NEM HIVATKOZHAT JELÖLŐNÉGYZETRE (2026-09-07, terepi naplóból):
+                # 2026-09-02 óta a tároló/firmware kizárás a program RÖGZÍTETT szabálya,
+                # nincs hozzá kapcsoló sehol. A régi mondat ("indítsd újra a fixet a
+                # megfelelő jelölőnégyzettel") egy nem létező felületre küldte a
+                # technikust, és egy meg nem hozott döntést magyarázott. Ugyanez a hiba a
+                # kézi szken `hw-risk-note` szövegénél már javítva lett - ez volt a
+                # második, kimaradt példány. A valódi teendő: a gyártó oldala, kézzel.
+                logging.info(f"[AUTOFIX] Tároló/firmware miatt ki sem keresett, alapdriveres eszközök: "
                              f"{[d['name'] for d, _i in skipped_by_user]}")
-                self.emit('task_progress', {'task': task_id, 'log': f'\n🛡️ {len(skipped_by_user)} eszköz a Windows beépített driverén fut, de ezekre a fix indításakor NEM engedélyezted a keresést: {names}{more}.'})
-                self.emit('task_progress', {'task': task_id, 'log': '   Ez nem hiba: a tároló- és firmware-drivereket szándékosan hagyjuk békén (egy rossz csere itt visszafordíthatatlan). Ha mégis kellenek, indítsd újra a fixet a megfelelő jelölőnégyzettel.'})
+                self.emit('task_progress', {'task': task_id, 'log': f'\n🛡️ {len(skipped_by_user)} eszköz a Windows beépített driverén fut, mert tároló- vagy firmware-eszköz: {names}{more}.'})
+                self.emit('task_progress', {'task': task_id, 'log': '   Ez nem hiba, hanem szándékos: ezekhez a program soha nem keres drivert, mert egy rossz csere itt visszafordíthatatlan (a gép nem indul el, vagy a firmware véglegesen elromlik). Ha valamelyikhez tényleg új driver kell, azt a gyártó letöltőoldaláról, kézzel érdemes feltenni.'})
             if by_design:
                 self.emit('task_progress', {'task': task_id, 'log': f'ℹ️ További {by_design} eszköz a Windows beépített driverén fut, és ez így HELYES: PCI-hidak, ACPI-csomópontok, USB-gyökérhubok, WAN Miniportok, billentyűzet/egér - ezekhez gyári driver nem is létezik, a gyártók ide szoftvert adnak, nem drivert.'})
         except Exception as e:
