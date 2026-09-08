@@ -23,6 +23,23 @@ from app.common import _app_exe_path
 # === /AUTO-IMPORTS ===
 
 
+# AZ ÚJRAPRÓBÁLKOZÁS A FASTLY CDN ELAVULT PÉLDÁNYA MIATT VAN, ÉS CSAK AKKOR FUT LE, HA
+# TÉNYLEG SEGÍTHET (2026-09-08, terepen mérve). A raw.githubusercontent.com mögötti CDN
+# egy push után percekig kiszolgálhat régi másolatot, és a `?t=<timestamp>` csak a
+# kliens-oldali gyorsítótárat kerüli meg - ezért született a 3 próbálkozás.
+#
+# A ciklus viszont a SIKERES, egyértelmű válasz után is továbbment. Mérve egy induláson:
+#   22:58:23  Letöltött BUILD_NUMBER: 304, Helyi: 304 -> Nincs újabb verzió.
+#   22:58:26  ...ugyanaz
+#   22:58:29  ...ugyanaz          ->  check_for_updates -> 6.30s
+# Vagyis MINDEN kézi indítás 6,3 másodpercet és 3 HTTP-kérést költött egy olyan kérdésre,
+# amire az első válasz definitív volt.
+#
+# AZ ÚJ SZABÁLY (a védőháló megmarad, az ár eltűnik):
+#   újabb build      -> azonnal vissza (eddig is így volt)
+#   AZONOS build     -> DEFINITÍV válasz, azonnal vissza  <- ez a nyereség
+#   KISEBB build     -> gyanús: elavult CDN-példány (vagy helyi bump push előtt) -> újra
+#   hiba / nem parse -> újra
 UPDATE_CHECK_ATTEMPTS = 3
 UPDATE_CHECK_RETRY_SEC = 3
 _RAW_BASE = "https://raw.githubusercontent.com/egonixaimgod/DriverVarazslo/main"
@@ -67,8 +84,14 @@ def check_for_updates():
                 if new_build > common.BUILD_NUMBER:
                     logging.info(f"[UPDATE] Új verzió elérhető: {new_build} (Jelenlegi: {common.BUILD_NUMBER})")
                     return {'has_update': True, 'new_version': new_build}
-                else:
-                    logging.info("[UPDATE] Nincs újabb verzió.")
+                if new_build == common.BUILD_NUMBER:
+                    # DEFINITÍV VÁLASZ - nincs mit újrapróbálni (lásd a konstansok indoklását).
+                    logging.info("[UPDATE] Nincs újabb verzió (a szerver a helyivel azonos "
+                                 "build-et ad - definitív válasz, nincs újrapróbálkozás).")
+                    return {'has_update': False}
+                logging.info(f"[UPDATE] A szerver a helyinél RÉGEBBI build-et ad "
+                             f"({new_build} < {common.BUILD_NUMBER}) - elavult CDN-példány vagy "
+                             f"push előtti helyi verziószám-emelés lehet, újrapróbáljuk.")
             else:
                 logging.error("[UPDATE] Nem található BUILD_NUMBER a letöltött fájlban!")
         except Exception:

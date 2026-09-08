@@ -167,8 +167,26 @@ def auto_cleanup_duplicates(run, log, get_drivers, check_cancel=None):
             log('  ✅ Nincs törölhető régi driver-verzió a DriverStore-ban.')
             return 0, 0, 0
         names = [d['published'] for g in groups for d in g['dups'] if not d['active'] and d['published']]
+        # MINDEN TÖRLENDŐ CSOMAGOT NEVÉN NEVEZÜNK, MIELŐTT HOZZÁNYÚLNÁNK (2026-09-08).
+        # A napló eddig ennyit mondott: "[DUPDRV] 2 duplikátum-csoport, 2 törölhető régi
+        # verzió", majd "pnputil /delete-driver oem5.inf". Az `oemNN.inf` szám önmagában
+        # SEMMIT nem árul el (ráadásul újratelepítéskor átszámozódik), tehát a "hova lett a
+        # driverem?" kérdés a naplóból megválaszolhatatlan volt - miközben ez a projekt
+        # egyik alapszabálya, hogy minden romboló lépés a CÉLJÁT is kiírja. Az adat végig
+        # ott volt a `groups`-ban, csak nem ment ki.
+        details = duplicate_delete_details(groups)
+        for g in groups:
+            for d in g['dups']:
+                if d['active'] or not d['published']:
+                    continue
+                logging.warning(
+                    f"[DUPDRV] TÖRLENDŐ: {d['published']} ({g['original']}) "
+                    f"{d.get('provider') or '?'} v{d.get('version') or '?'} [{d.get('date') or '?'}] "
+                    f"- MEGMARAD helyette: {g['keep'].get('published') or '?'} "
+                    f"v{g['keep'].get('version') or '?'} [{g['keep'].get('date') or '?'}]")
         log(f'  🧹 {len(names)} elavult driver-verzió törlése a DriverStore-ból...')
-        ok, fail, skipped = delete_duplicate_packages(run, log, names, active, check_cancel=check_cancel)
+        ok, fail, skipped = delete_duplicate_packages(run, log, names, active,
+                                                      check_cancel=check_cancel, details=details)
         log(f'  🧹 DriverStore-takarítás kész: {ok} törölve' + (f', {fail} sikertelen' if fail else '') + (f', {skipped} kihagyva' if skipped else '') + '.')
         return ok, fail, skipped
     except Exception as e:
@@ -180,21 +198,55 @@ def auto_cleanup_duplicates(run, log, get_drivers, check_cancel=None):
         return 0, 0, 0
 
 
-def delete_duplicate_packages(run, log, names, active_infs, check_cancel=None):
+def duplicate_delete_details(groups):
+    """published (oemNN.inf) -> emberi címke ("eredeti.inf, Gyártó vX [dátum]").
+
+    A törlési naplósorok és a képernyő-szöveg ebből tudják megnevezni, MI tűnt el:
+    az `oemNN.inf` szám önmagában semmitmondó és újratelepítéskor átszámozódik."""
+    out = {}
+    for g in (groups or []):
+        for d in g.get('dups') or []:
+            pub = (d.get('published') or '').strip()
+            if not pub:
+                continue
+            reszek = [g.get('original') or '?']
+            if d.get('provider'):
+                reszek.append(str(d['provider']))
+            if d.get('version'):
+                reszek.append('v' + str(d['version']))
+            if d.get('date'):
+                reszek.append(f"[{d['date']}]")
+            out[pub.lower()] = ' '.join(reszek)
+    return out
+
+
+def delete_duplicate_packages(run, log, names, active_infs, check_cancel=None, details=None):
     """A kijelölt régi duplikátum-verziók törlése (pnputil /delete-driver, sikertelen
     törlésnél második kör /force-szal). A names listát a hívónak már oemXX-re szűrve
     kell átadnia; az active_infs a TÖRLÉS ELŐTT frissen lekérdezett aktív-halmaz.
+
+    `details`: published -> emberi címke (duplicate_delete_details). Nem kötelező, de
+    ADD MEG, ha van: enélkül a napló és a képernyő is csak egy `oemNN.inf` számot mutat,
+    amiből utólag senki nem tudja megmondani, melyik driver tűnt el.
     Visszatérés: (ok, fail, skipped)."""
     ok = fail = skipped = 0
     total = len(names)
+    details = details or {}
+
+    def _cimke(n):
+        d = details.get((n or '').lower())
+        return f'{n} ({d})' if d else n
+
     for i, name in enumerate(names):
         if check_cancel and check_cancel():
             log('\n❗ Megszakítva!')
             break
         if name.lower() in active_infs:
             skipped += 1
-            log(f'  ⏭ {name} - időközben aktív lett, kihagyva')
+            log(f'  ⏭ {_cimke(name)} - időközben aktív lett, kihagyva')
             continue
+        # ROMBOLÓ LÉPÉS: a cél a MŰVELET ELŐTT megy a naplóba, névvel.
+        logging.warning(f"[DUPDRV] Törlés indul: {_cimke(name)}")
         res = run(['pnputil', '/delete-driver', name], ok_codes=(0, 3010))
         deleted = bool(res) and (res.returncode == 0 or 'deleted' in (res.stdout or '').lower() or 'törölve' in (res.stdout or '').lower())
         if not deleted:
@@ -204,8 +256,11 @@ def delete_duplicate_packages(run, log, names, active_infs, check_cancel=None):
             deleted = bool(res) and (res.returncode == 0 or 'deleted' in (res.stdout or '').lower() or 'törölve' in (res.stdout or '').lower())
         if deleted:
             ok += 1
-            log(f'  ✅ {name} törölve ({i + 1}/{total})')
+            logging.warning(f"[DUPDRV] Törölve: {_cimke(name)}")
+            log(f'  ✅ {_cimke(name)} törölve ({i + 1}/{total})')
         else:
             fail += 1
-            log(f'  ❌ {name} törlése sikertelen: {(res.stdout or "")[:120] if res else "?"}')
+            logging.warning(f"[DUPDRV] SIKERTELEN törlés: {_cimke(name)} - "
+                            f"{(res.stdout or '')[:200] if res else '?'}")
+            log(f'  ❌ {_cimke(name)} törlése sikertelen: {(res.stdout or "")[:120] if res else "?"}')
     return ok, fail, skipped

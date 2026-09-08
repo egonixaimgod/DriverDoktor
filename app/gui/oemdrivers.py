@@ -27,10 +27,24 @@ OEM_PLACEHOLDER_VALUES = (
     'system manufacturer', 'system product name', 'system serial number',
     'oem', 'o.e.m.', 'none', 'not applicable', 'not specified', 'null', 'x.x.x')
 
-# Alaplap-gyártók: összerakott gépeknél a gyári chipset-/audio-/LAN-driver EGYETLEN
-# forrása az alaplap gyártójának oldala (a WU ezeket asztali alaplapokra jellemzően
-# nem adja - terepen: ASRock B450M Pro4, ahol a Realtek hang a Microsoft generikus
-# hdaudio.inf-jén, a LAN pedig az inbox rtcx21x64.inf-en futott a fix után is).
+# Alaplap-gyártók: összerakott gépnél a szerelőnek szüksége van a gyártó saját
+# driver-oldalára - de KIEGÉSZÍTÉSKÉNT, NEM egyetlen forrásként.
+#
+# EZ A KOMMENT KORÁBBAN AZT ÁLLÍTOTTA, HOGY EZ AZ "EGYETLEN FORRÁS", MERT "a WU ezeket
+# asztali alaplapokra jellemzően nem adja" - ÉS EZ MA MÁR NEM IGAZ. A hivatkozott terepi
+# eset (ASRock B450M Pro4, 2026-07-24) akkor valós volt, de a 2026-09-01/09-02-i
+# javítások óta (az alaplap SAJÁT `&SUBSYS_`-kulcsán mélyítünk, és inbox-driveres
+# eszköznél a régebbi kiadás is legitim tartalék) a program megtalálja és fel is rakja
+# ezeket. UGYANAZON A GÉPEN újramérve (Build 304, 2026-09-07):
+#
+#   ✅ High Definition Audio Device telepítve!      (Realtek MEDIA 6.0.9136.1)
+#   ✅ Realtek PCIe GbE Family Controller telepítve! (Realtek Net 10.79.50.1003)
+#   ✅ ...: gyári driver működik (eddig Microsoft alapdriver volt).
+#
+# AMIÉRT A KÁRTYA MÉGIS KELL: a gyártói oldalon lévő csomag gyakran frissebb a
+# katalógusénál, van hozzá vezérlőpult/segédszoftver, és marad néhány eszköz
+# (BIOS-segédek, RGB/ventilátor-vezérlés), amire tényleg nincs katalógus-csomag.
+#
 # Szándékosan a gyártó DOWNLOAD/SUPPORT nyitóoldalára megyünk, nem modell-mélylinkre:
 # ezeknél az oldalszerkezet gyakran változik (az MSI/Gigabyte bot-védelem mögött van),
 # egy elrohadt mélylink pedig rosszabb, mint egy biztosan élő nyitóoldal + a kiírt

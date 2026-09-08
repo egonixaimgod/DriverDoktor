@@ -718,6 +718,38 @@ class GuiAutofixMixin:
             self.emit('task_progress', {'task': task_id, 'log': '✅ Nincs third-party driver a rendszerben.\n'})
         return 'ok'
 
+    @staticmethod
+    def _catalog_skip_text(kihagyott, wrong_pkg_keys):
+        """A "korábbi körben már foglalkoztunk vele" kihagyás SZÖVEGE, okonként bontva.
+        Visszatérés: (más_gépre_való_db, egyéb_db, képernyő-szöveg). Tiszta függvény.
+
+        MIÉRT KÜLÖN A KÉT OK (2026-09-08, terepen mérve): a kihagyás forrása HÁROM,
+        gyökeresen különböző eset, és a régi, egységes szöveg ("egy korábbi körben már
+        felment, de az eszköz nem vette át") közülük kettőre VALÓTLAN volt:
+
+          INF-vétó      -> a csomag EL SEM INDULT: letöltés után bizonyítottuk, hogy más
+                           gépgyártó változata. SOHA nem "ment fel".
+          nem kötött rá -> tényleg felment, csak az eszköz nem vette át.
+          már próbáltuk -> egy korábbi láb már foglalkozott vele ebben a láncban.
+
+        Mérve a 2026-09-07-i ASRock-láncban: a kiírt "↷ 2 csomag kihagyva: egy korábbi
+        körben már felment..." MINDKÉT tétele INF-vétós Realtek-csomag volt - vagyis a
+        mondat pont az ellenkezőjét állította a valóságnak. (Ugyanennek a függvénynek a
+        letöltési hibáról szóló kommentje már 2026-09-03 óta "valótlan"-nak nevezi ezt a
+        szöveget; csak az INF-vétós ág maradt ki az akkori javításból.)"""
+        n_wrong = sum(1 for h in (kihagyott or [])
+                      if ((h.get('pnp_id') or '').upper(),
+                          h.get('wu_title') or '') in (wrong_pkg_keys or set()))
+        n_other = len(kihagyott or []) - n_wrong
+        okok = []
+        if n_wrong:
+            okok.append(f'{n_wrong} db esetében már bizonyítottuk, hogy más '
+                        f'gépre/alaplapra készült (fel sem telepítettük)')
+        if n_other:
+            okok.append(f'{n_other} db már felment, de az eszköz nem vette át')
+        return n_wrong, n_other, (f'↷ {len(kihagyott or [])} katalógus-csomag kihagyva - '
+                                  + '; '.join(okok) + '. Nem töltjük le újra.')
+
     def _scan_and_install_wu_sync(self, task_id='autofix'):
         max_loops = 4
         total_installed_in_session = 0
@@ -1227,15 +1259,38 @@ class GuiAutofixMixin:
                     # tehát egy KÉSŐBBI fix újra megpróbálja.
                     done = self._autofix_stats_get('catalog_done') or []
                     done_keys = {(t.get('pnp', ''), t.get('title', '')) for t in done}
+                    # A KÉT OK KÜLÖN, MERT A KÉPERNYŐN NEM MONDHATNAK UGYANAZT (2026-09-08,
+                    # terepen mérve). A `tried_keys` HÁROM, gyökeresen különböző esetet fog
+                    # össze, és a régi egységes szöveg ("már felment, de az eszköz nem vette
+                    # át") közülük kettőre VALÓTLAN volt:
+                    #
+                    #   INF-vétó       -> a csomag EL SEM INDULT: letöltés után bizonyítottuk,
+                    #                     hogy más gépgyártó változata. Soha nem "ment fel".
+                    #   nem kötött rá  -> tényleg felment, de az eszköz nem vette át.
+                    #   ebben a láncban már próbáltuk -> egy korábbi láb már foglalkozott vele.
+                    #
+                    # Mérve a 2026-09-07-i ASRock-láncban: a kiírt "2 csomag ... már felment"
+                    # mindkét tétele INF-vétós Realtek-csomag volt, vagyis a mondat pont az
+                    # ellenkezőjét állította a valóságnak. Ugyanennek a függvénynek a lentebbi
+                    # kommentje (a letöltési hibáról) már nevén nevezi ezt a szöveget
+                    # "valótlan"-ként - csak az INF-vétós ág maradt ki a javításból.
+                    wrong_pkg_keys = {(t.get('pnp', ''), t.get('title', '')) for t in tried
+                                      if 'nem alkalmazható' in (t.get('reason') or '')}
                     tried_keys |= done_keys
                     skipped_known = 0
                     if tried_keys:
                         before = len(found)
-                        found = [h for h in found
-                                 if ((h.get('pnp_id') or '').upper(), h.get('wu_title') or '') not in tried_keys]
+                        kihagyott = [h for h in found
+                                     if ((h.get('pnp_id') or '').upper(), h.get('wu_title') or '') in tried_keys]
+                        found = [h for h in found if h not in kihagyott]
                         skipped_known = before - len(found)
                         if skipped_known:
-                            self.emit('task_progress', {'task': task_id, 'log': f'↷ {skipped_known} csomag kihagyva: egy korábbi körben már felment, de az eszköz nem vette át (nem töltjük le újra).'})
+                            n_wrong, n_other, uzenet = self._catalog_skip_text(
+                                kihagyott, wrong_pkg_keys)
+                            logging.info(f"[AUTOFIX-CAT] {skipped_known} katalógus-tétel kihagyva "
+                                         f"(más gépre való: {n_wrong}, nem kötött rá / már próbáltuk: "
+                                         f"{n_other}): {[h.get('name') for h in kihagyott][:8]}")
+                            self.emit('task_progress', {'task': task_id, 'log': uzenet})
                     if found:
                         self.emit('task_progress', {'task': task_id, 'log': f'✅ A katalógusban {len(found)} eszközre van driver - telepítés...'})
                         # A MEGKÍSÉRELT tételeket MÉG A TELEPÍTÉS ELŐTT feljegyezzük: ha a
@@ -2220,13 +2275,28 @@ class GuiAutofixMixin:
                          f"{[nb.get('name') for nb in wrong_pkg]}; nem kötött rá: "
                          f"{[nb.get('name') for nb in not_bound]}")
 
+            # A LISTA CSOMAGONKÉNTI, A SZÁM VISZONT ESZKÖZÖNKÉNT ÉRTELMES (2026-09-08).
+            # Egy eszközre több jelöltet is végigpróbálunk, tehát egy eszköz TÖBB sort adhat:
+            # terepen a "📎 3 eszközhöz volt ugyan csomag" alatt 2 eszköz állt (az egyik
+            # hangkártya két külön Realtek-csomaggal). A darabszám így nemcsak pontatlan
+            # volt, hanem nagyobbnak mutatta a hiányt, mint amekkora.
+            def _devcount(tetelek):
+                return len({(nb.get('pnp') or nb.get('name') or '?') for nb in tetelek})
+
             if wrong_pkg:
-                self.emit('task_progress', {'task': task_id, 'log': f'\n📎 {len(wrong_pkg)} eszközhöz volt ugyan csomag a Microsoft Update Catalogban, de az MÁS GÉPRE/ALAPLAPRA készült (nem telepítettük fel):'})
+                n_dev, n_pkg = _devcount(wrong_pkg), len(wrong_pkg)
+                self.emit('task_progress', {'task': task_id, 'log':
+                          f'\n📎 {n_dev} eszközhöz volt ugyan csomag a Microsoft Update Catalogban, '
+                          f'de az MÁS GÉPRE/ALAPLAPRA készült (nem telepítettük fel'
+                          + (f'; {n_pkg} csomagot próbáltunk végig' if n_pkg != n_dev else '') + '):'})
                 for nb in wrong_pkg:
                     self.emit('task_progress', {'task': task_id, 'log': _line(nb)})
                 self.emit('task_progress', {'task': task_id, 'log': '   A katalógus ugyanarra a chipre a többi gépgyártó változatát is felkínálja; a program ellenőrizte az INF-eket, és ezek egyike sem ismeri ezt az eszközt. Ez nem hiba, csak ehhez a géphez nincs gyári csomag a katalógusban.'})
             if not_bound:
-                self.emit('task_progress', {'task': task_id, 'log': f'\n📎 {len(not_bound)} csomag feltelepült, de az eszköz végül NEM vette át:'})
+                n_dev, n_pkg = _devcount(not_bound), len(not_bound)
+                self.emit('task_progress', {'task': task_id, 'log':
+                          f'\n📎 {n_pkg} csomag feltelepült, de az eszköz végül NEM vette át'
+                          + (f' ({n_dev} eszköz)' if n_pkg != n_dev else '') + ':'})
                 for nb in not_bound:
                     self.emit('task_progress', {'task': task_id, 'log': _line(nb)})
                 self.emit('task_progress', {'task': task_id, 'log': '   A Windows egy nála pontosabban illeszkedő drivert részesített előnyben.'})

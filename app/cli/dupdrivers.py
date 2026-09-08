@@ -74,6 +74,8 @@ class CliDupDriversMixin:
             return
 
         print()
-        ok, fail, skipped = dupdrivers_core.delete_duplicate_packages(self._run, print, to_delete, active_infs)
+        ok, fail, skipped = dupdrivers_core.delete_duplicate_packages(
+            self._run, print, to_delete, active_infs,
+            details=dupdrivers_core.duplicate_delete_details(groups))
         print("-" * 60)
         print(f"✅ Kész! Törölve: {ok}, Sikertelen: {fail}" + (f", Kihagyva: {skipped}" if skipped else ""))

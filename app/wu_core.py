@@ -866,6 +866,42 @@ HEALTH_REPORT_SKIP_INFS = {
 }
 
 
+def no_source_is_actionable(entry):
+    """VALÓDI TEENDŐ-e a "erre az eszközre nincs való katalógus-csomag" kimenetel?
+
+    A katalógus-telepítő `no_source` tételeire hívjuk (mezők: `inbox_now`, `hwid`,
+    `installed_inf`). Tiszta függvény, hogy offline tesztelhető legyen.
+
+    KÉT SZŰRÉS, ÉS MINDKETTŐT EGY-EGY KONKRÉT, KÉPERNYŐN LÁTHATÓ ELLENTMONDÁS
+    KÉNYSZERÍTETTE KI (2026-09-08, terepi napló, ASRock B450M Pro4 / Build 304):
+
+      1) MÁR GYÁRI DRIVEREN FUT (`inbox_now` hamis). Terepen ugyanaz a lánc 23:05:38-kor
+         felrakta a Realtek 6.0.9136.1-et ("gyári driver működik"), majd a KÖVETKEZŐ lábon
+         ugyanarra az eszközre kiírta, hogy "NINCS megfelelő csomag ... a gyártó saját
+         driver-oldaláról kell". A kereső naplója meg is mondja, miért: "a gép saját
+         kulcsán nincs újabb (6.0.9136.1 <= telepített 6.0.9136.1)". A program tehát a
+         SAJÁT, SIKERES MUNKÁJÁT jelentette hiányosságként.
+
+      2) A ZÁRÓ EGÉSZSÉGJELENTÉS UGYANEZT AZ ESZKÖZT SZÁNDÉKOSAN NEM SOROLJA FEL.
+         Terepen a `PCI standard ISA bridge` a `machine.inf`-en fut (rajta van a
+         HEALTH_REPORT_SKIP_INFS listán), így a katalógus-kör "menj a gyártó oldalára"
+         teendőt írt ki rá, a lánc végi jelentés viszont - helyesen - meg sem említette.
+         Ugyanaz a "két lista ellentmond egymásnak ugyanarról a gépről" hiba, amit az
+         AOC-monitor esete után a CLAUDE.md már rögzít. A feltételek szándékosan
+         megegyeznek a `_health_report_worth_listing`-ével (típuskódos azonosító +
+         Windows busz-/beviteli INF), hogy a két képernyő ne mondhasson mást.
+
+    AMIT EZ NEM CSINÁL: nem rejt el semmit. A ki nem írt tételek a naplóba nevesítve,
+    okkal mennek ki, és a tételes mérleg ("🚫 Nincs hozzá való csomag") a képernyőn is
+    felsorolja őket - csak a "TEENDŐ" figyelmeztetésbe nem kerülnek bele.
+    """
+    if not (entry or {}).get('inbox_now'):
+        return False
+    if not is_specific_hwid(entry.get('hwid') or entry.get('pnp_id') or ''):
+        return False
+    return (entry.get('installed_inf') or '').strip().lower() not in HEALTH_REPORT_SKIP_INFS
+
+
 # TÖRÖLT SZŰRŐK (2026-07-28) - ne kerüljenek vissza eszköz-szűrőként.
 #
 # Itt állt két konstans, amit MINDKÉT katalógus-kör (generikus csere és mély szken)

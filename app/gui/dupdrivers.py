@@ -26,6 +26,11 @@ class GuiDupDriversMixin:
                 drivers = self._get_third_party_drivers()
                 active_infs = dupdrivers_core.get_active_published_infs(self._run)
                 result, deletable = dupdrivers_core.build_duplicate_groups(drivers, active_infs)
+                # A CSOPORTOK MEGŐRZÉSE A TÖRLÉSHEZ: a JS csak `oemNN.inf` neveket küld
+                # vissza, márpedig a naplóban (és a képernyőn) meg kell nevezni, MI tűnt el
+                # - egy oemNN szám semmitmondó és újratelepítéskor átszámozódik. A listát a
+                # felület úgyis mindig frissíti törlés előtt, tehát nem avulhat el észrevétlen.
+                self._dup_last_groups = result
                 self.emit('dup_drivers_loaded', {'groups': result, 'deletable': deletable})
             except Exception as e:
                 logging.error(f"[DUPDRV] Listázási hiba: {e}", exc_info=True)
@@ -57,7 +62,9 @@ class GuiDupDriversMixin:
             ok, fail, skipped = dupdrivers_core.delete_duplicate_packages(
                 self._run,
                 lambda msg: self.emit('task_progress', {'task': 'dupclean', 'log': msg}),
-                names, active_infs, self._check_cancel)
+                names, active_infs, self._check_cancel,
+                details=dupdrivers_core.duplicate_delete_details(
+                    getattr(self, '_dup_last_groups', None)))
             msg = f'Kész! Törölve: {ok}, Sikertelen: {fail}' + (f', Kihagyva: {skipped}' if skipped else '')
             self.emit('task_complete', {'task': 'dupclean', 'status': msg})
             # Friss listák: a duplikátum-nézet és a fő driver-lista is változott.
